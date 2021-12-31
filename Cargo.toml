@@ -1,0 +1,20 @@
+[package]
+name = "midired"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+druid = { git = "https://github.com/linebender/druid.git" }
+
+# https://github.com/RustAudio/vst-rs
+# vst = "0.2.1"
+
+# https://github.com/negamartin/midly
+# midly = "0.5"
+
+# See for sound output
+# https://github.com/RustAudio/rodio
+# and/or
+# https://github.com/RustAudio/cpal
