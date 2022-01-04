@@ -8,10 +8,8 @@ Those files are usually recordings of real performance (e.g. from MIDI keyboard)
 
 ## Build
 
-Requires GTK3 (see https://github.com/linebender/druid/blob/master/README.md):
-```sh
-apt-get install libgtk-3-dev
-```
+In case you get "No package 'freetype2' found" on Linux
+install `libxft-dev` package.
 
 ## TODO
 
@@ -25,5 +23,5 @@ For a prototype
 ** Piano roll
 ** Paint notes
 
-FOr prototype version use hard-coded MIDI filename and VST path. 
+For prototype version use hard-coded MIDI filename and VST path. 
 

@@ -1,23 +1,63 @@
-use druid::widget::{Button, Flex, Label};
-use druid::{AppLauncher, LocalizedString, PlatformError, Widget, WidgetExt, WindowDesc};
+/*
+Using https://github.com/iced-rs/iced/blob/0.3/examples/counter/src/main.rs
+as a stub implementation for starters.
+*/
+use iced::{
+    button, Align, Button, Column, Element, Sandbox, Settings, Text,
+};
 
-fn main() -> Result<(), PlatformError> {
-    let main_window = WindowDesc::new(ui_builder());
-
-    let data = 0_u32;
-    AppLauncher::with_window(main_window)
-        .log_to_console()
-        .launch(data)
+pub fn main() -> iced::Result {
+    Counter::run(Settings::default())
 }
 
-fn ui_builder() -> impl Widget<u32> {
-    // The label text will be computed dynamically based on the current locale and count
-    let text =
-        LocalizedString::new("hello-counter").with_arg("count", |data: &u32, _env| (*data).into());
-    let label = Label::new(text).padding(5.0).center();
-    let button = Button::new("increment")
-        .on_click(|_ctx, data, _env| *data += 1)
-        .padding(5.0);
+#[derive(Default)]
+struct Counter {
+    value: i32,
+    increment_button: button::State,
+    decrement_button: button::State,
+}
 
-    Flex::column().with_child(label).with_child(button)
+#[derive(Debug, Clone, Copy)]
+enum Message {
+    IncrementPressed,
+    DecrementPressed,
+}
+
+impl Sandbox for Counter {
+    type Message = Message;
+
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn title(&self) -> String {
+        String::from("Counter - Iced")
+    }
+
+    fn update(&mut self, message: Message) {
+        match message {
+            Message::IncrementPressed => {
+                self.value += 1;
+            }
+            Message::DecrementPressed => {
+                self.value -= 1;
+            }
+        }
+    }
+
+    fn view(&mut self) -> Element<Message> {
+        Column::new()
+            .padding(20)
+            .align_items(Align::Center)
+            .push(
+                Button::new(&mut self.increment_button, Text::new("Increment"))
+                    .on_press(Message::IncrementPressed),
+            )
+            .push(Text::new(self.value.to_string()).size(50))
+            .push(
+                Button::new(&mut self.decrement_button, Text::new("Decrement"))
+                    .on_press(Message::DecrementPressed),
+            )
+            .into()
+    }
 }
