@@ -6,6 +6,10 @@ Those files are usually recordings of real performance (e.g. from MIDI keyboard)
 * Comfortable workflow with keyboard as primary input.
 * Primarily aimed at real recordings without strict tempo/bars. 
 
+## Status
+
+Not even a prototype, figuring things out.
+
 ## Build
 
 In case you get "No package 'freetype2' found" on Linux

@@ -16,10 +16,10 @@ iced = { version = "0.3.0", features = ["canvas", "debug"] }
 #rustc-hash = "1.1"
 
 # https://github.com/RustAudio/vst-rs
-# vst = "0.2.1"
+vst = "0.2.1"
 
 # https://github.com/negamartin/midly
-# midly = "0.5"
+midly = "0.5"
 
 # See for sound output
 # https://github.com/RustAudio/rodio
