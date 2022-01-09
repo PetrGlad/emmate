@@ -7,7 +7,10 @@ use iced::{
 };
 
 pub fn main() -> iced::Result {
-    Counter::run(Settings::default())
+    Counter::run(Settings {
+        antialiasing: true,
+        ..Settings::default()
+    })
 }
 
 #[derive(Default)]
