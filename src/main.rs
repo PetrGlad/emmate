@@ -102,7 +102,6 @@ pub fn main() -> iced::Result {
         let mut cursor  = midly::io::Cursor::new(&mut track_event_buf);
         note_event.write(&mut cursor).unwrap();
         println!("Event bytes {:?}\n", track_event_buf);
-
         let note = Event::Midi(MidiEvent {
             data: track_event_buf,
             delta_frames: 0,
@@ -119,11 +118,16 @@ pub fn main() -> iced::Result {
         let inputs = vec![vec![0.0; 1000]; input_count];
         let mut outputs = vec![vec![0.0; 1000]; output_count];
         let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
+
+        // instance.suspend(); // Can only set these parameters in suspended state.
+        // instance.set_sample_rate(48000f32);
+        // instance.set_block_size(128);
+
+        instance.resume();
         instance.start_process();
 
         let mut events_buffer = vst::buffer::SendEventBuffer::new(1);
         events_buffer.send_events_to_plugin([note], &mut instance);
-
         instance.process(&mut audio_buffer);
 
         for out in outputs {
