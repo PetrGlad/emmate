@@ -21,6 +21,9 @@ vst = "0.2.1"
 # https://github.com/negamartin/midly
 midly = "0.5"
 
+# TODO LGPL update licence desc
+wav = "1.0.0"
+
 # See for sound output
 # https://github.com/RustAudio/rodio
 # and/or

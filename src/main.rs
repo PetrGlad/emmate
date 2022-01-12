@@ -4,6 +4,7 @@
 */
 use std::io::BufWriter;
 use std::path::Path;
+use std::{error, result};
 use iced::{
     button, Align, Button, Column, Element, Sandbox, Settings, Text,
 };
@@ -26,7 +27,7 @@ impl Host for VstHost {
     }
 }
 
-pub fn main() -> iced::Result {
+pub fn main() {
     { // MIDI load/modify example
         let data = std::fs::read("yellow.mid").unwrap();
         // Parse the raw bytes
@@ -99,7 +100,7 @@ pub fn main() -> iced::Result {
             },
         };
         let mut track_event_buf = [0u8; 3];
-        let mut cursor  = midly::io::Cursor::new(&mut track_event_buf);
+        let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
         note_event.write(&mut cursor).unwrap();
         println!("Event bytes {:?}\n", track_event_buf);
         let note = Event::Midi(MidiEvent {
@@ -115,12 +116,13 @@ pub fn main() -> iced::Result {
         let input_count = info.inputs as usize;
         let output_count = info.outputs as usize;
         let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
-        let inputs = vec![vec![0.0; 1000]; input_count];
-        let mut outputs = vec![vec![0.0; 1000]; output_count];
+        let buf_size = 1 << 14;
+        let inputs = vec![vec![0.0; buf_size]; input_count];
+        let mut outputs = vec![vec![0.0; buf_size]; output_count];
         let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
 
-        // instance.suspend(); // Can only set these parameters in suspended state.
-        // instance.set_sample_rate(48000f32);
+        instance.suspend(); // Can only set these parameters in suspended state.
+        instance.set_sample_rate(48000f32);
         // instance.set_block_size(128);
 
         instance.resume();
@@ -130,10 +132,25 @@ pub fn main() -> iced::Result {
         events_buffer.send_events_to_plugin([note], &mut instance);
         instance.process(&mut audio_buffer);
 
-        for out in outputs {
+        for out in &outputs {
             println!("Output {:?}\n", out);
         }
         // TODO Output the sound to default audio device
+
+        {
+            // I want to hear it
+            use std::fs::File;
+            use std::path::Path;
+
+            // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
+            // let (header, data) = wav::read(&mut inp_file)?;
+            let wav_header = wav::Header::new(
+                wav::WAV_FORMAT_IEEE_FLOAT, 1, 48000, 32);
+
+            let wav_data = wav::BitDepth::ThirtyTwoFloat(outputs[0].to_owned());
+            let mut out_file = File::create(Path::new("output.wav")).unwrap();
+            wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+        }
 
         // println!("Closing instance...");
         // Close the instance. This is not necessary as the instance is shut down when
@@ -145,7 +162,7 @@ pub fn main() -> iced::Result {
         Ed::run(Settings {
             antialiasing: true,
             ..Settings::default()
-        })
+        }).unwrap()
     }
 }
 
