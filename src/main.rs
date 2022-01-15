@@ -5,6 +5,8 @@
 use std::io::BufWriter;
 use std::path::Path;
 use std::{error, result};
+use std::ffi::CString;
+use std::process::exit;
 use iced::{
     button, Align, Button, Column, Element, Sandbox, Settings, Text,
 };
@@ -12,6 +14,7 @@ use midly::{TrackEvent, TrackEventKind};
 use vst::host::{Host, HostBuffer, PluginLoader};
 use vst::plugin::{CanDo, Plugin};
 use std::sync::{Arc, Mutex};
+use alsa::Direction;
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
@@ -28,6 +31,46 @@ impl Host for VstHost {
 }
 
 pub fn main() {
+    { // Use ALSA to read midi events
+        // Diagnostics commands
+        //   amidi --list-devices
+        //   aseqdump --list
+        //   aseqdump --port='24:0'
+
+        let seq = alsa::seq::Seq::open(None, Some(Direction::Capture), false)
+            .expect("Cannot open MIDI sequencer.");
+
+        for cl in alsa::seq::ClientIter::new(&seq) {
+            println!("Found a client {:?}", &cl);
+        }
+
+        let mut subscription = alsa::seq::PortSubscribe::empty().unwrap();
+        subscription.set_sender(alsa::seq::Addr { client: 24, port: 0 }); // Note: hardcoded. // TODO Use a client from available list
+        // subscription.set_sender(alsa::seq::Addr::system_timer());
+        let input_port = seq.create_simple_port(
+            &CString::new("midi input").unwrap(),
+            alsa::seq::PortCap::WRITE | alsa::seq::PortCap::SUBS_WRITE,
+            alsa::seq::PortType::MIDI_GENERIC).unwrap();
+        subscription.set_dest(alsa::seq::Addr {
+            client: seq.client_id().unwrap(),
+            port: input_port,
+        });
+        subscription.set_time_update(false);
+        subscription.set_time_real(true); // Allows to event.get_tick
+
+        seq.subscribe_port(&subscription).unwrap();
+        let mut midi_input = seq.input();
+        loop {
+            let midi_event = midi_input.event_input().unwrap();
+            println!("Got MIDI event {:?}", midi_event);
+            if midi_event.get_type() == alsa::seq::EventType::Noteon {
+                let ev_data: alsa::seq::EvNote = midi_event.get_data().unwrap();
+                println!("Got NOTE ON event {:?}", &ev_data);
+                break;
+            }
+        }
+    }
+
     { // MIDI load/modify example
         let data = std::fs::read("yellow.mid").unwrap();
         // Parse the raw bytes

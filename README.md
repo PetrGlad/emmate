@@ -13,7 +13,10 @@ Not even a prototype, figuring things out.
 ## Build
 
 In case you get "No package 'freetype2' found" on Linux
-install `libxft-dev` package.
+`apt install libxft-dev`.
+
+ALSA wrapper dependency
+`apt install libasound2-dev`.
 
 ## TODO
 

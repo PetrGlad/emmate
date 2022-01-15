@@ -21,10 +21,14 @@ vst = "0.2.1"
 # https://github.com/negamartin/midly
 midly = "0.5"
 
+# https://github.com/Fluhzar/WAV
 # TODO LGPL update licence desc
 wav = "1.0.0"
+# Could also be https://github.com/ruuda/hound
 
-# See for sound output
 # https://github.com/RustAudio/rodio
-# and/or
-# https://github.com/RustAudio/cpal
+rodio="0.14.0"
+# see also https://github.com/RustAudio/cpal
+
+# https://docs.rs/alsa/latest/alsa/
+alsa = "0.6.0"
