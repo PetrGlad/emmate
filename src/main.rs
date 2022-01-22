@@ -2,74 +2,68 @@
   Using https://github.com/iced-rs/iced/blob/0.3/examples/counter/src/main.rs
   as a stub implementation for starters.
 */
-use std::io::BufWriter;
-use std::path::Path;
 use std::{error, result};
 use std::ffi::CString;
+use std::io::BufWriter;
+use std::path::Path;
 use std::process::exit;
+use std::sync::{Arc, Mutex};
+
+use alsa::Direction;
 use iced::{
-    button, Align, Button, Column, Element, Sandbox, Settings, Text,
+    Align, button, Button, Column, Element, Sandbox, Settings, Text,
 };
 use midly::{TrackEvent, TrackEventKind};
-use vst::host::{Host, HostBuffer, PluginLoader};
-use vst::plugin::{CanDo, Plugin};
-use std::sync::{Arc, Mutex};
-use alsa::Direction;
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
-use vst::api::{Events, Supported};
-use vst::event::{Event, MidiEvent};
+use vst::plugin::Plugin;
 
-#[allow(dead_code)]
-struct VstHost;
-
-impl Host for VstHost {
-    fn automate(&self, index: i32, value: f32) {
-        println!("Parameter {} had its value changed to {}", index, value);
-    }
-}
+mod midi_vst;
 
 pub fn main() {
-    { // Use ALSA to read midi events
-        // Diagnostics commands
-        //   amidi --list-devices
-        //   aseqdump --list
-        //   aseqdump --port='24:0'
-
-        let seq = alsa::seq::Seq::open(None, Some(Direction::Capture), false)
-            .expect("Cannot open MIDI sequencer.");
-
-        for cl in alsa::seq::ClientIter::new(&seq) {
-            println!("Found a client {:?}", &cl);
-        }
-
-        let mut subscription = alsa::seq::PortSubscribe::empty().unwrap();
-        subscription.set_sender(alsa::seq::Addr { client: 24, port: 0 }); // Note: hardcoded. // TODO Use a client from available list
-        // subscription.set_sender(alsa::seq::Addr::system_timer());
-        let input_port = seq.create_simple_port(
-            &CString::new("midi input").unwrap(),
-            alsa::seq::PortCap::WRITE | alsa::seq::PortCap::SUBS_WRITE,
-            alsa::seq::PortType::MIDI_GENERIC).unwrap();
-        subscription.set_dest(alsa::seq::Addr {
-            client: seq.client_id().unwrap(),
-            port: input_port,
-        });
-        subscription.set_time_update(false);
-        subscription.set_time_real(true); // Allows to event.get_tick
-
-        seq.subscribe_port(&subscription).unwrap();
-        let mut midi_input = seq.input();
-        loop {
-            let midi_event = midi_input.event_input().unwrap();
-            println!("Got MIDI event {:?}", midi_event);
-            if midi_event.get_type() == alsa::seq::EventType::Noteon {
-                let ev_data: alsa::seq::EvNote = midi_event.get_data().unwrap();
-                println!("Got NOTE ON event {:?}", &ev_data);
-                break;
-            }
-        }
-    }
+    // { // Use ALSA to read midi events
+    //
+    //     // TODO: Replace ALSA with midir for reading events. See https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
+    //
+    //     // Diagnostics commands
+    //     //   amidi --list-devices
+    //     //   aseqdump --list
+    //     //   aseqdump --port='24:0'
+    //
+    //     let seq = alsa::seq::Seq::open(None, Some(Direction::Capture), false)
+    //         .expect("Cannot open MIDI sequencer.");
+    //
+    //     for cl in alsa::seq::ClientIter::new(&seq) {
+    //         println!("Found a client {:?}", &cl);
+    //     }
+    //
+    //     let mut subscription = alsa::seq::PortSubscribe::empty().unwrap();
+    //     subscription.set_sender(alsa::seq::Addr { client: 24, port: 0 }); // Note: hardcoded. // TODO Use a client from available list
+    //     // subscription.set_sender(alsa::seq::Addr::system_timer());
+    //     let input_port = seq.create_simple_port(
+    //         &CString::new("midi input").unwrap(),
+    //         alsa::seq::PortCap::WRITE | alsa::seq::PortCap::SUBS_WRITE,
+    //         alsa::seq::PortType::MIDI_GENERIC).unwrap();
+    //     subscription.set_dest(alsa::seq::Addr {
+    //         client: seq.client_id().unwrap(),
+    //         port: input_port,
+    //     });
+    //     subscription.set_time_update(false);
+    //     subscription.set_time_real(true); // Allows to event.get_tick
+    //
+    //     seq.subscribe_port(&subscription).unwrap();
+    //     let mut midi_input = seq.input();
+    //     loop {
+    //         let midi_event = midi_input.event_input().unwrap();
+    //         println!("Got MIDI event {:?}", midi_event);
+    //         if midi_event.get_type() == alsa::seq::EventType::Noteon {
+    //             let ev_data: alsa::seq::EvNote = midi_event.get_data().unwrap();
+    //             println!("Got NOTE ON event {:?}", &ev_data);
+    //             break;
+    //         }
+    //     }
+    // }
 
     { // MIDI load/modify example
         let data = std::fs::read("yellow.mid").unwrap();
@@ -98,42 +92,15 @@ pub fn main() {
         smf.save("rewritten.mid").unwrap();
     }
 
-    { // Load VST example
-        let host = Arc::new(Mutex::new(VstHost));
+    {
+        // Load VST example
+        use vst::api::{Events, Supported};
+        use vst::event::{Event, MidiEvent};
+        use vst::host::{Host, HostBuffer, PluginLoader};
 
-        // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
-        let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
-        println!("Loading {}...", path.to_str().unwrap());
+        use crate::midi_vst::VstHost;
 
-        // Load the plugin
-        let mut loader =
-            PluginLoader::load(path, Arc::clone(&host)).unwrap_or_else(|e| panic!("Failed to load plugin: {}", e));
-
-        // Create an instance of the plugin
-        let mut instance = loader.instance().unwrap();
-
-        // Get the plugin information
-        let info = instance.get_info();
-        println!(
-            "Loaded '{}':\n\t\
-             Vendor: {}\n\t\
-             Presets: {}\n\t\
-             Parameters: {}\n\t\
-             VST ID: {}\n\t\
-             Version: {}\n\t\
-             Initial Delay: {} samples\n\t\
-             Inputs {}\n\t\
-             Outputs {}",
-            info.name, info.vendor, info.presets, info.parameters, info.unique_id,
-            info.version, info.initial_delay, info.inputs, info.outputs
-        );
-
-        // Initialize the instance
-        instance.init();
-        println!("Initialized VST instance.");
-        println!("Can receive MIDI events {}", instance.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes);
-
-        // TODO Instantiate vst::api::Event
+        let mut plugin = VstHost::init();
 
         let note_event = midly::live::LiveEvent::Midi {
             channel: 1.into(),
@@ -156,6 +123,8 @@ pub fn main() {
             note_off_velocity: 0,
         });
 
+        let mut instance = plugin.instance().unwrap();
+        let info = instance.get_info();
         let input_count = info.inputs as usize;
         let output_count = info.outputs as usize;
         let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
@@ -164,8 +133,8 @@ pub fn main() {
         let mut outputs = vec![vec![0.0; buf_size]; output_count];
         let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
 
-        instance.suspend(); // Can only set these parameters in suspended state.
-        instance.set_sample_rate(48000f32);
+        // instance.suspend(); // Can only set these parameters in suspended state.
+        // instance.set_sample_rate(48000f32);
         // instance.set_block_size(128);
 
         instance.resume();
@@ -178,12 +147,11 @@ pub fn main() {
         for out in &outputs {
             println!("Output {:?}\n", out);
         }
-        // TODO Output the sound to default audio device
+        // TODO Output the sound to default audio device using rodio
 
         {
             // I want to hear it
             use std::fs::File;
-            use std::path::Path;
 
             // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
             // let (header, data) = wav::read(&mut inp_file)?;
@@ -193,6 +161,10 @@ pub fn main() {
             let wav_data = wav::BitDepth::ThirtyTwoFloat(outputs[0].to_owned());
             let mut out_file = File::create(Path::new("output.wav")).unwrap();
             wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+        }
+        {
+            // TDDO Actually output sound:
+            // Produce a sequence of buffers that are produced by VST on demand, send them to Rodio
         }
 
         // println!("Closing instance...");
