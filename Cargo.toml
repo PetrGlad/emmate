@@ -35,3 +35,6 @@ alsa = "0.6.0"
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
 midir = "0.8.0"
+
+log = "0.4.17"
+stderrlog = "0.5.3"

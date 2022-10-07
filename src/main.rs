@@ -22,12 +22,17 @@ use midly::{TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
+use vst::api::Events;
 use vst::host::{Host, HostBuffer};
 use vst::plugin::Plugin;
 use crate::midi_vst::Vst;
 
 
 pub fn main() {
+    {
+        use log::*;
+        stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
+    }
     {
         // Load VST example
         use vst::api::{Events, Supported};
@@ -67,13 +72,17 @@ pub fn main() {
         let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
         let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
 
-        vst.plugin.start_process();
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-        events_buffer.send_events(events_list, &mut *(vst.host.lock().unwrap()));
+        events_buffer.store_events(events_list);
+        // XXX See https://github.com/RustAudio/vst-rs/pull/160.
+        // Do not know yet how to make a plugin reference available in a Host implementation.
+        // events_buffer.send_events(events_list, &mut *(vst.host.lock().unwrap()));
+        vst.plugin.process_events(events_buffer.events());
+
         println!("Processing events.");
         vst.plugin.process(&mut audio_buffer);
         for out in &outputs {
-            println!("Output {:?}\n", out);
+            println!("Output {:?}", out);
         }
 
         // TODO Output the sound to default audio device using rodio

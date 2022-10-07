@@ -18,6 +18,8 @@ In case you get "No package 'freetype2' found" on Linux
 ALSA wrapper dependency
 `apt install libasound2-dev`.
 
+As an example synth plugin you can use `amsynth`.
+
 ## TODO
 
 For a prototype

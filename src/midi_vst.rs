@@ -25,8 +25,10 @@ pub struct Vst {
 impl Vst {
     pub fn init() -> Vst {
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
-        let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
-        println!("Loading {}...", path.to_str().unwrap());
+        // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
+        let path = Path::new("/usr/lib/vst/amsynth_vst.so");
+        // let path = Path::new("/home/petr/.local/share/flatpak/runtime/org.freedesktop.LinuxAudio.Plugins.swh/x86_64/21.08/98e5e5a5bc3e8a2c55b0949d3902da76b3b0bcd4c0fea24676b35db13d01a011/files/lv2/declip-swh.lv2/plugin-Linux.so");
+        println!("Loading {}", path.to_str().unwrap());
 
         let host = Arc::new(Mutex::new(VstHost));
         let mut loader = PluginLoader::load(path, Arc::clone(&host))
@@ -35,6 +37,8 @@ impl Vst {
         let mut vst = Vst { host, plugin };
         // Diagnostics: get the plugin information
         let plugin = &mut vst.plugin;
+        plugin.suspend();
+
         let info = plugin.get_info();
         println!(
             "Loaded '{}':\n\t\
@@ -50,17 +54,19 @@ impl Vst {
             info.version, info.initial_delay, info.inputs, info.outputs
         );
         let params = plugin.get_parameter_object();
-        println!("Current preset: {}", params.get_preset_name(params.get_preset_num()));
-
+        params.change_preset(4);
+        println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
         // Initialize the instance
+
         plugin.init();
         println!("Initialized VST instance.");
         println!("Can receive MIDI events {}", plugin.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes);
 
-        plugin.suspend();
+        // plugin.suspend();
         plugin.set_sample_rate(48000f32); // rodio expects this
         // plugin.set_block_size(256); // Need it? What does it affect?
         plugin.resume();
+        plugin.start_process();
 
         vst
     }
