@@ -1,12 +1,12 @@
 [package]
 name = "midired"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-iced = { version = "0.3.0", features = ["canvas", "debug"] }
+iced = { version = "0.4.2", features = ["canvas", "debug"] }
 
 # Deps from iced "game_of_life" example
 # https://github.com/iced-rs/iced/blob/master/examples/game_of_life/Cargo.toml
@@ -16,10 +16,10 @@ iced = { version = "0.3.0", features = ["canvas", "debug"] }
 #rustc-hash = "1.1"
 
 # https://github.com/RustAudio/vst-rs
-vst = "0.2.1"
+vst = "0.3.0"
 
 # https://github.com/negamartin/midly
-midly = "0.5"
+midly = "0.5.2"
 
 # https://github.com/Fluhzar/WAV
 # TODO LGPL update licence desc
@@ -27,11 +27,11 @@ wav = "1.0.0"
 # Could also be https://github.com/ruuda/hound
 
 # https://github.com/RustAudio/rodio
-rodio="0.14.0"
+rodio="0.16.0"
 # see also https://github.com/RustAudio/cpal
 
 # https://docs.rs/alsa/latest/alsa/
 alsa = "0.6.0"
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
-midir = "0.7.0"
+midir = "0.8.0"
