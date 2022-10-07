@@ -25,6 +25,7 @@ use midly::TrackEventKind::Midi;
 use vst::api::Events;
 use vst::host::{Host, HostBuffer};
 use vst::plugin::Plugin;
+use wav::BitDepth;
 use crate::midi_vst::Vst;
 
 
@@ -42,7 +43,7 @@ pub fn main() {
         let note_event = midly::live::LiveEvent::Midi {
             channel: 1.into(),
             message: midly::MidiMessage::NoteOn {
-                key: 40.into(),
+                key: 50.into(),
                 vel: 80.into(),
             },
         };
@@ -66,7 +67,7 @@ pub fn main() {
         let info = vst.plugin.get_info();
         let output_count = info.outputs as usize;
         let input_count = info.inputs as usize;
-        let buf_size = 1 << 11;
+        let buf_size = 1 << 13;
         let inputs = vec![vec![0.0; buf_size]; input_count];
         let mut outputs = vec![vec![0.0; buf_size]; output_count];
         let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
@@ -80,25 +81,31 @@ pub fn main() {
         vst.plugin.process_events(events_buffer.events());
 
         println!("Processing events.");
-        vst.plugin.process(&mut audio_buffer);
-        for out in &outputs {
-            println!("Output {:?}", out);
+        // vst.plugin.process(&mut audio_buffer);
+        // for out in &outputs {
+        //     println!("Output {:?}", out);
+        // }
+        //
+        // // TODO Output the sound to default audio device using rodio
+        //
+        // {
+        // I want to hear it at least somehow
+        use std::fs::File;
+
+        // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
+        // let (header, data) = wav::read(&mut inp_file)?;
+        let wav_header = wav::Header::new(wav::WAV_FORMAT_IEEE_FLOAT, 1, 48000, 32);
+
+        let mut out_file = File::create(Path::new("output.wav")).unwrap();
+        // wav::write(wav_header, BitDepth::ThirtyTwoFloat &mut out_file).unwrap();
+        let mut pcm_data = vec![];
+        for _i in 1..10 {
+            vst.plugin.process(&mut audio_buffer);
+            pcm_data.append(&mut outputs[0].to_vec());
         }
-
-        // TODO Output the sound to default audio device using rodio
-
-        {
-            // I want to hear it at least somehow
-            use std::fs::File;
-
-            // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
-            // let (header, data) = wav::read(&mut inp_file)?;
-            let wav_header = wav::Header::new(wav::WAV_FORMAT_IEEE_FLOAT, 1, 48000, 32);
-
-            let wav_data = wav::BitDepth::ThirtyTwoFloat(outputs[0].to_owned());
-            let mut out_file = File::create(Path::new("output.wav")).unwrap();
-            wav::write(wav_header, &wav_data, &mut out_file).unwrap();
-        }
+        let wav_data = wav::BitDepth::ThirtyTwoFloat(pcm_data.to_owned());
+        wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+        // }
         {
             // TODO Actually output sound:
             // Have the VST to produce a sequence of buffers on demand via an f32 iterator, send them to Rodio

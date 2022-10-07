@@ -27,7 +27,6 @@ impl Vst {
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
         let path = Path::new("/usr/lib/vst/amsynth_vst.so");
-        // let path = Path::new("/home/petr/.local/share/flatpak/runtime/org.freedesktop.LinuxAudio.Plugins.swh/x86_64/21.08/98e5e5a5bc3e8a2c55b0949d3902da76b3b0bcd4c0fea24676b35db13d01a011/files/lv2/declip-swh.lv2/plugin-Linux.so");
         println!("Loading {}", path.to_str().unwrap());
 
         let host = Arc::new(Mutex::new(VstHost));
