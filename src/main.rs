@@ -5,14 +5,15 @@
 mod midi_vst;
 mod midi;
 
-use std::{error, result};
+use std::{error, result, thread};
 use std::borrow::BorrowMut;
 use std::ffi::CString;
-use std::io::BufWriter;
+use std::io::{BufReader, BufWriter};
 use std::ops::DerefMut;
 use std::path::Path;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use alsa::Direction;
 use iced::{
@@ -22,17 +23,18 @@ use midly::{TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
+use rodio::OutputStream;
+use rodio::source::SineWave;
 use vst::api::Events;
 use vst::host::{Host, HostBuffer};
 use vst::plugin::Plugin;
 use wav::BitDepth;
-use crate::midi_vst::Vst;
-
+use crate::midi_vst::{OutputSource, Vst};
 
 pub fn main() {
     {
-        use log::*;
-        stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
+        // use log::*;
+        // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
     {
         // Load VST example
@@ -63,53 +65,56 @@ pub fn main() {
         let events_list = [note];
 
         let mut vst = Vst::init();
-
-        let info = vst.plugin.get_info();
-        let output_count = info.outputs as usize;
-        let input_count = info.inputs as usize;
-        let buf_size = 1 << 13;
-        let inputs = vec![vec![0.0; buf_size]; input_count];
-        let mut outputs = vec![vec![0.0; buf_size]; output_count];
-        let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
-        let mut audio_buffer = host_buffer.bind(&inputs, &mut outputs);
-
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
         events_buffer.store_events(events_list);
         // XXX See https://github.com/RustAudio/vst-rs/pull/160.
         // Do not know yet how to make a plugin reference available in a Host implementation.
-        // events_buffer.send_events(events_list, &mut *(vst.host.lock().unwrap()));
-        vst.plugin.process_events(events_buffer.events());
-
-        println!("Processing events.");
-        // vst.plugin.process(&mut audio_buffer);
+        // events_buffer.send_events(events_list, &mut *(VST.host.lock().unwrap()));
+        let plugin_holder = vst.plugin.clone();
+        {
+            println!("Processing events.");
+            let mut plugin = plugin_holder.lock().unwrap();
+            plugin.process_events(events_buffer.events());
+        }
+        // VST.plugin.process(&mut audio_buffer);
         // for out in &outputs {
         //     println!("Output {:?}", out);
         // }
         //
-        // // TODO Output the sound to default audio device using rodio
         //
         // {
-        // I want to hear it at least somehow
-        use std::fs::File;
-
-        // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
-        // let (header, data) = wav::read(&mut inp_file)?;
-        let wav_header = wav::Header::new(wav::WAV_FORMAT_IEEE_FLOAT, 1, 48000, 32);
-
-        let mut out_file = File::create(Path::new("output.wav")).unwrap();
-        // wav::write(wav_header, BitDepth::ThirtyTwoFloat &mut out_file).unwrap();
-        let mut pcm_data = vec![];
-        for _i in 1..10 {
-            vst.plugin.process(&mut audio_buffer);
-            pcm_data.append(&mut outputs[0].to_vec());
-        }
-        let wav_data = wav::BitDepth::ThirtyTwoFloat(pcm_data.to_owned());
-        wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+        //     // I want to hear it at least somehow
+        //     use std::fs::File;
+        //
+        //     // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
+        //     // let (header, data) = wav::read(&mut inp_file)?;
+        //     let wav_header = wav::Header::new(wav::WAV_FORMAT_IEEE_FLOAT, 2, 48000, 32);
+        //
+        //     let mut out_file = File::create(Path::new("output.wav")).unwrap();
+        //     // wav::write(wav_header, BitDepth::ThirtyTwoFloat &mut out_file).unwrap();
+        //     let mut pcm_data = vec![];
+        //     for _i in 1..20 {
+        //         plugin.process(&mut audio_buffer);
+        //         pcm_data.append(&mut outputs[0].to_vec());
+        //     }
+        //     let wav_data = wav::BitDepth::ThirtyTwoFloat(pcm_data.to_owned());
+        //     wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+        //     drop(out_file);
         // }
+        // TODO Output the sound to default audio device using rodio
         {
-            // TODO Actually output sound:
-            // Have the VST to produce a sequence of buffers on demand via an f32 iterator, send them to Rodio
+            println!("Streaming sound (hopefully).");
+            let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+
+            let file = std::fs::File::open("output.wav").unwrap();
+            let beep_sink = stream_handle.play_once(BufReader::new(file)).unwrap();
+            beep_sink.set_volume(0.5);
+
             // This seems like a good example of generative audio source https://github.com/RustAudio/rodio/blob/master/src/source/sine.rs
+            // stream_handle.play_raw(SineWave::new(1000.0)).unwrap();
+            stream_handle.play_raw(OutputSource::new(&vst)).unwrap();
+
+            thread::sleep(Duration::from_millis(3000));
         }
 
         // println!("Closing host instance.");
