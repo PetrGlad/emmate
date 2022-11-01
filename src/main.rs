@@ -8,17 +8,19 @@ mod midi;
 use std::{error, result, thread};
 use std::borrow::BorrowMut;
 use std::ffi::CString;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, stdin};
 use std::ops::DerefMut;
 use std::path::Path;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
 use std::time::Duration;
 
 use alsa::Direction;
 use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
 };
+use midir::MidiInput;
 use midly::{TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
@@ -35,6 +37,35 @@ pub fn main() {
     {
         // use log::*;
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
+    }
+
+    {
+        let input = MidiInput::new("midir").unwrap();
+        let mut port_idx = None;
+        println!("Midi input ports:");
+        let ports = input.ports();
+        for (i, port) in ports.iter().enumerate() {
+            let name = input.port_name(&port).unwrap();
+            println!("\t{}", name);
+            if name.starts_with("Digital Piano") {
+                port_idx = Some(i);
+                println!("Selected MIDI input: '{}'", name);
+                break;
+            }
+        }
+        let port = ports.get(port_idx.unwrap()).unwrap();
+        let conn = input.connect(
+            &port,
+            "midi-input",
+            |t, ev, _data| println!("MIDI event: {} {:?} {}", t, ev, ev.len()),
+            (),
+        ).unwrap();
+
+        println!("Connection open, reading MIDI input");
+        let mut input = String::new();
+        input.clear();
+        stdin().read_line(&mut input).unwrap(); // wait for next enter key press
+        conn.close();
     }
     {
         // Load VST example
@@ -121,12 +152,12 @@ pub fn main() {
         // drop(instance);
     }
 
-    // { // GUI example
-    //     Ed::run(Settings {
-    //         antialiasing: true,
-    //         ..Settings::default()
-    //     }).unwrap()
-    // }
+    { // GUI example
+        Ed::run(Settings {
+            antialiasing: true,
+            ..Settings::default()
+        }).unwrap()
+    }
 }
 
 #[derive(Default)]
