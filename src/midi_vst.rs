@@ -47,7 +47,7 @@ impl Vst {
                 "Loaded '{}':\n\t\
              Vendor: {}\n\t\
              Presets: {}\n\t\
-             Parameters: {}\n\t\
+             Parameters count: {}\n\t\
              VST ID: {}\n\t\
              Version: {}\n\t\
              Initial delay: {} samples\n\t\
@@ -57,7 +57,7 @@ impl Vst {
                 info.version, info.initial_delay, info.inputs, info.outputs
             );
             let params = plugin.get_parameter_object();
-            params.change_preset(1);
+            params.change_preset(4);
             println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
             // Initialize the instance
 
@@ -67,7 +67,7 @@ impl Vst {
 
             // plugin.suspend();
             plugin.set_sample_rate(sample_rate.to_owned() as f32);
-            // plugin.set_block_size(256); // Need it? What does it affect?
+            plugin.set_block_size(128); // Does it affect processing delay?
             plugin.resume();
             plugin.start_process();
         }
@@ -85,13 +85,14 @@ pub struct OutputSource {
 }
 
 impl OutputSource {
-    pub fn new(vst: &Vst) -> OutputSource {
+    pub fn new(vst: &Vst, buf_size: usize) -> OutputSource {
+        assert!(buf_size > 0);
         let outputs;
         {
             let plugin_holder = vst.plugin.clone();
             let plugin = plugin_holder.try_lock().unwrap();
             let info = plugin.get_info();
-            outputs = vec![vec![0.0; 1 << 13]; info.outputs as usize];
+            outputs = vec![vec![0.0; buf_size]; info.outputs as usize];
         }
         OutputSource {
             sample_rate: vst.sample_rate.to_owned() as u32,
@@ -104,12 +105,10 @@ impl OutputSource {
     }
 
     fn fill_buffer(&mut self) {
-        let mut plugin_holder = self.plugin.clone();
-        let mut plugin = plugin_holder.try_lock().unwrap();
+        let mut plugin = self.plugin.lock().unwrap();
         let info = plugin.get_info();
         let output_count = info.outputs as usize;
         let input_count = info.inputs as usize;
-        let buf_size = 1 << 10;
         let inputs = vec![vec![0.0; 0]; input_count];
         let mut host_buffer: HostBuffer<f32> = HostBuffer::new(input_count, output_count);
         let mut buffer = host_buffer.bind(&inputs, &mut self.outputs);
