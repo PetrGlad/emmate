@@ -1410,6 +1410,7 @@ name = "midired"
 version = "0.0.1"
 dependencies = [
  "alsa",
+ "cpal",
  "iced",
  "log",
  "midir",
