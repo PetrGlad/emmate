@@ -27,12 +27,14 @@ wav = "1.0.0"
 # Could also be https://github.com/ruuda/hound
 
 # https://github.com/RustAudio/rodio
-rodio="0.16.0"
-# see also https://github.com/RustAudio/cpal
+# rodio="0.16.0" # does not have try_from_device_config function
+# rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "70c80462e64d" } # master at 2022-11-06
+rodio = { path = "rodio" }
 
 # https://docs.rs/alsa/latest/alsa/
-alsa = "0.6.0"
+alsa = "0.7.0"
 
+# see also https://github.com/RustAudio/cpal
 cpal = "0.14.0"
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html

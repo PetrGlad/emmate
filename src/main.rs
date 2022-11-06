@@ -17,6 +17,8 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use alsa::Direction;
+use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, SupportedBufferSize, SupportedStreamConfig};
+use cpal::SupportedBufferSize::Range;
 use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
 };
@@ -42,11 +44,26 @@ pub fn main() {
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
 
-    list_all_devicess();
+    let audio_host = cpal::default_host();
+    let out_device = lookup_device("pipewire").unwrap();
+    // .unwrap_or(audio_host.default_output_device().unwrap());
+    println!("Default output device: {:?}", out_device.name());
+    let out_conf = out_device.default_output_config().unwrap();
+    println!("Default output config: {:?}", out_conf);
+    let out_conf = SupportedStreamConfig::new(
+        out_conf.channels(),
+        out_conf.sample_rate(),
+        // Trying to reduce delays. There seem no good correlation between the buffer size and the midi->sound lag.
+        SupportedBufferSize::Range { min: 64, max: 128 },
+        out_conf.sample_format(),
+    );
+    println!("Output config: {:?}", out_conf);
+    let (_stream, stream_handle) =
+        rodio::OutputStream::try_from_device_config(&out_device, out_conf.to_owned()).unwrap();
+    // let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
 
-    let (_stream, stream_handle) = rodio::OutputStream::try_from_device(cpal::()).unwrap();
     {
-        let vst = Vst::init();
+        let vst = Vst::init(&out_conf.sample_rate());
         {
             // Example: Sound from a file:
             // let file = std::fs::File::open("output.wav").unwrap();
@@ -60,7 +77,7 @@ pub fn main() {
             //     .unwrap();
 
             // Sound from the VST host:
-            // stream_handle.play_raw(OutputSource::new(&vst, 128)).unwrap();
+            stream_handle.play_raw(OutputSource::new(&vst, 1)).unwrap();
         }
 
         // {
@@ -84,6 +101,7 @@ pub fn main() {
             for (i, port) in ports.iter().enumerate() {
                 let name = input.port_name(&port).unwrap();
                 println!("\t{}", name);
+
                 // if name.starts_with("Digital Piano") {
                 if name.starts_with("MPK mini 3") {
                     port_idx = Some(i);
@@ -92,37 +110,41 @@ pub fn main() {
                 }
             }
 
-            let port = ports.get(port_idx.unwrap()).unwrap();
+            let port = ports.get(port_idx
+                .expect("No midi input selected."))
+                .unwrap();
             let plugin_holder2 = vst.plugin.clone();
             let conn = input.connect(
                 &port,
                 "midi-input",
                 move |t, ev, _data| {
-                    // println!("MIDI event: {} {:?} {}", t, ev, ev.len());
+                    println!("MIDI event: {} {:?} {}", t, ev, ev.len());
                     if ev[0] == 254 { return; }
-                    // let mut ev_buf = [0u8; 3];
-                    // for (i, x) in ev.iter().enumerate() {
-                    //     ev_buf[i] = *x;
-                    // }
-                    // let note = Event::Midi(MidiEvent {
-                    //     data: ev_buf,
-                    //     delta_frames: 0,
-                    //     live: true,
-                    //     note_length: None,
-                    //     note_offset: None,
-                    //     detune: 0,
-                    //     note_off_velocity: 0,
-                    // });
-                    // let events_list = [note];
-                    // let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-                    // events_buffer.store_events(events_list);
-                    // let mut plugin = plugin_holder2.lock().unwrap();
-                    // plugin.process_events(events_buffer.events());
+                    let mut ev_buf = [0u8; 3];
+                    for (i, x) in ev.iter().enumerate() {
+                        ev_buf[i] = *x;
+                    }
+                    let note = Event::Midi(MidiEvent {
+                        data: ev_buf,
+                        delta_frames: 0,
+                        live: true,
+                        note_length: None,
+                        note_offset: None,
+                        detune: 0,
+                        note_off_velocity: 0,
+                    });
+                    let events_list = [note];
+                    let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
+                    events_buffer.store_events(events_list);
+                    let mut plugin = plugin_holder2.lock().unwrap();
+                    plugin.process_events(events_buffer.events());
 
-                    stream_handle.play_raw(
-                        SineWave::new(1000.0)
-                            .take_duration(Duration::from_millis(100)))
-                        .unwrap()
+                    // Trying to estimate rodio delays in the playback.
+                    // Playing a simple source directly to exclude potential delays in the VST.
+                    // stream_handle.play_raw(
+                    //     SineWave::new(1000.0)
+                    //         .take_duration(Duration::from_millis(100)))
+                    //     .unwrap()
                 },
                 (),
             ).unwrap();
@@ -240,19 +262,11 @@ impl Sandbox for Ed {
     }
 }
 
-use cpal::traits::{DeviceTrait, HostTrait};
-use midly::MetaMessage::DeviceName;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-
-// TODO To reduce delays try to pick other devices for output
-// (pick a device from cpal and make a rodio stream from it).
-// Experimented with sine wave source and there are similar delays after the midi
-// event as with a plugin-generated sound. So delayz are likely at the output (buffering
-// or the device).
-
-fn list_all_devicess() {
+fn lookup_device(device_selector: &str)
+                 -> Option<cpal::Device> {
     // Copy-paste from cpal examples
-
     println!("Supported hosts:\n  {:?}", cpal::ALL_HOSTS);
     let available_hosts = cpal::available_hosts();
     println!("Available hosts:\n  {:?}", available_hosts);
@@ -260,7 +274,6 @@ fn list_all_devicess() {
     for host_id in available_hosts {
         println!("{}", host_id.name());
         let host = cpal::host_from_id(host_id).unwrap();
-
 
         let default_in = host.default_input_device().map(|e| e.name().unwrap());
         let default_out = host.default_output_device().map(|e| e.name().unwrap());
@@ -271,6 +284,9 @@ fn list_all_devicess() {
         println!("  Devices: ");
         for (device_index, device) in devices.enumerate() {
             println!("  {}. \"{}\"", device_index + 1, device.name().unwrap());
+            if device.name().unwrap().starts_with(device_selector) {
+                return Some(device);
+            }
 
             // Input configs
             if let Ok(conf) = device.default_input_config() {
@@ -283,17 +299,18 @@ fn list_all_devicess() {
                     Vec::new()
                 }
             };
-            if !input_configs.is_empty() {
-                println!("    All supported input stream configs:");
-                for (config_index, config) in input_configs.into_iter().enumerate() {
-                    println!(
-                        "      {}.{}. {:?}",
-                        device_index + 1,
-                        config_index + 1,
-                        config
-                    );
-                }
-            }
+            // Too verbose
+            // if !input_configs.is_empty() {
+            //     println!("    All supported input stream configs:");
+            //     for (config_index, config) in input_configs.into_iter().enumerate() {
+            //         println!(
+            //             "      {}.{}. {:?}",
+            //             device_index + 1,
+            //             config_index + 1,
+            //             config
+            //         );
+            //     }
+            // }
 
             // Output configs
             if let Ok(conf) = device.default_output_config() {
@@ -306,17 +323,20 @@ fn list_all_devicess() {
                     Vec::new()
                 }
             };
-            if !output_configs.is_empty() {
-                println!("    All supported output stream configs:");
-                for (config_index, config) in output_configs.into_iter().enumerate() {
-                    println!(
-                        "      {}.{}. {:?}",
-                        device_index + 1,
-                        config_index + 1,
-                        config
-                    );
-                }
-            }
+            // Too verbose
+            // if !output_configs.is_empty() {
+            //     println!("    All supported output stream configs:");
+            //     for (config_index, config) in output_configs.into_iter().enumerate() {
+            //         println!(
+            //             "      {}.{}. {:?}",
+            //             device_index + 1,
+            //             config_index + 1,
+            //             config
+            //         );
+            //     }
+            // }
         }
     }
+
+    None
 }

@@ -2,6 +2,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use cpal::SampleRate;
 use rodio::Source;
 
 use vst::api::{Event, Events, Supported};
@@ -26,7 +27,9 @@ pub struct Vst {
 }
 
 impl Vst {
-    pub fn init() -> Vst {
+    pub fn init(sample_rate: &SampleRate) -> Vst {
+        let sample_rate_f = sample_rate.0 as f32;
+
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
         let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
         // let path = Path::new("/usr/lib/VST/amsynth_vst.so");
@@ -36,7 +39,6 @@ impl Vst {
         let mut loader = PluginLoader::load(path, Arc::clone(&host))
             .unwrap_or_else(|e| panic!("Failed to load plugin: {}", e));
         let mut plugin_holder = Arc::new(Mutex::new(loader.instance().unwrap()));
-        let sample_rate = 48000.0;
         {
             let mut plugin = plugin_holder.lock().unwrap();
             plugin.suspend();
@@ -66,12 +68,12 @@ impl Vst {
             println!("Can receive MIDI events {}", plugin.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes);
 
             // plugin.suspend();
-            plugin.set_sample_rate(sample_rate.to_owned() as f32);
-            plugin.set_block_size(128); // Does it affect processing delay?
+            plugin.set_sample_rate(sample_rate_f.to_owned());
+            plugin.set_block_size(256); // Does it affect processing delay?
             plugin.resume();
             plugin.start_process();
         }
-        Vst { host, plugin: plugin_holder, sample_rate }
+        Vst { host, plugin: plugin_holder, sample_rate: sample_rate_f }
     }
 }
 
