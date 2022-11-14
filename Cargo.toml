@@ -29,7 +29,8 @@ wav = "1.0.0"
 # https://github.com/RustAudio/rodio
 # rodio="0.16.0" # does not have try_from_device_config function
 # rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "70c80462e64d" } # master at 2022-11-06
-rodio = { path = "rodio" }
+# rodio = { path = "rodio" }
+rodio = { git = "https://github.com/PetrGlad/rodio.git", branch = "configurable-buffer-size" }
 
 # https://docs.rs/alsa/latest/alsa/
 alsa = "0.7.0"

@@ -17,7 +17,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use alsa::Direction;
-use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, SupportedBufferSize, SupportedStreamConfig};
+use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
 use cpal::SupportedBufferSize::Range;
 use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
@@ -50,20 +50,20 @@ pub fn main() {
     println!("Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
     println!("Default output config: {:?}", out_conf);
-    let out_conf = SupportedStreamConfig::new(
-        out_conf.channels(),
-        out_conf.sample_rate(),
+    let sample_format = out_conf.sample_format();
+    let out_conf = StreamConfig {
+        channels: out_conf.channels(),
+        sample_rate: out_conf.sample_rate(),
         // Trying to reduce delays. There seem no good correlation between the buffer size and the midi->sound lag.
-        SupportedBufferSize::Range { min: 64, max: 128 },
-        out_conf.sample_format(),
-    );
+        buffer_size: BufferSize::Fixed(128),
+    };
     println!("Output config: {:?}", out_conf);
     let (_stream, stream_handle) =
-        rodio::OutputStream::try_from_device_config(&out_device, out_conf.to_owned()).unwrap();
+        rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
     // let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
 
     {
-        let vst = Vst::init(&out_conf.sample_rate());
+        let vst = Vst::init(&out_conf.sample_rate);
         {
             // Example: Sound from a file:
             // let file = std::fs::File::open("output.wav").unwrap();
@@ -73,7 +73,8 @@ pub fn main() {
             // Example: Sound from a generative source:
             // stream_handle.play_raw(
             //     SineWave::new(1000.0)
-            //         .take_duration(Duration::from_millis(200)))
+            //         .take_duration(Duration::from_secs(30))
+            //         .amplify(0.2))
             //     .unwrap();
 
             // Sound from the VST host:
