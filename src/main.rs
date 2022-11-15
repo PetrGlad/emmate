@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use alsa::Direction;
 use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
+use cpal::SampleFormat::F32;
 use cpal::SupportedBufferSize::Range;
 use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
@@ -37,25 +38,26 @@ use vst::plugin::Plugin;
 use wav::BitDepth;
 use crate::midi_vst::{OutputSource, Vst};
 use vst::event::{MidiEvent};
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
 
 pub fn main() {
     {
         // use log::*;
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
-
+    let buffer_size = 256;
     let audio_host = cpal::default_host();
-    let out_device = lookup_device("pipewire").unwrap();
-    // .unwrap_or(audio_host.default_output_device().unwrap());
+    let out_device = audio_host.default_output_device().unwrap();
     println!("Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
     println!("Default output config: {:?}", out_conf);
-    let sample_format = out_conf.sample_format();
+    let sample_format = F32; // out_conf.sample_format();
     let out_conf = StreamConfig {
         channels: out_conf.channels(),
         sample_rate: out_conf.sample_rate(),
         // Trying to reduce delays. There seem no good correlation between the buffer size and the midi->sound lag.
-        buffer_size: BufferSize::Fixed(128),
+        buffer_size: BufferSize::Fixed(buffer_size),
     };
     println!("Output config: {:?}", out_conf);
     let (_stream, stream_handle) =
@@ -63,7 +65,7 @@ pub fn main() {
     // let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
 
     {
-        let vst = Vst::init(&out_conf.sample_rate);
+        let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
         {
             // Example: Sound from a file:
             // let file = std::fs::File::open("output.wav").unwrap();
@@ -74,11 +76,11 @@ pub fn main() {
             // stream_handle.play_raw(
             //     SineWave::new(1000.0)
             //         .take_duration(Duration::from_secs(30))
-            //         .amplify(0.2))
+            //         .amplify(0.1))
             //     .unwrap();
 
             // Sound from the VST host:
-            stream_handle.play_raw(OutputSource::new(&vst, 1)).unwrap();
+            stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
         }
 
         // {
@@ -261,83 +263,4 @@ impl Sandbox for Ed {
             )
             .into()
     }
-}
-
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-fn lookup_device(device_selector: &str)
-                 -> Option<cpal::Device> {
-    // Copy-paste from cpal examples
-    println!("Supported hosts:\n  {:?}", cpal::ALL_HOSTS);
-    let available_hosts = cpal::available_hosts();
-    println!("Available hosts:\n  {:?}", available_hosts);
-
-    for host_id in available_hosts {
-        println!("{}", host_id.name());
-        let host = cpal::host_from_id(host_id).unwrap();
-
-        let default_in = host.default_input_device().map(|e| e.name().unwrap());
-        let default_out = host.default_output_device().map(|e| e.name().unwrap());
-        println!("  Default Input Device:\n    {:?}", default_in);
-        println!("  Default Output Device:\n    {:?}", default_out);
-
-        let devices = host.devices().unwrap();
-        println!("  Devices: ");
-        for (device_index, device) in devices.enumerate() {
-            println!("  {}. \"{}\"", device_index + 1, device.name().unwrap());
-            if device.name().unwrap().starts_with(device_selector) {
-                return Some(device);
-            }
-
-            // Input configs
-            if let Ok(conf) = device.default_input_config() {
-                println!("    Default input stream config:\n      {:?}", conf);
-            }
-            let input_configs = match device.supported_input_configs() {
-                Ok(f) => f.collect(),
-                Err(e) => {
-                    println!("    Error getting supported input configs: {:?}", e);
-                    Vec::new()
-                }
-            };
-            // Too verbose
-            // if !input_configs.is_empty() {
-            //     println!("    All supported input stream configs:");
-            //     for (config_index, config) in input_configs.into_iter().enumerate() {
-            //         println!(
-            //             "      {}.{}. {:?}",
-            //             device_index + 1,
-            //             config_index + 1,
-            //             config
-            //         );
-            //     }
-            // }
-
-            // Output configs
-            if let Ok(conf) = device.default_output_config() {
-                println!("    Default output stream config:\n      {:?}", conf);
-            }
-            let output_configs = match device.supported_output_configs() {
-                Ok(f) => f.collect(),
-                Err(e) => {
-                    println!("    Error getting supported output configs: {:?}", e);
-                    Vec::new()
-                }
-            };
-            // Too verbose
-            // if !output_configs.is_empty() {
-            //     println!("    All supported output stream configs:");
-            //     for (config_index, config) in output_configs.into_iter().enumerate() {
-            //         println!(
-            //             "      {}.{}. {:?}",
-            //             device_index + 1,
-            //             config_index + 1,
-            //             config
-            //         );
-            //     }
-            // }
-        }
-    }
-
-    None
 }

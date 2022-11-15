@@ -1,8 +1,8 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use cpal::SampleRate;
+use std::time::{Duration, SystemTime};
+use cpal::{FrameCount, SampleRate};
 use rodio::Source;
 
 use vst::api::{Event, Events, Supported};
@@ -27,7 +27,7 @@ pub struct Vst {
 }
 
 impl Vst {
-    pub fn init(sample_rate: &SampleRate) -> Vst {
+    pub fn init(sample_rate: &SampleRate, buffer_size: &FrameCount) -> Vst {
         let sample_rate_f = sample_rate.0 as f32;
 
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
@@ -61,7 +61,6 @@ impl Vst {
             let params = plugin.get_parameter_object();
             params.change_preset(4);
             println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
-            // Initialize the instance
 
             plugin.init();
             println!("Initialized VST instance.");
@@ -69,7 +68,7 @@ impl Vst {
 
             // plugin.suspend();
             plugin.set_sample_rate(sample_rate_f.to_owned());
-            plugin.set_block_size(256); // Does it affect processing delay?
+            plugin.set_block_size(*buffer_size as i64);
             plugin.resume();
             plugin.start_process();
         }
@@ -87,14 +86,14 @@ pub struct OutputSource {
 }
 
 impl OutputSource {
-    pub fn new(vst: &Vst, buf_size: usize) -> OutputSource {
-        assert!(buf_size > 0);
+    pub fn new(vst: &Vst, buf_size: &FrameCount) -> OutputSource {
+        assert!(*buf_size > 0);
         let outputs;
         {
             let plugin_holder = vst.plugin.clone();
             let plugin = plugin_holder.try_lock().unwrap();
             let info = plugin.get_info();
-            outputs = vec![vec![0.0; buf_size]; info.outputs as usize];
+            outputs = vec![vec![0.0; *buf_size as usize]; info.outputs as usize];
         }
         OutputSource {
             sample_rate: vst.sample_rate.to_owned() as u32,
