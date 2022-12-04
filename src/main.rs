@@ -5,7 +5,7 @@
 mod midi_vst;
 mod midi;
 
-use std::{error, result, thread};
+use std::{error, primitive, result, thread};
 use std::borrow::BorrowMut;
 use std::ffi::CString;
 use std::io::{BufReader, BufWriter, stdin};
@@ -24,7 +24,7 @@ use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
 };
 use midir::MidiInput;
-use midly::{TrackEvent, TrackEventKind};
+use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
@@ -33,7 +33,7 @@ use rodio::source::SineWave;
 use rodio::source::TakeDuration;
 use vst::api::Events;
 use vst::event::Event;
-use vst::host::{Host, HostBuffer};
+use vst::host::{Host, HostBuffer, PluginInstance};
 use vst::plugin::Plugin;
 use wav::BitDepth;
 use crate::midi_vst::{OutputSource, Vst};
@@ -105,8 +105,8 @@ pub fn main() {
                 let name = input.port_name(&port).unwrap();
                 println!("\t{}", name);
 
-                // if name.starts_with("Digital Piano") {
-                if name.starts_with("MPK mini 3") {
+                if name.starts_with("Digital Piano") {
+                    // if name.starts_with("MPK mini 3") {
                     port_idx = Some(i);
                     println!("Selected MIDI input: '{}'", name);
                     break;
@@ -136,11 +136,7 @@ pub fn main() {
                         detune: 0,
                         note_off_velocity: 0,
                     });
-                    let events_list = [note];
-                    let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-                    events_buffer.store_events(events_list);
-                    let mut plugin = plugin_holder2.lock().unwrap();
-                    plugin.process_events(events_buffer.events());
+                    play_message(&plugin_holder2, &note);
 
                     // Trying to estimate rodio delays in the playback.
                     // Playing a simple source directly to exclude potential delays in the VST.
@@ -151,6 +147,33 @@ pub fn main() {
                 },
                 (),
             ).unwrap();
+
+            { // MIDI load/modify example
+                let data = std::fs::read("yellow.mid").unwrap();
+                // Parse the raw bytes
+                let mut smf = midly::Smf::parse(&data).unwrap();
+                // Use the information
+                println!("midi file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
+                let track = smf.tracks.get(0).unwrap();
+
+                println!("The 1st track is {:#?}", &track);
+
+                // Try doing some modifications
+                let mut i = 0;
+                while i < track.len() {
+                    let event = track[i.to_owned()];
+                    event.delta; // TODO ?????????????? Transport  design ??????????????
+                    match event.kind {
+                        TrackEventKind::Midi { channel: _, message } => {
+                            play_message(&plugin_holder2, &make_a_note(&message));
+                        }
+                        _ => ()
+                    };
+                    i += 1;
+                }
+
+                // smf.save("rewritten.mid").unwrap();
+            }
 
             let mut input = String::new();
             input.clear();
@@ -172,7 +195,7 @@ pub fn main() {
         //     for _i in 1..20 {
         //         plugin.process(&mut audio_buffer);
         //         pcm_data.append(&mut outputs[0].to_vec());
-        //     }
+        //  `   }
         //     let wav_data = wav::BitDepth::ThirtyTwoFloat(pcm_data.to_owned());
         //     wav::write(wav_header, &wav_data, &mut out_file).unwrap();
         //     drop(out_file);
@@ -189,19 +212,24 @@ pub fn main() {
     // }
 }
 
-fn make_a_note<'a>() -> Event<'a> {
+fn play_message(plugin_holder2: &Arc<Mutex<PluginInstance>>, note: &Event) {
+    let events_list = [note];
+    let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
+    events_buffer.store_events(events_list);
+    let mut plugin = plugin_holder2.lock().unwrap();
+    plugin.process_events(events_buffer.events());
+}
+
+fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
     let note_event = midly::live::LiveEvent::Midi {
         channel: 1.into(),
-        message: midly::MidiMessage::NoteOn {
-            key: 50.into(),
-            vel: 80.into(),
-        },
+        message: message.to_owned(),
     };
     let mut track_event_buf = [0u8; 3];
     let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
     note_event.write(&mut cursor).unwrap();
     println!("Event bytes {:?}\n", track_event_buf);
-    let note = Event::Midi(MidiEvent {
+    Event::Midi(MidiEvent {
         data: track_event_buf,
         delta_frames: 0,
         live: true,
@@ -209,8 +237,7 @@ fn make_a_note<'a>() -> Event<'a> {
         note_offset: None,
         detune: 0,
         note_off_velocity: 0,
-    });
-    note
+    })
 }
 
 #[derive(Default)]

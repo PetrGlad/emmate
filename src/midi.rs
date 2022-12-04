@@ -52,7 +52,7 @@
 //
 //         println!("The 1st track is {:#?}", &track);
 //
-//         // Try to do some modifications
+//         // Try doing some modifications
 //         let mut i = 0;
 //         while i < track.len() {
 //             let skip = match track[i].kind {
