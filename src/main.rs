@@ -13,7 +13,7 @@ use std::ops::DerefMut;
 use std::path::Path;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
+use std::thread::{park_timeout, sleep};
 use std::time::Duration;
 
 use alsa::Direction;
@@ -24,7 +24,7 @@ use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
 };
 use midir::MidiInput;
-use midly::{MidiMessage, TrackEvent, TrackEventKind};
+use midly::{Format, MidiMessage, Timing, TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
@@ -105,8 +105,8 @@ pub fn main() {
                 let name = input.port_name(&port).unwrap();
                 println!("\t{}", name);
 
-                if name.starts_with("Digital Piano") {
-                    // if name.starts_with("MPK mini 3") {
+                // if name.starts_with("Digital Piano") {
+                if name.starts_with("MPK mini 3") {
                     port_idx = Some(i);
                     println!("Selected MIDI input: '{}'", name);
                     break;
@@ -136,7 +136,7 @@ pub fn main() {
                         detune: 0,
                         note_off_velocity: 0,
                     });
-                    play_message(&plugin_holder2, &note);
+                    play_message(&plugin_holder2.clone(), &note);
 
                     // Trying to estimate rodio delays in the playback.
                     // Playing a simple source directly to exclude potential delays in the VST.
@@ -156,16 +156,33 @@ pub fn main() {
                 println!("midi file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
                 let track = smf.tracks.get(0).unwrap();
 
-                println!("The 1st track is {:#?}", &track);
+                println!("SMF header {:#?}", &smf.header);
+                assert!(&smf.header.format == &Format::SingleTrack,
+                        "MIDI SMF format is not supported {:#?}", &smf.header.format);
+                // TODO Also should support Tempo messages. Tempo messages set micros per beat.
+                // Default tempo is 120 beats per minute and default signature 4/4
+                let tick_per_beat = beat_duration(&smf.header.timing);
+                let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
+                let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
+                println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
+                         &tick_per_beat, &beat_per_sec, &usec_per_tick);
+
+
+                println!("First event of the 1st track is {:#?}", &track[..10]);
 
                 // Try doing some modifications
                 let mut i = 0;
                 while i < track.len() {
                     let event = track[i.to_owned()];
-                    event.delta; // TODO ?????????????? Transport  design ??????????????
+                    println!("Event: {:#?}", &event);
+
+                    // TODO ?????????????? Transport  design ?????????????? Use Dropseed, maybe Tokio?
+                    sleep(Duration::from_micros(event.delta.as_int() as u64 * usec_per_tick as u64));
+
                     match event.kind {
                         TrackEventKind::Midi { channel: _, message } => {
-                            play_message(&plugin_holder2, &make_a_note(&message));
+                            play_message(&vst.plugin.clone(), &make_a_note(&message));
+                            println!("  PLAYED");
                         }
                         _ => ()
                     };
@@ -210,6 +227,13 @@ pub fn main() {
     //         ..Settings::default()
     //     }).unwrap()
     // }
+}
+
+fn beat_duration(timing: &Timing) -> u32 {
+    match timing {
+        Timing::Metrical(d) => d.as_int() as u32,
+        _ => panic!("Timing format {:#?} is not supported.", timing)
+    }
 }
 
 fn play_message(plugin_holder2: &Arc<Mutex<PluginInstance>>, note: &Event) {
