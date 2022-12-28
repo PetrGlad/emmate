@@ -1,9 +1,6 @@
-/*
-  Using https://github.com/iced-rs/iced/blob/0.3/examples/counter/src/main.rs
-  as a stub implementation for starters.
-*/
 mod midi_vst;
 mod midi;
+mod engine;
 
 use std::{error, primitive, result, thread};
 use std::borrow::BorrowMut;
@@ -39,6 +36,7 @@ use wav::BitDepth;
 use crate::midi_vst::{OutputSource, Vst};
 use vst::event::{MidiEvent};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use crate::engine::Engine;
 
 
 pub fn main() {
@@ -52,11 +50,11 @@ pub fn main() {
     println!("Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
     println!("Default output config: {:?}", out_conf);
-    let sample_format = F32; // out_conf.sample_format();
+    assert!(out_conf.sample_format() == F32);
+    let sample_format = F32; // To use with vst.
     let out_conf = StreamConfig {
         channels: out_conf.channels(),
         sample_rate: out_conf.sample_rate(),
-        // Trying to reduce delays. There seem no good correlation between the buffer size and the midi->sound lag.
         buffer_size: BufferSize::Fixed(buffer_size),
     };
     println!("Output config: {:?}", out_conf);
@@ -66,137 +64,132 @@ pub fn main() {
 
     {
         let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
-        {
-            // Example: Sound from a file:
-            // let file = std::fs::File::open("output.wav").unwrap();
-            // let beep_sink = stream_handle.play_once(BufReader::new(file)).unwrap();
-            // beep_sink.set_volume(0.3);
-
-            // Example: Sound from a generative source:
-            // stream_handle.play_raw(
-            //     SineWave::new(1000.0)
-            //         .take_duration(Duration::from_secs(30))
-            //         .amplify(0.1))
-            //     .unwrap();
-
-            // Sound from the VST host:
-            stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
-        }
+        stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
+        let engine = Arc::new(Mutex::new(Engine::new(vst)));
+        engine.lock().unwrap().start();
 
         // {
-        //     let events_list = [make_a_note()];
-        //     let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-        //     events_buffer.store_events(events_list);
-        //     // XXX See https://github.com/RustAudio/vst-rs/pull/160.
-        //     // Do not know yet how to make a plugin reference available in a Host implementation.
-        //     // events_buffer.send_events(events_list, &mut *(VST.host.lock().unwrap()));
-        //     let plugin_holder = vst.plugin.clone();
-        //     println!("Processing events.");
-        //     let mut plugin = plugin_holder.lock().unwrap();
-        //     plugin.process_events(events_buffer.events());
+        //     // Example: Sound from a file:
+        //     // let file = std::fs::File::open("output.wav").unwrap();
+        //     // let beep_sink = stream_handle.play_once(BufReader::new(file)).unwrap();
+        //     // beep_sink.set_volume(0.3);
+        //
+        //     // Example: Sound from a generative source:
+        //     // stream_handle.play_raw(
+        //     //     SineWave::new(1000.0)
+        //     //         .take_duration(Duration::from_secs(30))
+        //     //         .amplify(0.1))
+        //     //     .unwrap();
+        //
+        //     // Sound from the VST host:
+        //     stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
         // }
 
-        {
-            let input = MidiInput::new("midir").unwrap();
-            let mut port_idx = None;
-            println!("Midi input ports:");
-            let ports = input.ports();
-            for (i, port) in ports.iter().enumerate() {
-                let name = input.port_name(&port).unwrap();
-                println!("\t{}", name);
+        // {
+        //     println!("Processing events.");
+        //     engine.process(&make_a_note());
+        // }
 
-                // if name.starts_with("Digital Piano") {
-                if name.starts_with("MPK mini 3") {
-                    port_idx = Some(i);
-                    println!("Selected MIDI input: '{}'", name);
-                    break;
-                }
-            }
+        // {
+        //     let input = MidiInput::new("midir").unwrap();
+        //     let mut port_idx = None;
+        //     println!("Midi input ports:");
+        //     let ports = input.ports();
+        //     for (i, port) in ports.iter().enumerate() {
+        //         let name = input.port_name(&port).unwrap();
+        //         println!("\t{}", name);
+        //
+        //         // if name.starts_with("Digital Piano") {
+        //         if name.starts_with("MPK mini 3") {
+        //             port_idx = Some(i);
+        //             println!("Selected MIDI input: '{}'", name);
+        //             break;
+        //         }
+        //     }
+        //
+        //     let port = ports.get(port_idx
+        //         .expect("No midi input selected."))
+        //         .unwrap();
+        //     let seq_engine = engine.clone();
+        //     let conn = input.connect(
+        //         &port,
+        //         "midi-input",
+        //         move|t, ev, _data| {
+        //             println!("MIDI event: {} {:?} {}", t, ev, ev.len());
+        //             if ev[0] == 254 { return; }
+        //             let mut ev_buf = [0u8; 3];
+        //             for (i, x) in ev.iter().enumerate() {
+        //                 ev_buf[i] = *x;
+        //             }
+        //             let note = Event::Midi(MidiEvent {
+        //                 data: ev_buf,
+        //                 delta_frames: 0,
+        //                 live: true,
+        //                 note_length: None,
+        //                 note_offset: None,
+        //                 detune: 0,
+        //                 note_off_velocity: 0,
+        //             });
+        //             seq_engine.lock().unwrap().process(note);
+        //
+        //             // Trying to estimate rodio delays in the playback.
+        //             // Playing a simple source directly to exclude potential delays in the VST.
+        //             // stream_handle.play_raw(
+        //             //     SineWave::new(1000.0)
+        //             //         .take_duration(Duration::from_millis(100)))
+        //             //     .unwrap()
+        //         },
+        //         (),
+        //     ).unwrap();
+        //
+        //     let mut input = String::new();
+        //     input.clear();
+        //     stdin().read_line(&mut input).unwrap(); // wait for next enter key press
+        //     conn.close();
+        // }
 
-            let port = ports.get(port_idx
-                .expect("No midi input selected."))
-                .unwrap();
-            let plugin_holder2 = vst.plugin.clone();
-            let conn = input.connect(
-                &port,
-                "midi-input",
-                move |t, ev, _data| {
-                    println!("MIDI event: {} {:?} {}", t, ev, ev.len());
-                    if ev[0] == 254 { return; }
-                    let mut ev_buf = [0u8; 3];
-                    for (i, x) in ev.iter().enumerate() {
-                        ev_buf[i] = *x;
+        { // Play MIDI from SMD
+            let data = std::fs::read("yellow.mid").unwrap();
+            // Parse the raw bytes
+            let smf = midly::Smf::parse(&data).unwrap();
+            // Use the information
+            println!("midi file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
+            let track = smf.tracks.get(0).unwrap();
+
+            println!("SMF header {:#?}", &smf.header);
+            assert!(&smf.header.format == &Format::SingleTrack,
+                    "MIDI SMF format is not supported {:#?}", &smf.header.format);
+            // TODO Also should support Tempo messages. Tempo messages set micros per beat.
+            // Default tempo is 120 beats per minute and default signature 4/4
+            let tick_per_beat = beat_duration(&smf.header.timing);
+            let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
+            let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
+            println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
+                     &tick_per_beat, &beat_per_sec, &usec_per_tick);
+
+            println!("First event of the 1st track is {:#?}", &track[..10]);
+
+            // Try doing some modifications
+            let mut i = 0;
+            while i < track.len() {
+                let event = track[i.to_owned()];
+                println!("Event: {:#?}", &event);
+
+                sleep(Duration::from_micros(event.delta.as_int() as u64 * usec_per_tick as u64));
+
+                match event.kind {
+                    TrackEventKind::Midi { channel: _, message } => {
+                        engine.lock().unwrap().process(make_a_note(&message));
+                        println!("  PLAYED");
                     }
-                    let note = Event::Midi(MidiEvent {
-                        data: ev_buf,
-                        delta_frames: 0,
-                        live: true,
-                        note_length: None,
-                        note_offset: None,
-                        detune: 0,
-                        note_off_velocity: 0,
-                    });
-                    play_message(&plugin_holder2.clone(), &note);
-
-                    // Trying to estimate rodio delays in the playback.
-                    // Playing a simple source directly to exclude potential delays in the VST.
-                    // stream_handle.play_raw(
-                    //     SineWave::new(1000.0)
-                    //         .take_duration(Duration::from_millis(100)))
-                    //     .unwrap()
-                },
-                (),
-            ).unwrap();
-
-            { // MIDI load/modify example
-                let data = std::fs::read("yellow.mid").unwrap();
-                // Parse the raw bytes
-                let mut smf = midly::Smf::parse(&data).unwrap();
-                // Use the information
-                println!("midi file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
-                let track = smf.tracks.get(0).unwrap();
-
-                println!("SMF header {:#?}", &smf.header);
-                assert!(&smf.header.format == &Format::SingleTrack,
-                        "MIDI SMF format is not supported {:#?}", &smf.header.format);
-                // TODO Also should support Tempo messages. Tempo messages set micros per beat.
-                // Default tempo is 120 beats per minute and default signature 4/4
-                let tick_per_beat = beat_duration(&smf.header.timing);
-                let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
-                let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
-                println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-                         &tick_per_beat, &beat_per_sec, &usec_per_tick);
-
-
-                println!("First event of the 1st track is {:#?}", &track[..10]);
-
-                // Try doing some modifications
-                let mut i = 0;
-                while i < track.len() {
-                    let event = track[i.to_owned()];
-                    println!("Event: {:#?}", &event);
-
-                    // TODO ?????????????? Transport  design ?????????????? Use Dropseed, maybe Tokio?
-                    sleep(Duration::from_micros(event.delta.as_int() as u64 * usec_per_tick as u64));
-
-                    match event.kind {
-                        TrackEventKind::Midi { channel: _, message } => {
-                            play_message(&vst.plugin.clone(), &make_a_note(&message));
-                            println!("  PLAYED");
-                        }
-                        _ => ()
-                    };
-                    i += 1;
-                }
-
-                // smf.save("rewritten.mid").unwrap();
+                    _ => ()
+                };
+                i += 1;
             }
 
-            let mut input = String::new();
-            input.clear();
-            stdin().read_line(&mut input).unwrap(); // wait for next enter key press
-            conn.close();
+            // smf.save("rewritten.mid").unwrap();
         }
+
 
         // {
         //     // Example: output to a file:
@@ -236,14 +229,6 @@ fn beat_duration(timing: &Timing) -> u32 {
     }
 }
 
-fn play_message(plugin_holder2: &Arc<Mutex<PluginInstance>>, note: &Event) {
-    let events_list = [note];
-    let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-    events_buffer.store_events(events_list);
-    let mut plugin = plugin_holder2.lock().unwrap();
-    plugin.process_events(events_buffer.events());
-}
-
 fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
     let note_event = midly::live::LiveEvent::Midi {
         channel: 1.into(),
@@ -263,6 +248,11 @@ fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
         note_off_velocity: 0,
     })
 }
+
+/*
+  Using https://github.com/iced-rs/iced/blob/0.3/examples/counter/src/main.rs
+  as a stub implementation for starters.
+*/
 
 #[derive(Default)]
 struct Ed {
