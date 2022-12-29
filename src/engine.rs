@@ -11,8 +11,8 @@ use vst::plugin::Plugin;
 /// An event to be rendered by the engine at given time
 pub struct EngineEvent {
     /// Scheduled moment in microseconds from now.
-    dt: u64,
-    midi_event: Event<'static>,
+    pub dt: u32,
+    pub midi_event: Event<'static>,
 }
 
 pub trait MidiSource: Iterator<Item=EngineEvent> + Send
@@ -49,7 +49,7 @@ impl Engine {
                     let ev = s.next();
                     match ev {
                         Some(e) => {
-                            thread::sleep(Duration::from_micros(e.dt));
+                            thread::sleep(Duration::from_micros(e.dt as u64));
                             engine2.process(e.midi_event);
                         }
                         None => {
@@ -66,7 +66,7 @@ impl Engine {
         engine
     }
 
-    pub fn add(&mut self, source: Box<dyn MidiSource>) {
+    pub fn add(&self, source: Box<dyn MidiSource>) {
         self.sources.lock().unwrap().push(source);
     }
 

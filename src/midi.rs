@@ -1,12 +1,93 @@
+use midly::{Format, Smf, Timing, TrackEventKind};
+use crate::engine::{EngineEvent, MidiSource};
+use vst::api::Events;
+use vst::event::{Event, MidiEvent};
+
+pub struct SmfSource {
+    smf: Smf<'static>,
+    usec_per_tick: u32,
+    i: usize,
+}
+
+impl SmfSource {
+    pub fn new(smf: Smf<'static>) -> SmfSource {
+        println!("SMF header {:#?}", &smf.header);
+        println!("SMF file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
+        assert!(&smf.header.format == &Format::SingleTrack,
+                "MIDI SMF format is not supported {:#?}", &smf.header.format);
+        assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required");
+        // println!("First event of the 1st track is {:#?}", &track[..10]);
+        let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
+        SmfSource { smf, usec_per_tick, i: 0 }
+    }
+}
+
+fn usec_per_midi_tick(timing: &Timing) -> u32 {
+    let tick_per_beat = beat_duration(timing);
+    let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
+    let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
+    println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
+             &tick_per_beat, &beat_per_sec, &usec_per_tick);
+    usec_per_tick
+}
+
+fn beat_duration(timing: &Timing) -> u32 {
+    // TODO Also should support Tempo messages. Tempo messages set micros per beat.
+    // Default tempo is 120 beats per minute and default signature 4/4
+    match timing {
+        Timing::Metrical(d) => d.as_int() as u32,
+        _ => panic!("Timing format {:#?} is not supported.", timing)
+    }
+}
+
+impl MidiSource for SmfSource {}
+
+impl Iterator for SmfSource {
+    type Item = EngineEvent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let track = &self.smf.tracks[0];
+        while self.i < track.len() {
+            let event = track[self.i.to_owned()];
+            //  println!("Event: {:#?}", &event);
+            match event.kind {
+                TrackEventKind::Midi { channel: _, message } => {
+                    return Some(EngineEvent {
+                        dt: event.delta.as_int() as u32 * self.usec_per_tick,
+                        midi_event: make_a_note(&message),
+                    });
+                }
+                _ => ()
+            };
+            self.i += 1;
+        }
+        None
+    }
+}
+
+
+fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
+    let note_event = midly::live::LiveEvent::Midi {
+        channel: 1.into(),
+        message: message.to_owned(),
+    };
+    let mut track_event_buf = [0u8; 3];
+    let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
+    note_event.write(&mut cursor).unwrap();
+    println!("Event bytes {:?}\n", track_event_buf);
+    Event::Midi(MidiEvent {
+        data: track_event_buf,
+        delta_frames: 0,
+        live: true,
+        note_length: None,
+        note_offset: None,
+        detune: 0,
+        note_off_velocity: 0,
+    })
+}
+
+
 // { // Use ALSA to read midi events
-//
-//     // TODO: Replace ALSA with midir for reading events. See https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
-//
-//     // Diagnostics commands
-//     //   amidi --list-devices
-//     //   aseqdump --list
-//     //   aseqdump --port='24:0'
-//
 //     let seq = alsa::seq::Seq::open(None, Some(Direction::Capture), false)
 //         .expect("Cannot open MIDI sequencer.");
 //

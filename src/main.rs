@@ -37,6 +37,8 @@ use crate::midi_vst::{OutputSource, Vst};
 use vst::event::{MidiEvent};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::engine::Engine;
+use crate::midi::SmfSource;
+
 
 pub fn main() {
     {
@@ -147,41 +149,12 @@ pub fn main() {
         //     conn.close();
         // }
 
-        { // Play MIDI from SMD
+        { // Play MIDI from an SMD file.
             let data = std::fs::read("yellow.mid").unwrap();
-            // Parse the raw bytes
             let smf = midly::Smf::parse(&data).unwrap();
-            // Use the information
-            println!("midi file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
-            let track = smf.tracks.get(0).unwrap();
-
-            println!("SMF header {:#?}", &smf.header);
-            assert!(&smf.header.format == &Format::SingleTrack,
-                    "MIDI SMF format is not supported {:#?}", &smf.header.format);
-            let usec_per_tick = usec_per_miti_tick(&smf.header.timing);
-            println!("First event of the 1st track is {:#?}", &track[..10]);
-
-            // Try doing some modifications
-            let mut i = 0;
-            while i < track.len() {
-                let event = track[i.to_owned()];
-                println!("Event: {:#?}", &event);
-
-                sleep(Duration::from_micros(event.delta.as_int() as u64 * usec_per_tick as u64));
-
-                match event.kind {
-                    TrackEventKind::Midi { channel: _, message } => {
-                        engine.process(make_a_note(&message));
-                        println!("  PLAYED");
-                    }
-                    _ => ()
-                };
-                i += 1;
-            }
-
-            // smf.save("rewritten.mid").unwrap();
+            let smf_midi_source = SmfSource::new(smf);
+            engine.add(Box::new(smf_midi_source));
         }
-
 
         // {
         //     // Example: output to a file:
@@ -212,44 +185,6 @@ pub fn main() {
     //         ..Settings::default()
     //     }).unwrap()
     // }
-}
-
-fn usec_per_miti_tick(smf_timing: &Timing) -> u32 {
-    let tick_per_beat = beat_duration(smf_timing);
-    let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
-    let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
-    println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-             &tick_per_beat, &beat_per_sec, &usec_per_tick);
-    usec_per_tick
-}
-
-fn beat_duration(timing: &Timing) -> u32 {
-    // TODO Also should support Tempo messages. Tempo messages set micros per beat.
-    // Default tempo is 120 beats per minute and default signature 4/4
-    match timing {
-        Timing::Metrical(d) => d.as_int() as u32,
-        _ => panic!("Timing format {:#?} is not supported.", timing)
-    }
-}
-
-fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
-    let note_event = midly::live::LiveEvent::Midi {
-        channel: 1.into(),
-        message: message.to_owned(),
-    };
-    let mut track_event_buf = [0u8; 3];
-    let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
-    note_event.write(&mut cursor).unwrap();
-    println!("Event bytes {:?}\n", track_event_buf);
-    Event::Midi(MidiEvent {
-        data: track_event_buf,
-        delta_frames: 0,
-        live: true,
-        note_length: None,
-        note_offset: None,
-        detune: 0,
-        note_off_velocity: 0,
-    })
 }
 
 /*

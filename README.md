@@ -1,6 +1,6 @@
 # midired
 
-Off grid midi editor with following goals:
+Off grid MIDI editor with following goals:
 
 * A feature absent in _any_ other midi editor I could get my hands on (both commercial and free ones): removing a note
   can shift the tail of the track left to fill the gap. In some editors this is actually doable but cumbersome at best.
@@ -11,9 +11,8 @@ Off grid midi editor with following goals:
 
 ## Status
 
-Not even a prototype, still figuring things out.
-I am learning both Rust, MIDI and sound processing at once so the code should not be expected to be a good style example
-for now.
+Not even a prototype, still figuring things out.I am learning both Rust, MIDI and sound processing at once so the code
+should not be expected to be a good style example for now.
 
 ## Build
 
@@ -44,5 +43,16 @@ May explore following options for the next version
 * Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of spinning in a thread.
 * Or, be based on [Dropseed](https://github.com/MeadowlarkDAW/dropseed) (which is used in MeadowlarkDAW)
 * Or, ideally, participate in [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark) - but I am not comfortable to
-  take on that yet. 
-        
+  take on that yet.
+
+# Notes
+
+SMD - Standard MIDI File.
+
+Rodio and other libraries use interleaved stream format 1 sample of each channel, then 2 sample of each channel and so
+  on (ch1s1, ch2s1, ...., ch1s2, ch2s2, ....).
+
+Diagnostic commands
+* `amidi --list-devices`
+* `aseqdump --list`
+* `aseqdump --port='24:0'`
