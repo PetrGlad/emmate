@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::thread;
 use std::time::Duration;
 // use std::collections::BinaryHeap;
@@ -7,82 +8,66 @@ use vst::host::{Host, HostBuffer, PluginInstance};
 use std::sync::{Arc, Mutex};
 use vst::plugin::Plugin;
 
-/////////////////////////////////////////////////////////////////////////////////////////////
-//>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-
-// use std::{error, primitive, result};
-// use std::borrow::BorrowMut;
-// use std::ffi::CString;
-// use std::io::{BufReader, BufWriter, stdin};
-// use std::ops::DerefMut;
-// use std::path::Path;
-// use std::process::exit;
-// use std::thread::{park_timeout, sleep};
-
-// use alsa::Direction;
-// use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
-// use cpal::SampleFormat::F32;
-// use cpal::SupportedBufferSize::Range;
-// use iced::{
-//     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
-// };
-// use midir::MidiInput;
-// use midly::{Format, MidiMessage, Timing, TrackEvent, TrackEventKind};
-// use midly::io::Cursor;
-// use midly::MidiMessage::NoteOn;
-// use midly::TrackEventKind::Midi;
-// use rodio::{cpal, OutputStream, Source};
-// use rodio::source::SineWave;
-// use rodio::source::TakeDuration;
-// use vst::api::Events;
-
-// use wav::BitDepth;
-// use crate::midi_vst::{OutputSource};
-// use vst::event::{MidiEvent};
-// use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-//<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-/////////////////////////////////////////////////////////////////////////////////////////////
-
-
 /// An event to be rendered by the engine at given time
-pub struct EngineEvent<'a> {
-    /// Scheduled moment in microseconds.
-    /// TODO Since beginning of the score? What for real-time ones then? Or have an option score-time/real-time
-    at: u64,
-    midi_event: Event<'a>,
+pub struct EngineEvent {
+    /// Scheduled moment in microseconds from now.
+    dt: u64,
+    midi_event: Event<'static>,
 }
 
-type MidiSource<'a> = dyn Iterator<Item=&'a EngineEvent<'a>>;
+pub trait MidiSource: Iterator<Item=EngineEvent> + Send
+{}
 
-pub struct Engine/*<'a>*/ {
+pub struct Engine {
     vst: Vst,
-    // sources: Vec<&'a Arc<Mutex<MidiSource<'a>>>>,
+    sources: Arc<Mutex<Vec<Box<dyn MidiSource>>>>,
 }
 
-impl<'a> EngineEvent<'a> {
+impl EngineEvent {
     // TODO Ord, PartialOrd by timestamp
     // TODO new() from sequencer midi event
 }
 
-impl/*<'a>*/ Engine/*<'a>*/ {
+impl Engine {
     // TODO some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
     // TODO send - add an event to the queue (should wake if the new event is earlier than all others)
 
-    pub fn new(vst: Vst) -> Engine/*<'a>*/ {
-        Engine { vst/*, sources: Vec::new()*/ }
+    pub fn new(vst: Vst) -> Engine {
+        Engine { vst, sources: Arc::new(Mutex::new(Vec::new())) }
     }
 
-    pub fn start(&mut self) {
-        // thread::spawn(|| {
-        //     // FIXME Implement
-        //     for s in self.sources.lock() {
-        //         // println!("hi number {} from the spawned thread", s.next());
-        //         println!("hi from the engine");
-        //         thread::sleep(Duration::from_millis(6789));
-        //     }
-        // });
+    pub fn start(self) -> Arc<Engine> {
+        let engine = Arc::new(self);
+        let engine2 = engine.clone();
+        thread::spawn(move || {
+            loop {
+                let mut sources = engine2.sources.lock().unwrap();
+                // TODO Multi-source would ask each source for a new event and play the earliest one.
+                // TODO Immediate schedule should interrupt sleep.
+                assert!(sources.len() <= 1, "Only single source is supported in the prototype.");
+                for s in sources.iter_mut() {
+                    let ev = s.next();
+                    match ev {
+                        Some(e) => {
+                            thread::sleep(Duration::from_micros(e.dt));
+                            engine2.process(e.midi_event);
+                        }
+                        None => {
+                            // TODO Remove the source, keep processing.
+                            println!("The MIDI source is completely processed, stopping engine.");
+                            return;
+                        }
+                    }
+                }
+                // TODO XXX Relieving contention, in a full implementation should not be needed.
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        engine
+    }
+
+    pub fn add(&mut self, source: Box<dyn MidiSource>) {
+        self.sources.lock().unwrap().push(source);
     }
 
     /// Process the event at specified moment
@@ -91,7 +76,7 @@ impl/*<'a>*/ Engine/*<'a>*/ {
     // }
 
     /// Process the event immediately
-    pub fn process(&mut self, event: Event) {
+    pub fn process(&self, event: Event) {
         let events_list = [event];
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
         events_buffer.store_events(events_list);

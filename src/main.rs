@@ -6,7 +6,7 @@ use std::{error, primitive, result, thread};
 use std::borrow::BorrowMut;
 use std::ffi::CString;
 use std::io::{BufReader, BufWriter, stdin};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
@@ -21,7 +21,7 @@ use iced::{
     Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
 };
 use midir::MidiInput;
-use midly::{Format, MidiMessage, Timing, TrackEvent, TrackEventKind};
+use midly::{Format, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
 use midly::io::Cursor;
 use midly::MidiMessage::NoteOn;
 use midly::TrackEventKind::Midi;
@@ -37,7 +37,6 @@ use crate::midi_vst::{OutputSource, Vst};
 use vst::event::{MidiEvent};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::engine::Engine;
-
 
 pub fn main() {
     {
@@ -65,8 +64,8 @@ pub fn main() {
     {
         let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
         stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
-        let engine = Arc::new(Mutex::new(Engine::new(vst)));
-        engine.lock().unwrap().start();
+        let engine = Engine::new(vst);
+        let mut engine = engine.start();
 
         // {
         //     // Example: Sound from a file:
@@ -159,14 +158,7 @@ pub fn main() {
             println!("SMF header {:#?}", &smf.header);
             assert!(&smf.header.format == &Format::SingleTrack,
                     "MIDI SMF format is not supported {:#?}", &smf.header.format);
-            // TODO Also should support Tempo messages. Tempo messages set micros per beat.
-            // Default tempo is 120 beats per minute and default signature 4/4
-            let tick_per_beat = beat_duration(&smf.header.timing);
-            let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
-            let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
-            println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-                     &tick_per_beat, &beat_per_sec, &usec_per_tick);
-
+            let usec_per_tick = usec_per_miti_tick(&smf.header.timing);
             println!("First event of the 1st track is {:#?}", &track[..10]);
 
             // Try doing some modifications
@@ -179,7 +171,7 @@ pub fn main() {
 
                 match event.kind {
                     TrackEventKind::Midi { channel: _, message } => {
-                        engine.lock().unwrap().process(make_a_note(&message));
+                        engine.process(make_a_note(&message));
                         println!("  PLAYED");
                     }
                     _ => ()
@@ -222,7 +214,18 @@ pub fn main() {
     // }
 }
 
+fn usec_per_miti_tick(smf_timing: &Timing) -> u32 {
+    let tick_per_beat = beat_duration(smf_timing);
+    let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
+    let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
+    println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
+             &tick_per_beat, &beat_per_sec, &usec_per_tick);
+    usec_per_tick
+}
+
 fn beat_duration(timing: &Timing) -> u32 {
+    // TODO Also should support Tempo messages. Tempo messages set micros per beat.
+    // Default tempo is 120 beats per minute and default signature 4/4
     match timing {
         Timing::Metrical(d) => d.as_int() as u32,
         _ => panic!("Timing format {:#?} is not supported.", timing)
