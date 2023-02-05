@@ -1,24 +1,44 @@
+use std::ops::Deref;
+use std::sync::Arc;
 use midly::{Format, Smf, Timing, TrackEventKind};
 use crate::engine::{EngineEvent, MidiSource};
 use vst::api::Events;
 use vst::event::{Event, MidiEvent};
 
 pub struct SmfSource {
-    smf: Smf<'static>,
-    usec_per_tick: u32,
+    events: Vec<EngineEvent>,
     i: usize,
 }
 
 impl SmfSource {
-    pub fn new(smf: Smf<'static>) -> SmfSource {
+    pub fn new(smf_data: Vec<u8>) -> SmfSource {
+        let smf_data = smf_data.to_owned();
+        let smf = midly::Smf::parse(&smf_data).unwrap();
         println!("SMF header {:#?}", &smf.header);
         println!("SMF file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
         assert!(&smf.header.format == &Format::SingleTrack,
                 "MIDI SMF format is not supported {:#?}", &smf.header.format);
-        assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required");
+        assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required.");
         // println!("First event of the 1st track is {:#?}", &track[..10]);
-        let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
-        SmfSource { smf, usec_per_tick, i: 0 }
+        let usec_per_tick = &usec_per_midi_tick(&smf.header.timing);
+
+        // TODO Convert these MIDI events to EngineEvets with notes to avoid reference problems
+        let mut events = vec![];
+        for me in &smf.tracks[0] {
+            // TODO match MidiMessage (Moving from SoundEvent to MidiMessage since
+            // MidiMessage does not depend on backing data.)
+
+            // match me.kind {
+            //     TrackEventKind::Midi { channel: _, message } => {
+            //         events.push(EngineEvent {
+            //             dt: me.delta.as_int() as u32 * usec_per_tick,
+            //             event: Note { pitch: message., velocity: 0 } // TODO Implement // make_a_note(&message),
+            //         });
+            //     }
+            //     _ => ()
+            // };
+        }
+        SmfSource { events, i: 0 }
     }
 }
 
@@ -46,19 +66,20 @@ impl Iterator for SmfSource {
     type Item = EngineEvent;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let track = &self.smf.tracks[0];
+        let track = &self.events;
         while self.i < track.len() {
-            let event = track[self.i.to_owned()];
+            let event = track[self.i.clone()];
             //  println!("Event: {:#?}", &event);
-            match event.kind {
-                TrackEventKind::Midi { channel: _, message } => {
-                    return Some(EngineEvent {
-                        dt: event.delta.as_int() as u32 * self.usec_per_tick,
-                        midi_event: make_a_note(&message),
-                    });
-                }
-                _ => ()
-            };
+            // TODO Adapt to new engine event
+            // match event.kind {
+            //     TrackEventKind::Midi { channel: _, message } => {
+            //         return Some(EngineEvent {
+            //             dt: event.delta.as_int() as u32 * self.usec_per_tick,
+            //             event: make_a_note(&message),
+            //         });
+            //     }
+            //     _ => ()
+            // };
             self.i += 1;
         }
         None
@@ -66,7 +87,7 @@ impl Iterator for SmfSource {
 }
 
 
-fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
+fn make_a_note(message: &midly::MidiMessage) -> EngineEvent {
     let note_event = midly::live::LiveEvent::Midi {
         channel: 1.into(),
         message: message.to_owned(),
@@ -75,15 +96,18 @@ fn make_a_note<'a>(message: &midly::MidiMessage) -> Event<'a> {
     let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
     note_event.write(&mut cursor).unwrap();
     println!("Event bytes {:?}\n", track_event_buf);
-    Event::Midi(MidiEvent {
-        data: track_event_buf,
-        delta_frames: 0,
-        live: true,
-        note_length: None,
-        note_offset: None,
-        detune: 0,
-        note_off_velocity: 0,
-    })
+    EngineEvent {
+        dt: 0, // TODO 
+        event: midly::MidiMessage::NoteOn {
+            data: track_event_buf,
+            delta_frames: 0,
+            live: true,
+            note_length: None,
+            note_offset: None,
+            detune: 0,
+            note_off_velocity: 0,
+        },
+    }
 }
 
 

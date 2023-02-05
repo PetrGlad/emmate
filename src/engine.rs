@@ -12,7 +12,7 @@ use vst::plugin::Plugin;
 pub struct EngineEvent {
     /// Scheduled moment in microseconds from now.
     pub dt: u32,
-    pub midi_event: Event<'static>,
+    pub event: midly::MidiMessage,
 }
 
 pub trait MidiSource: Iterator<Item=EngineEvent> + Send

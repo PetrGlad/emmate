@@ -1,6 +1,7 @@
 mod midi_vst;
 mod midi;
 mod engine;
+mod events;
 
 use std::{error, primitive, result, thread};
 use std::borrow::BorrowMut;
@@ -150,9 +151,8 @@ pub fn main() {
         // }
 
         { // Play MIDI from an SMD file.
-            let data = std::fs::read("yellow.mid").unwrap();
-            let smf = midly::Smf::parse(&data).unwrap();
-            let smf_midi_source = SmfSource::new(smf);
+            let smf_data = std::fs::read("yellow.mid").unwrap();
+            let smf_midi_source = SmfSource::new(smf_data);
             engine.add(Box::new(smf_midi_source));
         }
 
