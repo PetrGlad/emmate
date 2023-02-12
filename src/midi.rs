@@ -27,16 +27,15 @@ impl SmfSource {
         for me in &smf.tracks[0] {
             // TODO match MidiMessage (Moving from SoundEvent to MidiMessage since
             // MidiMessage does not depend on backing data.)
-
-            // match me.kind {
-            //     TrackEventKind::Midi { channel: _, message } => {
-            //         events.push(EngineEvent {
-            //             dt: me.delta.as_int() as u32 * usec_per_tick,
-            //             event: Note { pitch: message., velocity: 0 } // TODO Implement // make_a_note(&message),
-            //         });
-            //     }
-            //     _ => ()
-            // };
+            match me.kind {
+                TrackEventKind::Midi { channel: _, message } => {
+                    events.push(EngineEvent {
+                        dt: me.delta.as_int() as u32 * usec_per_tick,
+                        event: message // TODO Implement // make_a_note(&message),
+                    });
+                }
+                _ => ()
+            };
         }
         SmfSource { events, i: 0 }
     }
@@ -85,31 +84,6 @@ impl Iterator for SmfSource {
         None
     }
 }
-
-
-fn make_a_note(message: &midly::MidiMessage) -> EngineEvent {
-    let note_event = midly::live::LiveEvent::Midi {
-        channel: 1.into(),
-        message: message.to_owned(),
-    };
-    let mut track_event_buf = [0u8; 3];
-    let mut cursor = midly::io::Cursor::new(&mut track_event_buf);
-    note_event.write(&mut cursor).unwrap();
-    println!("Event bytes {:?}\n", track_event_buf);
-    EngineEvent {
-        dt: 0, // TODO 
-        event: midly::MidiMessage::NoteOn {
-            data: track_event_buf,
-            delta_frames: 0,
-            live: true,
-            note_length: None,
-            note_offset: None,
-            detune: 0,
-            note_off_velocity: 0,
-        },
-    }
-}
-
 
 // { // Use ALSA to read midi events
 //     let seq = alsa::seq::Seq::open(None, Some(Direction::Capture), false)

@@ -6,6 +6,7 @@ use vst::event::Event;
 use crate::midi_vst::Vst;
 use vst::host::{Host, HostBuffer, PluginInstance};
 use std::sync::{Arc, Mutex};
+use midly::MidiMessage;
 use vst::plugin::Plugin;
 
 /// An event to be rendered by the engine at given time
@@ -50,7 +51,7 @@ impl Engine {
                     match ev {
                         Some(e) => {
                             thread::sleep(Duration::from_micros(e.dt as u64));
-                            engine2.process(e.midi_event);
+                            engine2.process(smf_to_vst(e.event));
                         }
                         None => {
                             // TODO Remove the source, keep processing.
@@ -83,4 +84,8 @@ impl Engine {
         let mut plugin = self.vst.plugin.lock().unwrap();
         plugin.process_events(events_buffer.events());
     }
+}
+
+fn smf_to_vst<'a>(smfMidiEvent: MidiMessage) -> Event<'a> {
+    todo!()
 }
