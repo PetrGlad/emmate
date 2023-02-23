@@ -19,7 +19,10 @@ iced = { version = "0.4.2", features = ["canvas", "debug"] }
 vst = "0.3.0"
 
 # https://github.com/negamartin/midly
-midly = "0.5.2"
+midly = { version = "0.5.3", fetures = ["alloc"] }
+
+# https://github.com/RustAudio/wmidi
+wmidi = "4.0.6"
 
 # https://github.com/Fluhzar/WAV
 # TODO LGPL update licence desc

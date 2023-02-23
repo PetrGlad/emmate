@@ -7,7 +7,7 @@ use vst::event::{Event, MidiEvent};
 
 pub struct SmfSource {
     events: Vec<EngineEvent>,
-    i: usize,
+    current_idx: usize,
 }
 
 impl SmfSource {
@@ -22,22 +22,11 @@ impl SmfSource {
         // println!("First event of the 1st track is {:#?}", &track[..10]);
         let usec_per_tick = &usec_per_midi_tick(&smf.header.timing);
 
-        // TODO Convert these MIDI events to EngineEvets with notes to avoid reference problems
         let mut events = vec![];
         for me in &smf.tracks[0] {
-            // TODO match MidiMessage (Moving from SoundEvent to MidiMessage since
-            // MidiMessage does not depend on backing data.)
-            match me.kind {
-                TrackEventKind::Midi { channel: _, message } => {
-                    events.push(EngineEvent {
-                        dt: me.delta.as_int() as u32 * usec_per_tick,
-                        event: message // TODO Implement // make_a_note(&message),
-                    });
-                }
-                _ => ()
-            };
+            events.push(me.to_static());
         }
-        SmfSource { events, i: 0 }
+        SmfSource { events, current_idx: 0 }
     }
 }
 
@@ -59,27 +48,15 @@ fn beat_duration(timing: &Timing) -> u32 {
     }
 }
 
-impl MidiSource for SmfSource {}
-
 impl Iterator for SmfSource {
     type Item = EngineEvent;
 
     fn next(&mut self) -> Option<Self::Item> {
         let track = &self.events;
-        while self.i < track.len() {
-            let event = track[self.i.clone()];
-            //  println!("Event: {:#?}", &event);
-            // TODO Adapt to new engine event
-            // match event.kind {
-            //     TrackEventKind::Midi { channel: _, message } => {
-            //         return Some(EngineEvent {
-            //             dt: event.delta.as_int() as u32 * self.usec_per_tick,
-            //             event: make_a_note(&message),
-            //         });
-            //     }
-            //     _ => ()
-            // };
-            self.i += 1;
+        while self.current_idx < track.len() {
+            let event = track[self.current_idx.to_owned()].to_owned();
+            self.current_idx += 1;
+            return Some(event);
         }
         None
     }

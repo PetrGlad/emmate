@@ -6,28 +6,30 @@ use vst::event::Event;
 use crate::midi_vst::Vst;
 use vst::host::{Host, HostBuffer, PluginInstance};
 use std::sync::{Arc, Mutex};
-use midly::MidiMessage;
+use midly::{MidiMessage, TrackEvent};
 use vst::plugin::Plugin;
 
 /// An event to be rendered by the engine at given time
-pub struct EngineEvent {
-    /// Scheduled moment in microseconds from now.
-    pub dt: u32,
-    pub event: midly::MidiMessage,
-}
+// #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+// pub struct EngineEvent {
+//     /// Scheduled moment in microseconds from now.
+//     pub dt: u32,
+//     pub event: midly::MidiMessage,
+// }
+pub type EngineEvent = TrackEvent<'static>;
 
-pub trait MidiSource: Iterator<Item=EngineEvent> + Send
-{}
+
+pub type MidiSource = dyn Iterator<Item=EngineEvent> + Send;
 
 pub struct Engine {
     vst: Vst,
-    sources: Arc<Mutex<Vec<Box<dyn MidiSource>>>>,
+    sources: Arc<Mutex<Vec<Box<MidiSource>>>>,
 }
 
-impl EngineEvent {
-    // TODO Ord, PartialOrd by timestamp
-    // TODO new() from sequencer midi event
-}
+// impl EngineEvent {
+//     // TODO Ord, PartialOrd by timestamp
+//     // TODO new() from sequencer midi event
+// }
 
 impl Engine {
     // TODO some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
@@ -67,7 +69,7 @@ impl Engine {
         engine
     }
 
-    pub fn add(&self, source: Box<dyn MidiSource>) {
+    pub fn add(&self, source: Box<MidiSource>) {
         self.sources.lock().unwrap().push(source);
     }
 
@@ -86,6 +88,18 @@ impl Engine {
     }
 }
 
-fn smf_to_vst<'a>(smfMidiEvent: MidiMessage) -> Event<'a> {
-    todo!()
+fn smf_to_vst<'a>(smf_midi_event: MidiMessage) -> Event<'a> {
+    todo!();
+    // TODO encode the event
+    let mut ev_buf= [0u8;0];
+    // smf_midi_event.write();
+    Event::Midi(vst::event::MidiEvent {
+        data: ev_buf,
+        delta_frames: 0,
+        live: true,
+        note_length: None,
+        note_offset: None,
+        detune: 0,
+        note_off_velocity: 0,
+    })
 }
