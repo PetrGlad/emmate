@@ -7,17 +7,16 @@ use crate::midi_vst::Vst;
 use vst::host::{Host, HostBuffer, PluginInstance};
 use std::sync::{Arc, Mutex};
 use midly::{MidiMessage, TrackEvent};
+use midly::live::LiveEvent;
 use vst::plugin::Plugin;
 
 /// An event to be rendered by the engine at given time
-// #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-// pub struct EngineEvent {
-//     /// Scheduled moment in microseconds from now.
-//     pub dt: u32,
-//     pub event: midly::MidiMessage,
-// }
-pub type EngineEvent = TrackEvent<'static>;
-
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+pub struct EngineEvent {
+    /// Scheduled moment in microseconds from now.
+    pub delta: u64,
+    pub event: LiveEvent<'static>,
+}
 
 pub type MidiSource = dyn Iterator<Item=EngineEvent> + Send;
 
@@ -27,13 +26,13 @@ pub struct Engine {
 }
 
 // impl EngineEvent {
-//     // TODO Ord, PartialOrd by timestamp
-//     // TODO new() from sequencer midi event
+//     // TODO (scheduling) Ord, PartialOrd by timestamp
+//     // TODO (scheduling) new() from sequencer midi event
 // }
 
 impl Engine {
-    // TODO some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
-    // TODO send - add an event to the queue (should wake if the new event is earlier than all others)
+    // TODO (scheduling) some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
+    // TODO (scheduling) send - add an event to the queue (should wake if the new event is earlier than all others)
 
     pub fn new(vst: Vst) -> Engine {
         Engine { vst, sources: Arc::new(Mutex::new(Vec::new())) }
@@ -52,7 +51,8 @@ impl Engine {
                     let ev = s.next();
                     match ev {
                         Some(e) => {
-                            thread::sleep(Duration::from_micros(e.dt as u64));
+                            println!("event, sleeping for {} uS", e.delta);
+                            thread::sleep(Duration::from_micros(e.delta));
                             engine2.process(smf_to_vst(e.event));
                         }
                         None => {
@@ -88,13 +88,12 @@ impl Engine {
     }
 }
 
-fn smf_to_vst<'a>(smf_midi_event: MidiMessage) -> Event<'a> {
-    todo!();
-    // TODO encode the event
-    let mut ev_buf= [0u8;0];
-    // smf_midi_event.write();
+fn smf_to_vst(event: midly::live::LiveEvent<'static>) -> Event<'static> {
+    let mut ev_buf = Vec::new();
+    event.write(&mut ev_buf)
+        .expect("The live event should be writable.");
     Event::Midi(vst::event::MidiEvent {
-        data: ev_buf,
+        data: ev_buf.try_into().unwrap(),
         delta_frames: 0,
         live: true,
         note_length: None,

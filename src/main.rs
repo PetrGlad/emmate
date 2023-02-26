@@ -179,12 +179,12 @@ pub fn main() {
         // drop(instance);
     }
 
-    // { // GUI example
-    //     Ed::run(Settings {
-    //         antialiasing: true,
-    //         ..Settings::default()
-    //     }).unwrap()
-    // }
+    { // GUI example
+        Ed::run(Settings {
+            antialiasing: true,
+            ..Settings::default()
+        }).unwrap()
+    }
 }
 
 /*
