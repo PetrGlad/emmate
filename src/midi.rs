@@ -1,13 +1,16 @@
-use std::ops::Deref;
+use std::ops::{Add, Deref};
 use std::sync::Arc;
-use midly::{Format, Smf, Timing, TrackEventKind};
-use crate::engine::{EngineEvent, MidiSource};
+use std::time::{Duration, Instant};
+use midly::{Format, Smf, Timing, TrackEvent, TrackEventKind};
+use crate::engine::{Engine, EngineEvent, EventSource};
 use vst::api::Events;
 use vst::event::{Event, MidiEvent};
 
 pub struct SmfSource {
-    events: Vec<EngineEvent>,
+    events: Vec<TrackEvent<'static>>,
+    tick : Duration,
     current_idx: usize,
+    running_at: Instant,
 }
 
 impl SmfSource {
@@ -20,13 +23,18 @@ impl SmfSource {
                 "MIDI SMF format is not supported {:#?}", &smf.header.format);
         assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required.");
         // println!("First event of the 1st track is {:#?}", &track[..10]);
-        let usec_per_tick = &usec_per_midi_tick(&smf.header.timing);
-
+        let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
         let mut events = vec![];
         for me in &smf.tracks[0] {
-            events.push(me.to_static());
+            let event = me.to_static();
+            events.push(event);
         }
-        SmfSource { events, current_idx: 0 }
+        SmfSource {
+            events,
+            tick : Duration::from_micros(usec_per_tick as u64),
+            current_idx: 0,
+            running_at: Instant::now(),
+        }
     }
 }
 
@@ -48,15 +56,24 @@ fn beat_duration(timing: &Timing) -> u32 {
     }
 }
 
-impl Iterator for SmfSource {
-    type Item = EngineEvent;
+impl EventSource for SmfSource {
+    fn is_running(&self) -> bool {
+        self.current_idx < self.events.len()
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next(&mut self, at: &Instant) -> Option<EngineEvent> {
         let track = &self.events;
-        while self.current_idx < track.len() {
-            let event = track[self.current_idx.to_owned()].to_owned();
+        while self.is_running() {
+            let event = track[self.current_idx];
+            let running_at = self.running_at + self.tick * event.delta.as_int();
+            if running_at > *at {
+                return None;
+            }
+            self.running_at = running_at;
             self.current_idx += 1;
-            return Some(event);
+            if let Some(lev) = event.kind.as_live_event() {
+                return Some(EngineEvent { event: lev });
+            }
         }
         None
     }

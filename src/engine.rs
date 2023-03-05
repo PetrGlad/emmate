@@ -1,7 +1,6 @@
 use std::ops::Deref;
 use std::thread;
-use std::time::Duration;
-// use std::collections::BinaryHeap;
+use std::time::{Duration, Instant};
 use vst::event::Event;
 use crate::midi_vst::Vst;
 use vst::host::{Host, HostBuffer, PluginInstance};
@@ -13,22 +12,22 @@ use vst::plugin::Plugin;
 /// An event to be rendered by the engine at given time
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct EngineEvent {
-    /// Scheduled moment in microseconds from now.
-    pub delta: u64,
     pub event: LiveEvent<'static>,
 }
 
-pub type MidiSource = dyn Iterator<Item=EngineEvent> + Send;
+pub trait EventSource {
+    /** Return false when no new events will be produced from the source. */
+    fn is_running(&self) -> bool;
+    /** The next event to be played at the instant. */
+    fn next(&mut self, at: &Instant) -> Option<EngineEvent>;
+}
+
+type EventSourceHandle = dyn EventSource + Send;
 
 pub struct Engine {
     vst: Vst,
-    sources: Arc<Mutex<Vec<Box<MidiSource>>>>,
+    sources: Arc<Mutex<Vec<Box<EventSourceHandle>>>>,
 }
-
-// impl EngineEvent {
-//     // TODO (scheduling) Ord, PartialOrd by timestamp
-//     // TODO (scheduling) new() from sequencer midi event
-// }
 
 impl Engine {
     // TODO (scheduling) some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
@@ -44,32 +43,22 @@ impl Engine {
         thread::spawn(move || {
             loop {
                 let mut sources = engine2.sources.lock().unwrap();
-                // TODO Multi-source would ask each source for a new event and play the earliest one.
-                // TODO Immediate schedule should interrupt sleep.
-                assert!(sources.len() <= 1, "Only single source is supported in the prototype.");
+                thread::sleep(Duration::from_micros(300));
+                sources.retain(|s| s.is_running());
+                let now = Instant::now();
                 for s in sources.iter_mut() {
-                    let ev = s.next();
-                    match ev {
-                        Some(e) => {
-                            println!("event, sleeping for {} uS", e.delta);
-                            thread::sleep(Duration::from_micros(e.delta));
-                            engine2.process(smf_to_vst(e.event));
-                        }
-                        None => {
-                            // TODO Remove the source, keep processing.
-                            println!("The MIDI source is completely processed, stopping engine.");
-                            return;
-                        }
+                    /* TODO (implementation) A source may have more than one event for a given instant.
+                        Render all events that are currently available. */
+                    if let Some(e) = s.next(&now) {
+                        engine2.process(smf_to_vst(e.event));
                     }
                 }
-                // TODO XXX Relieving contention, in a full implementation should not be needed.
-                thread::sleep(Duration::from_millis(5));
             }
         });
         engine
     }
 
-    pub fn add(&self, source: Box<MidiSource>) {
+    pub fn add(&self, source: Box<EventSourceHandle>) {
         self.sources.lock().unwrap().push(source);
     }
 

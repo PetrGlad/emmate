@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-iced = { version = "0.4.2", features = ["canvas", "debug"] }
+iced = { version = "0.8.0", features = ["canvas", "debug"] }
 
 # Deps from iced "game_of_life" example
 # https://github.com/iced-rs/iced/blob/master/examples/game_of_life/Cargo.toml
@@ -21,7 +21,7 @@ iced = { version = "0.4.2", features = ["canvas", "debug"] }
 vst = "0.3.0"
 
 # https://github.com/negamartin/midly
-midly = { version = "0.5.3", fetures = ["alloc"] }
+midly = { version = "0.5.3", features = ["alloc"] }
 
 # https://github.com/RustAudio/wmidi
 wmidi = "4.0.6"

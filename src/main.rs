@@ -18,9 +18,7 @@ use alsa::Direction;
 use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
 use cpal::SampleFormat::F32;
 use cpal::SupportedBufferSize::Range;
-use iced::{
-    Alignment, button, Button, Column, Element, Sandbox, Settings, Text,
-};
+use iced::{Alignment, widget::button, widget::Button, widget::Column, Element, Sandbox, Settings, widget::Text, widget};
 use midir::MidiInput;
 use midly::{Format, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
 use midly::io::Cursor;
@@ -153,6 +151,7 @@ pub fn main() {
         { // Play MIDI from an SMD file.
             let smf_data = std::fs::read("yellow.mid").unwrap();
             let smf_midi_source = SmfSource::new(smf_data);
+            // TODO Start source explicitly: delay of processing start crams events together.
             engine.add(Box::new(smf_midi_source));
         }
 
@@ -180,10 +179,7 @@ pub fn main() {
     }
 
     { // GUI example
-        Ed::run(Settings {
-            antialiasing: true,
-            ..Settings::default()
-        }).unwrap()
+        Ed::run(Settings::default()).unwrap()
     }
 }
 
@@ -195,8 +191,6 @@ pub fn main() {
 #[derive(Default)]
 struct Ed {
     value: i32,
-    increment_button: button::State,
-    decrement_button: button::State,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -227,17 +221,17 @@ impl Sandbox for Ed {
         }
     }
 
-    fn view(&mut self) -> Element<Message> {
+    fn view(&self) -> Element<Message> {
         Column::new()
             .padding(20)
             .align_items(Alignment::Start)
             .push(
-                Button::new(&mut self.increment_button, Text::new("Increment"))
+                Button::new(Text::new("Increment"))
                     .on_press(Message::IncrementPressed),
             )
             .push(Text::new(self.value.to_string()).size(50))
             .push(
-                Button::new(&mut self.decrement_button, Text::new("Decrement"))
+                Button::new(Text::new("Decrement"))
                     .on_press(Message::DecrementPressed),
             )
             .into()
