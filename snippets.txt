@@ -1,0 +1,46 @@
+{
+   let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+   // Example: Sound from a file:
+    let file = std::fs::File::open("output.wav").unwrap();
+    let beep_sink = stream_handle.play_once(BufReader::new(file)).unwrap();
+    beep_sink.set_volume(0.3);
+
+    // Example: Sound from a generative source:
+    stream_handle.play_raw(
+        SineWave::new(1000.0)
+            .take_duration(Duration::from_secs(30))
+            .amplify(0.1))
+        .unwrap();
+
+    // Sound from the VST host:
+    stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
+}
+
+
+{
+    stream_handle.play_raw(
+         SineWave::new(1000.0)
+             .take_duration(Duration::from_millis(100)))
+         .unwrap()
+}
+{
+    // Example: output to a file:
+    use std::fs::File;
+
+    // let mut inp_file = File::open(Path::new("data/sine.wav"))?;
+    // let (header, data) = wav::read(&mut inp_file)?;
+    let wav_header = wav::Header::new(wav::WAV_FORMAT_IEEE_FLOAT, 2, 48000, 32);
+
+    let mut out_file = File::create(Path::new("output.wav")).unwrap();
+    // wav::write(wav_header, BitDepth::ThirtyTwoFloat &mut out_file).unwrap();
+    let mut pcm_data = vec![];
+    for _i in 1..20 {
+        plugin.process(&mut audio_buffer);
+        pcm_data.append(&mut outputs[0].to_vec());
+    }
+    let wav_data = wav::BitDepth::ThirtyTwoFloat(pcm_data.to_owned());
+    wav::write(wav_header, &wav_data, &mut out_file).unwrap();
+    drop(out_file);
+}
+println!("Closing host instance.");
+drop(instance);
