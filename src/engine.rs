@@ -15,57 +15,78 @@ pub struct EngineEvent {
     pub event: LiveEvent<'static>,
 }
 
+/// Micros from the start.
+pub type TransportTime = u64;
+
 pub trait EventSource {
     /** Return false when no new events will be produced from the source. */
     fn is_running(&self) -> bool;
-    /** The next event to be played at the instant. */
-    fn next(&mut self, at: &Instant) -> Option<EngineEvent>;
+    /** Reset current source's time to this moment. */
+    fn reset(&mut self, at: &TransportTime);
+    /** The next event to be played at the instant.
+                             On subsequent calls instants must not decrease unless a reset call sets another time.
+     */
+    fn next(&mut self, at: &TransportTime) -> Option<EngineEvent>;
 }
 
 type EventSourceHandle = dyn EventSource + Send;
 
 pub struct Engine {
     vst: Vst,
-    sources: Arc<Mutex<Vec<Box<EventSourceHandle>>>>,
+    sources: Vec<Box<EventSourceHandle>>,
+    running_at: TransportTime,
+    reset_at: Instant,
 }
 
 impl Engine {
     // TODO (scheduling) some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
-    // TODO (scheduling) send - add an event to the queue (should wake if the new event is earlier than all others)
 
     pub fn new(vst: Vst) -> Engine {
-        Engine { vst, sources: Arc::new(Mutex::new(Vec::new())) }
+        Engine {
+            vst,
+            sources: Vec::new(),
+            running_at: 0,
+            reset_at: Instant::now(),
+        }
     }
 
-    pub fn start(self) -> Arc<Engine> {
-        let engine = Arc::new(self);
+    pub fn start(self) -> Arc<Mutex<Engine>> {
+        let engine = Arc::new(Mutex::new(self));
         let engine2 = engine.clone();
         thread::spawn(move || {
+            engine2.lock().unwrap().reset(0);
             loop {
-                let mut sources = engine2.sources.lock().unwrap();
-                thread::sleep(Duration::from_micros(300));
-                sources.retain(|s| s.is_running());
-                let now = Instant::now();
-                for s in sources.iter_mut() {
-                    /* TODO (implementation) A source may have more than one event for a given instant.
-                        Render all events that are currently available. */
-                    if let Some(e) = s.next(&now) {
-                        engine2.process(smf_to_vst(e.event));
+                thread::sleep(Duration::from_micros(1_000));
+                let mut locked = engine2.lock().unwrap();
+                locked.sources.retain(|s| s.is_running());
+                let transport_time = locked.running_at.to_owned() + Instant::now()
+                    .duration_since(locked.reset_at.to_owned())
+                    .as_micros() as u64;
+                let mut batch = vec![];
+                for s in locked.sources.iter_mut() {
+                    while let Some(ev) = s.next(&transport_time) {
+                        batch.push(smf_to_vst(ev.event));
                     }
+                }
+                for ev in batch.iter() {
+                    locked.process(*ev);
                 }
             }
         });
         engine
     }
 
-    pub fn add(&self, source: Box<EventSourceHandle>) {
-        self.sources.lock().unwrap().push(source);
+    pub fn reset(&mut self, at: TransportTime) {
+        self.running_at = at;
+        self.reset_at = Instant::now();
+        for s in self.sources.iter_mut() {
+            s.reset(&at);
+        }
     }
 
-    /// Process the event at specified moment
-    // pub fn schedule(&self, event: &EngineEvent) {
-    //     todo!("");
-    // }
+    pub fn add(&mut self, source: Box<EventSourceHandle>) {
+        self.sources.push(source);
+    }
 
     /// Process the event immediately
     pub fn process(&self, event: Event) {

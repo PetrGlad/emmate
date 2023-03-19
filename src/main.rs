@@ -152,7 +152,7 @@ pub fn main() {
             let smf_data = std::fs::read("yellow.mid").unwrap();
             let smf_midi_source = SmfSource::new(smf_data);
             // TODO Start source explicitly: delay of processing start crams events together.
-            engine.add(Box::new(smf_midi_source));
+            engine.lock().unwrap().add(Box::new(smf_midi_source));
         }
 
         // {

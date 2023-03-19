@@ -2,15 +2,15 @@ use std::ops::{Add, Deref};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use midly::{Format, Smf, Timing, TrackEvent, TrackEventKind};
-use crate::engine::{Engine, EngineEvent, EventSource};
+use crate::engine::{Engine, EngineEvent, EventSource, TransportTime};
 use vst::api::Events;
 use vst::event::{Event, MidiEvent};
 
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
-    tick : Duration,
+    tick: Duration,
     current_idx: usize,
-    running_at: Instant,
+    running_at: TransportTime,
 }
 
 impl SmfSource {
@@ -31,9 +31,9 @@ impl SmfSource {
         }
         SmfSource {
             events,
-            tick : Duration::from_micros(usec_per_tick as u64),
+            tick: Duration::from_micros(usec_per_tick as u64),
             current_idx: 0,
-            running_at: Instant::now(),
+            running_at: 0,
         }
     }
 }
@@ -61,11 +61,15 @@ impl EventSource for SmfSource {
         self.current_idx < self.events.len()
     }
 
-    fn next(&mut self, at: &Instant) -> Option<EngineEvent> {
+    fn reset(&mut self, at: &TransportTime) {
+        self.running_at = at.to_owned();
+    }
+
+    fn next(&mut self, at: &TransportTime) -> Option<EngineEvent> {
         let track = &self.events;
         while self.is_running() {
             let event = track[self.current_idx];
-            let running_at = self.running_at + self.tick * event.delta.as_int();
+            let running_at = self.running_at.to_owned() + self.tick.as_micros() as u64 * event.delta.as_int() as u64;
             if running_at > *at {
                 return None;
             }
