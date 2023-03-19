@@ -90,69 +90,71 @@ pub fn main() {
         //     engine.process(&make_a_note());
         // }
 
-        // {
-        //     let input = MidiInput::new("midir").unwrap();
-        //     let mut port_idx = None;
-        //     println!("Midi input ports:");
-        //     let ports = input.ports();
-        //     for (i, port) in ports.iter().enumerate() {
-        //         let name = input.port_name(&port).unwrap();
-        //         println!("\t{}", name);
-        //
-        //         // if name.starts_with("Digital Piano") {
-        //         if name.starts_with("MPK mini 3") {
-        //             port_idx = Some(i);
-        //             println!("Selected MIDI input: '{}'", name);
-        //             break;
-        //         }
-        //     }
-        //
-        //     let port = ports.get(port_idx
-        //         .expect("No midi input selected."))
-        //         .unwrap();
-        //     let seq_engine = engine.clone();
-        //     let conn = input.connect(
-        //         &port,
-        //         "midi-input",
-        //         move|t, ev, _data| {
-        //             println!("MIDI event: {} {:?} {}", t, ev, ev.len());
-        //             if ev[0] == 254 { return; }
-        //             let mut ev_buf = [0u8; 3];
-        //             for (i, x) in ev.iter().enumerate() {
-        //                 ev_buf[i] = *x;
-        //             }
-        //             let note = Event::Midi(MidiEvent {
-        //                 data: ev_buf,
-        //                 delta_frames: 0,
-        //                 live: true,
-        //                 note_length: None,
-        //                 note_offset: None,
-        //                 detune: 0,
-        //                 note_off_velocity: 0,
-        //             });
-        //             seq_engine.lock().unwrap().process(note);
-        //
-        //             // Trying to estimate rodio delays in the playback.
-        //             // Playing a simple source directly to exclude potential delays in the VST.
-        //             // stream_handle.play_raw(
-        //             //     SineWave::new(1000.0)
-        //             //         .take_duration(Duration::from_millis(100)))
-        //             //     .unwrap()
-        //         },
-        //         (),
-        //     ).unwrap();
-        //
-        //     let mut input = String::new();
-        //     input.clear();
-        //     stdin().read_line(&mut input).unwrap(); // wait for next enter key press
-        //     conn.close();
-        // }
-
         { // Play MIDI from an SMD file.
             let smf_data = std::fs::read("yellow.mid").unwrap();
             let smf_midi_source = SmfSource::new(smf_data);
             // TODO Start source explicitly: delay of processing start crams events together.
             engine.lock().unwrap().add(Box::new(smf_midi_source));
+        }
+        {
+            let input = MidiInput::new("midir").unwrap();
+            let mut port_idx = None;
+            println!("Midi input ports:");
+            let ports = input.ports();
+            for (i, port) in ports.iter().enumerate() {
+                let name = input.port_name(&port).unwrap();
+                println!("\t{}", name);
+
+                // if name.starts_with("Digital Piano") {
+                if name.starts_with("MPK mini 3") {
+                    port_idx = Some(i);
+                    println!("Selected MIDI input: '{}'", name);
+                    break;
+                }
+            }
+
+            if port_idx == None {
+                println!("WARN No midi input selected.");
+            } else {
+                let port = ports.get(port_idx.unwrap())
+                    .unwrap();
+                let seq_engine = engine.clone();
+                let conn = input.connect(
+                    &port,
+                    "midi-input",
+                    move |t, ev, _data| {
+                        println!("MIDI event: {} {:?} {}", t, ev, ev.len());
+                        if ev[0] == 254 { return; }
+                        let mut ev_buf = [0u8; 3];
+                        for (i, x) in ev.iter().enumerate() {
+                            ev_buf[i] = *x;
+                        }
+                        let note = Event::Midi(MidiEvent {
+                            data: ev_buf,
+                            delta_frames: 0,
+                            live: true,
+                            note_length: None,
+                            note_offset: None,
+                            detune: 0,
+                            note_off_velocity: 0,
+                        });
+                        seq_engine.lock().unwrap().process(note);
+
+                        // Trying to estimate rodio delays in the playback.
+                        // Playing a simple source directly to exclude potential delays in the VST.
+                        // stream_handle.play_raw(
+                        //     SineWave::new(1000.0)
+                        //         .take_duration(Duration::from_millis(100)))
+                        //     .unwrap()
+                    },
+                    (),
+                ).unwrap();
+
+                let mut input = String::new();
+                input.clear();
+                stdin().read_line(&mut input).unwrap(); // wait for next enter key press
+                conn.close();
+            }
         }
 
         // {
