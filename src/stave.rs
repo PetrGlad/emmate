@@ -24,15 +24,22 @@ impl canvas::Program<()> for Stave {
 
     fn draw(&self, state: &Self::State, theme: &Theme, bounds: Rectangle, cursor: Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(bounds.size());
-        let tone_step = bounds.height / 100.0;
+        let key_count = 88;
+        let tone_step = bounds.height / key_count as f32;
         let time_step = bounds.width / 1000.0;
 
         // Grid
-        for row in 1..99 {
+        let black_key = |tone: &i32| vec![1, 4, 6, 9, 11].contains(&(*tone % 12));
+        for row in 0..key_count {
+            let color = if black_key(&row) {
+                Color::from_rgb(0.3, 0.3, 0.3)
+            } else {
+                Color::from_rgb(0.9, 0.9, 0.9)
+            };
             let y = tone_step * row.to_owned() as f32;
             frame.stroke(&Path::line(Point { x: 0.0, y },
                                      Point { x: frame.width(), y }),
-                         Stroke::default().with_color(Color::from_rgb(0.9, 0.9, 0.9)));
+                         Stroke::default().with_color(color));
         }
         // Notes
         let mock_track = [(34, 28, 12), (45, 100, 30), (147, 30, 17)];
@@ -42,7 +49,7 @@ impl canvas::Program<()> for Stave {
             frame.stroke(&Path::line(Point { x, y },
                                      Point { x: x + (duration as f32 * time_step), y }),
                          Stroke::default()
-                             .with_color(Color::from_rgb(0.5, 0.55, 0.7))
+                             .with_color(Color::from_rgb(0.4, 0.45, 0.55))
                              .with_width(tone_step * 0.9)
                              .with_line_cap(LineCap::Round));
         }
