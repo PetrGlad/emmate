@@ -1,42 +1,31 @@
+use std::{error, primitive, result, thread};
+use std::io::{BufReader, BufWriter, stdin};
+use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
+use std::thread::{sleep};
+
+use cpal::{BufferSize, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
+use cpal::SampleFormat::F32;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use iced::{Alignment, Element, Length, Rectangle, Sandbox, Settings, Theme, widget, widget::button, widget::Button, widget::Column, widget::Text};
+use iced::widget::{Canvas, canvas, container};
+use midir::{MidiInput, MidiInputConnection};
+use midly::{MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
+use rodio::{cpal, OutputStream, Source};
+use vst::event::Event;
+use vst::event::MidiEvent;
+use vst::host::{Host, HostBuffer, PluginInstance};
+
+use crate::engine::Engine;
+use crate::midi::SmfSource;
+use crate::midi_vst::{OutputSource, Vst};
+use crate::stave::Stave;
+
 mod midi_vst;
 mod midi;
 mod engine;
 mod events;
-
-use std::{error, primitive, result, thread};
-use std::borrow::BorrowMut;
-use std::ffi::CString;
-use std::io::{BufReader, BufWriter, stdin};
-use std::ops::{Deref, DerefMut};
-use std::path::Path;
-use std::process::exit;
-use std::sync::{Arc, Mutex};
-use std::thread::{park_timeout, sleep};
-use std::time::Duration;
-
-use alsa::Direction;
-use cpal::{BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
-use cpal::SampleFormat::F32;
-use cpal::SupportedBufferSize::Range;
-use iced::{Alignment, widget::button, widget::Button, widget::Column, Element, Sandbox, Settings, widget::Text, widget};
-use midir::{MidiInput, MidiInputConnection};
-use midly::{Format, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
-use midly::io::Cursor;
-use midly::MidiMessage::NoteOn;
-use midly::TrackEventKind::Midi;
-use rodio::{cpal, OutputStream, Source};
-use rodio::source::SineWave;
-use rodio::source::TakeDuration;
-use vst::api::Events;
-use vst::event::Event;
-use vst::host::{Host, HostBuffer, PluginInstance};
-use vst::plugin::Plugin;
-use wav::BitDepth;
-use crate::midi_vst::{OutputSource, Vst};
-use vst::event::{MidiEvent};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use crate::engine::Engine;
-use crate::midi::SmfSource;
+mod stave;
 
 pub fn main() {
     {
@@ -80,7 +69,7 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
         rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
     let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
     stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
-    let engine = Engine::new( vst);
+    let engine = Engine::new(vst);
     (stream, engine.start())
 }
 
@@ -138,11 +127,13 @@ fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Op
 
 #[derive(Default)]
 struct Ed {
+    stave: Stave,
     value: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Message {
+pub enum Message {
+    Stave,
     IncrementPressed,
     DecrementPressed,
 }
@@ -162,26 +153,35 @@ impl Sandbox for Ed {
         match message {
             Message::IncrementPressed => {
                 self.value += 1;
+                self.stave.radius = (i32::abs(self.value.into()) * 7) as f32;
             }
             Message::DecrementPressed => {
                 self.value -= 1;
+                self.stave.radius = (i32::abs(self.value.into()) * 7) as f32;
             }
+            _ => ()
         }
     }
 
     fn view(&self) -> Element<Message> {
         Column::new()
             .padding(20)
-            .align_items(Alignment::Start)
+            .spacing(20)
+            .push(container(Text::new("I cannot do this, Petr."))
+                .width(Length::Fill))
+            .push(self.stave.view().map(move |message| Message::Stave))
             .push(
-                Button::new(Text::new("Increment"))
-                    .on_press(Message::IncrementPressed),
-            )
-            .push(Text::new(self.value.to_string()).size(50))
-            .push(
-                Button::new(Text::new("Decrement"))
-                    .on_press(Message::DecrementPressed),
-            )
+                Column::new()
+                    .align_items(Alignment::Start)
+                    .push(
+                        Button::new(Text::new("Increment"))
+                            .on_press(Message::IncrementPressed),
+                    )
+                    .push(Text::new(self.value.to_string()).size(50))
+                    .push(
+                        Button::new(Text::new("Decrement"))
+                            .on_press(Message::DecrementPressed),
+                    ))
             .into()
     }
 }
