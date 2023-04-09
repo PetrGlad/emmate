@@ -2,7 +2,7 @@ use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use iced::event::Status;
 use iced::mouse::Interaction;
 use iced::widget::{canvas, Canvas};
-use iced::widget::canvas::{Cursor, Event, Frame, Geometry, Path, Stroke};
+use iced::widget::canvas::{Cursor, Event, Frame, Geometry, LineCap, Path, Stroke};
 use crate::Message;
 
 #[derive(Debug, /*Clone, Copy,*/ Default)]
@@ -27,10 +27,29 @@ impl canvas::Program<()> for Stave {
         let tone_step = bounds.height / 100.0;
         let time_step = bounds.width / 1000.0;
 
+        // Grid
+        for row in 1..99 {
+            let y = tone_step * row.to_owned() as f32;
+            frame.stroke(&Path::line(Point { x: 0.0, y },
+                                     Point { x: frame.width(), y }),
+                         Stroke::default().with_color(Color::from_rgb(0.9, 0.9, 0.9)));
+        }
+        // Notes
+        let mock_track = [(34, 28, 12), (45, 100, 30), (147, 30, 17)];
+        for (t, duration, tone) in mock_track {
+            let y = tone_step * tone as f32;
+            let x = t as f32 * time_step;
+            frame.stroke(&Path::line(Point { x, y },
+                                     Point { x: x + (duration as f32 * time_step), y }),
+                         Stroke::default()
+                             .with_color(Color::from_rgb(0.5, 0.55, 0.7))
+                             .with_width(tone_step * 0.9)
+                             .with_line_cap(LineCap::Round));
+        }
+
         // let background = Path::rectangle(Point::ORIGIN, frame.size());
         // frame.fill(&background, Color::WHITE);
 
-        frame.stroke(&Path::line(Point::ORIGIN, frame.center()), Stroke::default());
         let circle = Path::circle(frame.center(), self.radius.into());
         frame.fill(&circle, Color::BLACK);
         vec![frame.into_geometry()]

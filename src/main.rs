@@ -7,7 +7,8 @@ use std::thread::{sleep};
 use cpal::{BufferSize, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
 use cpal::SampleFormat::F32;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use iced::{Alignment, Element, Length, Rectangle, Sandbox, Settings, Theme, widget, widget::button, widget::Button, widget::Column, widget::Text};
+use iced::{Alignment, Element, Length, Rectangle, Sandbox, Settings, Theme, widget, widget::button, widget::Button, widget::Column, widget::Text, window};
+use iced::futures::SinkExt;
 use iced::widget::{Canvas, canvas, container};
 use midir::{MidiInput, MidiInputConnection};
 use midly::{MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
@@ -47,7 +48,10 @@ pub fn main() {
     midi_inputs.push(midi_keyboard_input("MPK mini 3", &mut engine));
 
     // GUI example
-    Ed::run(Settings::default()).unwrap()
+    Ed::run(Settings {
+        antialiasing: true,
+        ..Settings::default()
+    }).unwrap()
 }
 
 fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {

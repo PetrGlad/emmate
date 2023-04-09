@@ -32,7 +32,7 @@ impl Vst {
 
         // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
         let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
-        // let path = Path::new("/usr/lib/VST/amsynth_vst.so");
+        // let path = Path::new("/usr/lib/vst/amsynth_vst.so");
         println!("Loading {}", path.to_str().unwrap());
 
         let host = Arc::new(Mutex::new(VstHost));
@@ -59,7 +59,8 @@ impl Vst {
                 info.version, info.initial_delay, info.inputs, info.outputs
             );
             let params = plugin.get_parameter_object();
-            params.change_preset(4);
+            params.change_preset(4); // For pianoteq
+            // params.change_preset(1096); // For amsynth
             println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
 
             plugin.init();
