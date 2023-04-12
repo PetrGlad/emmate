@@ -1,9 +1,6 @@
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
-use iced::event::Status;
-use iced::mouse::Interaction;
 use iced::widget::{canvas, Canvas};
-use iced::widget::canvas::{Cursor, Event, Frame, Geometry, LineCap, Path, Stroke};
-use crate::Message;
+use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 
 #[derive(Debug, /*Clone, Copy,*/ Default)]
 pub struct Stave {
@@ -22,7 +19,7 @@ impl Stave {
 impl canvas::Program<()> for Stave {
     type State = ();
 
-    fn draw(&self, state: &Self::State, theme: &Theme, bounds: Rectangle, cursor: Cursor) -> Vec<Geometry> {
+    fn draw(&self, _state: &Self::State, _theme: &Theme, bounds: Rectangle, _cursor: Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(bounds.size());
         let key_count = 88;
         let tone_step = bounds.height / key_count as f32;

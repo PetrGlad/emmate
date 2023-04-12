@@ -1,21 +1,13 @@
-use std::{error, primitive, result, thread};
-use std::io::{BufReader, BufWriter, stdin};
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
-use std::thread::{sleep};
-
-use cpal::{BufferSize, SampleFormat, SampleRate, StreamConfig, SupportedBufferSize, SupportedStreamConfig};
+use cpal::{BufferSize, StreamConfig};
 use cpal::SampleFormat::F32;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use iced::{Alignment, Element, Length, Rectangle, Sandbox, Settings, Theme, widget, widget::button, widget::Button, widget::Column, widget::Text, window};
-use iced::futures::SinkExt;
-use iced::widget::{Canvas, canvas, container};
+use cpal::traits::{DeviceTrait, HostTrait};
+use iced::{Alignment, Element, Length, Sandbox, Settings, widget::Button, widget::Column, widget::Text};
+use iced::widget::{container};
 use midir::{MidiInput, MidiInputConnection};
-use midly::{MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
-use rodio::{cpal, OutputStream, Source};
+use rodio::{cpal, OutputStream};
 use vst::event::Event;
 use vst::event::MidiEvent;
-use vst::host::{Host, HostBuffer, PluginInstance};
 
 use crate::engine::Engine;
 use crate::midi::SmfSource;
@@ -173,7 +165,7 @@ impl Sandbox for Ed {
             .spacing(20)
             .push(container(Text::new("I cannot do this, Petr."))
                 .width(Length::Fill))
-            .push(self.stave.view().map(move |message| Message::Stave))
+            .push(self.stave.view().map(move |_message| Message::Stave))
             .push(
                 Column::new()
                     .align_items(Alignment::Start)

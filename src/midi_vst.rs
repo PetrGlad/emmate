@@ -1,14 +1,11 @@
-use std::borrow::{Borrow, BorrowMut};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration};
 use cpal::{FrameCount, SampleRate};
 use rodio::Source;
 
-use vst::api::{Event, Events, Supported};
-use vst::buffer::AudioBuffer;
+use vst::api::{Supported};
 use vst::host::{Host, HostBuffer, PluginInstance, PluginLoader};
-use vst::host::OpCode::GetSampleRate;
 use vst::plugin::{CanDo, Plugin};
 
 // #[allow(dead_code)]
@@ -38,7 +35,7 @@ impl Vst {
         let host = Arc::new(Mutex::new(VstHost));
         let mut loader = PluginLoader::load(path, Arc::clone(&host))
             .unwrap_or_else(|e| panic!("Failed to load plugin: {}", e));
-        let mut plugin_holder = Arc::new(Mutex::new(loader.instance().unwrap()));
+        let plugin_holder = Arc::new(Mutex::new(loader.instance().unwrap()));
         {
             let mut plugin = plugin_holder.lock().unwrap();
             plugin.suspend();
@@ -139,7 +136,7 @@ impl Iterator for OutputSource {
             self.sample_idx += 1;
             output = mut_outputs.get_mut(self.channel_idx.to_owned());
         }
-        let mut sample = output.unwrap().get(self.sample_idx.to_owned());
+        let sample = output.unwrap().get(self.sample_idx.to_owned());
         match sample {
             Some(&x) => {
                 self.channel_idx += 1;

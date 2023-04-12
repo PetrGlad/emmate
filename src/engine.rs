@@ -1,11 +1,8 @@
-use std::ops::Deref;
 use std::thread;
 use std::time::{Duration, Instant};
 use vst::event::Event;
 use crate::midi_vst::Vst;
-use vst::host::{Host, HostBuffer, PluginInstance};
 use std::sync::{Arc, Mutex};
-use midly::{MidiMessage, TrackEvent};
 use midly::live::LiveEvent;
 use vst::plugin::Plugin;
 

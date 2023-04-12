@@ -1,11 +1,6 @@
-use std::ops::{Add, Deref};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use midly::{Format, Smf, Timing, TrackEvent, TrackEventKind};
-use crate::engine::{Engine, EngineEvent, EventSource, TransportTime};
-use vst::api::Events;
-use vst::event::{Event, MidiEvent};
-
+use std::time::{Duration};
+use midly::{Format, Smf, Timing, TrackEvent};
+use crate::engine::{EngineEvent, EventSource, TransportTime};
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
     tick: Duration,
@@ -13,22 +8,26 @@ pub struct SmfSource {
     running_at: TransportTime,
 }
 
+pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
+    let smf = Smf::parse(smf_data).unwrap();
+    println!("SMF header {:#?}", &smf.header);
+    println!("SMF file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
+    assert!(&smf.header.format == &Format::SingleTrack,
+            "MIDI SMF format is not supported {:#?}", &smf.header.format);
+    assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required.");
+    // println!("Starting events of the 1st track are {:#?}", &track[..10]);
+    let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
+    let mut events = vec![];
+    for me in &smf.tracks[0] {
+        let event = me.to_static();
+        events.push(event);
+    }
+    (events, usec_per_tick)
+}
+
 impl SmfSource {
     pub fn new(smf_data: Vec<u8>) -> SmfSource {
-        let smf_data = smf_data.to_owned();
-        let smf = midly::Smf::parse(&smf_data).unwrap();
-        println!("SMF header {:#?}", &smf.header);
-        println!("SMF file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
-        assert!(&smf.header.format == &Format::SingleTrack,
-                "MIDI SMF format is not supported {:#?}", &smf.header.format);
-        assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required.");
-        // println!("First event of the 1st track is {:#?}", &track[..10]);
-        let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
-        let mut events = vec![];
-        for me in &smf.tracks[0] {
-            let event = me.to_static();
-            events.push(event);
-        }
+        let (events, usec_per_tick) = load_smf(&smf_data);
         SmfSource {
             events,
             tick: Duration::from_micros(usec_per_tick as u64),
