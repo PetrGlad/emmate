@@ -12,7 +12,7 @@ use vst::event::MidiEvent;
 use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
-use crate::stave::Stave;
+use crate::stave::{events_to_notes, Stave};
 
 mod midi_vst;
 mod midi;
@@ -39,7 +39,12 @@ pub fn main() {
     midi_inputs.push(midi_keyboard_input("XPIANOGT", &mut engine));
     midi_inputs.push(midi_keyboard_input("MPK mini 3", &mut engine));
 
-    // GUI example
+    // Load some sample data to show on stave. Should be read from same source as the engine's.
+    let smf_data = std::fs::read("yellow.mid").unwrap();
+    let events = midi::load_smf(&smf_data);
+    let notes = events_to_notes(events.0);
+
+    // GUI
     Ed::run(Settings {
         antialiasing: true,
         ..Settings::default()

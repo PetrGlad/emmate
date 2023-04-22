@@ -36,8 +36,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    // TODO (scheduling) some transport controls. Maybe: pause/unpause - pause processing events, reset - clear queue.
-
     pub fn new(vst: Vst) -> Engine {
         Engine {
             vst,
@@ -95,7 +93,7 @@ impl Engine {
     }
 }
 
-fn smf_to_vst(event: midly::live::LiveEvent<'static>) -> Event<'static> {
+fn smf_to_vst(event: LiveEvent<'static>) -> Event<'static> {
     let mut ev_buf = Vec::new();
     event.write(&mut ev_buf)
         .expect("The live event should be writable.");

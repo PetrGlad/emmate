@@ -1,10 +1,27 @@
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use iced::widget::{canvas, Canvas};
 use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
+use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
-#[derive(Debug, /*Clone, Copy,*/ Default)]
+type Pitch = u8;
+type Velocity = u8;
+
+#[derive(Debug)]
+pub struct Note {
+    pub pitch: Pitch,
+    pub velocity: Velocity,
+    // Since the track beginning.
+    pub on: Duration,
+    pub duration: Duration,
+}
+
+#[derive(Debug, Default)]
 pub struct Stave {
+    // TODO Remove
     pub radius: f32,
+    pub notes: Vec<Note>,
 }
 
 impl Stave {
@@ -58,4 +75,41 @@ impl canvas::Program<()> for Stave {
         frame.fill(&circle, Color::BLACK);
         vec![frame.into_geometry()]
     }
+}
+
+pub fn events_to_notes(events: Vec<TrackEvent<'static>>) -> Vec<Note> {
+    // TODO Think if we should use Note in the engine also - the calculations are very similar.
+    let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
+    let mut notes = vec![];
+    let mut at: u64 = 0;
+    for ev in events {
+        at += ev.delta.as_int() as u64;
+        match ev.kind {
+            TrackEventKind::Midi { message, .. } => {
+                match message {
+                    MidiMessage::NoteOn { key, .. } => {
+                        ons.insert(key.as_int() as Pitch, (at.to_owned(), message));
+                    }
+                    MidiMessage::NoteOff { key, .. } => {
+                        let on = ons.remove(&(key.as_int() as Pitch));
+                        match on {
+                            Some((t, MidiMessage::NoteOn { key, vel })) => {
+                                notes.push(Note {
+                                    on: Duration::from_micros(t),
+                                    duration: Duration::from_micros(at.to_owned() - t.to_owned()),
+                                    pitch: key.as_int() as Pitch,
+                                    velocity: vel.as_int() as Velocity,
+                                });
+                            }
+                            Some(_) => (),
+                            None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev)
+                        }
+                    }
+                    _ => ()
+                }
+            }
+            _ => ()
+        };
+    }
+    notes
 }
