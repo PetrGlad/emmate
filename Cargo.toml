@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-iced = { version = "0.8.0", features = ["canvas", "debug"] }
+iced = { version = "0.8.0", features = ["canvas", "debug", "tokio"] }
+palette = "0.6.1"
 
 # Deps from iced "game_of_life" example
 # https://github.com/iced-rs/iced/blob/master/examples/game_of_life/Cargo.toml

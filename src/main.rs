@@ -3,7 +3,7 @@ use cpal::{BufferSize, StreamConfig};
 use cpal::SampleFormat::F32;
 use cpal::traits::{DeviceTrait, HostTrait};
 use iced::{Alignment, Element, Length, Sandbox, Settings, widget::Button, widget::Column, widget::Text};
-use iced::widget::{container};
+use iced::widget::{container, Row, Space};
 use midir::{MidiInput, MidiInputConnection};
 use rodio::{cpal, OutputStream};
 use vst::event::Event;
@@ -12,7 +12,7 @@ use vst::event::MidiEvent;
 use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
-use crate::stave::{events_to_notes, Stave};
+use crate::stave::{events_to_notes, Note, Stave};
 
 mod midi_vst;
 mod midi;
@@ -38,11 +38,6 @@ pub fn main() {
     midi_inputs.push(midi_keyboard_input("Digital Piano", &mut engine));
     midi_inputs.push(midi_keyboard_input("XPIANOGT", &mut engine));
     midi_inputs.push(midi_keyboard_input("MPK mini 3", &mut engine));
-
-    // Load some sample data to show on stave. Should be read from same source as the engine's.
-    let smf_data = std::fs::read("yellow.mid").unwrap();
-    let events = midi::load_smf(&smf_data);
-    let notes = events_to_notes(events.0);
 
     // GUI
     Ed::run(Settings {
@@ -129,7 +124,6 @@ fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Op
 #[derive(Default)]
 struct Ed {
     stave: Stave,
-    value: i32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,7 +137,13 @@ impl Sandbox for Ed {
     type Message = Message;
 
     fn new() -> Self {
-        Self::default()
+        // TODO ???????????????????? Do not want to setup engine here. How to start it not using statics?
+        // Load some sample data to show on stave. Should be read from same source as the engine's.
+        let smf_data = std::fs::read("yellow.mid").unwrap();
+        let events = midi::load_smf(&smf_data);
+        let notes = events_to_notes(events.0);
+
+        Ed { stave: Stave { notes, time_scale: 7e-8f32 } }
     }
 
     fn title(&self) -> String {
@@ -153,12 +153,10 @@ impl Sandbox for Ed {
     fn update(&mut self, message: Message) {
         match message {
             Message::IncrementPressed => {
-                self.value += 1;
-                self.stave.radius = (i32::abs(self.value.into()) * 7) as f32;
+                self.stave.time_scale *= 1.05;
             }
             Message::DecrementPressed => {
-                self.value -= 1;
-                self.stave.radius = (i32::abs(self.value.into()) * 7) as f32;
+                self.stave.time_scale *= 0.95;
             }
             _ => ()
         }
@@ -172,15 +170,16 @@ impl Sandbox for Ed {
                 .width(Length::Fill))
             .push(self.stave.view().map(move |_message| Message::Stave))
             .push(
-                Column::new()
+                Row::new()
                     .align_items(Alignment::Start)
                     .push(
-                        Button::new(Text::new("Increment"))
+                        Button::new(Text::new("Zoom in"))
                             .on_press(Message::IncrementPressed),
                     )
-                    .push(Text::new(self.value.to_string()).size(50))
+                    // .push(Text::new(self.stave.time_scale.to_string()).size(50))
+                    .push(Space::new(10, 0))
                     .push(
-                        Button::new(Text::new("Decrement"))
+                        Button::new(Text::new("Zoom out"))
                             .on_press(Message::DecrementPressed),
                     ))
             .into()
