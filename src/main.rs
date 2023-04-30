@@ -147,7 +147,7 @@ impl Sandbox for Ed {
     }
 
     fn title(&self) -> String {
-        String::from("Midired")
+        String::from("emmate")
     }
 
     fn update(&mut self, message: Message) {

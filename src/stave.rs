@@ -38,7 +38,7 @@ impl Stave {
 fn note_color(velocity: &Velocity) -> Color {
     let coeff = 1.0 - velocity.clone() as f32 / 128.0;
     let slow = Color::from_rgb(0.8 * &coeff, 0.9 * &coeff, 0.9 * &coeff);
-    let fast = Color::from_rgb(0.03, 0.03, 0.03);
+    let fast = Color::from_rgb(0.02, 0.02, 0.02);
     let l1 = Srgba::from(slow).into_linear();
     let l2 = Srgba::from(fast).into_linear();
     Color::from(Srgba::from_linear(l1.lighten(l2)))
