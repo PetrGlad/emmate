@@ -12,7 +12,7 @@ use vst::event::MidiEvent;
 use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
-use crate::stave::{events_to_notes, Note, Stave};
+use crate::stave::{events_to_notes, Stave};
 
 mod midi_vst;
 mod midi;
@@ -143,7 +143,7 @@ impl Sandbox for Ed {
         let events = midi::load_smf(&smf_data);
         let notes = events_to_notes(events.0);
 
-        Ed { stave: Stave { notes, time_scale: 7e-8f32 } }
+        Ed { stave: Stave { notes, time_scale: 12e-8f32 } }
     }
 
     fn title(&self) -> String {
@@ -176,7 +176,6 @@ impl Sandbox for Ed {
                         Button::new(Text::new("Zoom in"))
                             .on_press(Message::IncrementPressed),
                     )
-                    // .push(Text::new(self.stave.time_scale.to_string()).size(50))
                     .push(Space::new(10, 0))
                     .push(
                         Button::new(Text::new("Zoom out"))

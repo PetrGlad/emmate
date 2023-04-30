@@ -3,15 +3,14 @@
 Off grid MIDI editor with following goals:
 
 * Not a DAW (would like it to be but do not have enough time for that).
-* Do not care (much) about measures, geared towards real-time recorded events. Primarily aimed at real recordings
-  without strict tempo/bars.
+* Do not care (much) about measures. Primarily aimed at piano real recordings without strict tempo/bars.
 * A feature absent in _any_ other midi editor I could get my hands on (both commercial and free ones): removing a note
   can shift the tail of the track left to fill the gap. In some editors this is actually doable but cumbersome at best.
 * Playing/editing very long (over several thousands events) files.
   Those files are usually recordings of real performance (e.g. from MIDI keyboard).
 * Comfortable workflow with keyboard as primary input.
 * Allows making fine adjustments of expression.
-* Unlimited undo/redo.
+* Unlimited undo/redo. Never loose session data.
 * Blackbox recording (aways-on MIDI recording).
 
 I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but that does not seem to
@@ -35,10 +34,10 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Use a hot key for an action.
+- [ ] See how to use a hot key for an action.
 - [ ] Play/time selection cursor.
 - [ ] Share project's note data between stave pane and engine.
-- [ ] Transport controls (play, rewind, step, pause).
+- [ ] Transport controls (play/pause, rewind, step, pause).
 - [ ] Scale stave time (horizontally) with mouse wheel.
 - [ ] Configuration file (VST plugin path and MIDI input configuration).
 - [ ] Time selection (or note selection) in UI, whichever simpler.

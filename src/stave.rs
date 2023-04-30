@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use iced::widget::{canvas, Canvas};
@@ -36,8 +36,8 @@ impl Stave {
 }
 
 fn note_color(velocity: &Velocity) -> Color {
-    let coeff = 1.0 - velocity.clone() as f32 / 128.0;
-    let slow = Color::from_rgb(0.8 * &coeff, 0.9 * &coeff, 0.9 * &coeff);
+    let ratio = 1.0 - velocity.clone() as f32 / 128.0;
+    let slow = Color::from_rgb(0.8 * &ratio, 0.9 * &ratio, 0.9 * &ratio);
     let fast = Color::from_rgb(0.02, 0.02, 0.02);
     let l1 = Srgba::from(slow).into_linear();
     let l2 = Srgba::from(fast).into_linear();
@@ -49,20 +49,21 @@ impl canvas::Program<()> for Stave {
 
     fn draw(&self, _state: &Self::State, _theme: &Theme, bounds: Rectangle, _cursor: Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(bounds.size());
-        let key_count = 88;
+        let key_count = 88 as Pitch;
+        // Tone 60 is C3, tones start at C-2
+        let first_key = 21 as Pitch;
         let tone_step = bounds.height / key_count as f32;
-        let mut bottom_line = 0.0;
+        let bottom_line = key_count as f32 * tone_step;
 
         // Grid
-        let black_key = |tone: &i32| vec![1, 4, 6, 9, 11].contains(&(*tone % 12));
-        for row in 0..key_count {
-            let color = if black_key(&row) {
-                Color::from_rgb(0.3, 0.3, 0.3)
+        let black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
+        for key in 0..key_count {
+            let color = if black_key(&(first_key + key)) {
+                Color::from_rgb(0.1, 0.1, 0.1)
             } else {
                 Color::from_rgb(0.9, 0.9, 0.9)
             };
-            let y = &tone_step * row.to_owned() as f32;
-            bottom_line = y;
+            let y = bottom_line - tone_step * key as f32;
             frame.stroke(&Path::line(Point { x: 0.0, y },
                                      Point { x: frame.width(), y }),
                          Stroke::default().with_color(color));
@@ -72,7 +73,7 @@ impl canvas::Program<()> for Stave {
         let time_step = bounds.width * &self.time_scale;
         for Note { on, duration, pitch, velocity } in &self.notes
         {
-            let y = &bottom_line - &tone_step * pitch.to_owned() as f32;
+            let y = bottom_line - tone_step * (pitch - first_key) as f32;
             let x = on.as_micros() as f32 * time_step;
             frame.stroke(&Path::line(Point { x, y },
                                      Point { x: x + (duration.as_micros() as f32 * time_step), y }),
