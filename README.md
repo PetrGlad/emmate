@@ -9,8 +9,8 @@ Off grid MIDI editor with following goals:
 * Playing/editing very long (over several thousands events) files.
   Those files are usually recordings of real performance (e.g. from MIDI keyboard).
 * Comfortable workflow with keyboard as primary input.
-* Allows making fine adjustments of expression.
-* Unlimited undo/redo. Never loose session data.
+* Allows making fine adjustments of notes and tempo.
+* Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
 * Blackbox recording (aways-on MIDI recording).
 
 I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but that does not seem to
@@ -40,7 +40,7 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Transport controls (play/pause, rewind, step, pause).
 - [ ] Scale stave time (horizontally) with mouse wheel.
 - [ ] Configuration file (VST plugin path and MIDI input configuration).
-- [ ] Time selection (or note selection) in UI, whichever simpler.
+- [ ] Time or note selection in UI.
 - [x] A UI window with simple text message.
 - [x] Load/decode a MIDI file.
 - [x] Load a MIDI->PCM plugin (https://github.com/RustAudio/vst-rs/blob/master/examples/simple_host.rs).

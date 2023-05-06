@@ -1,8 +1,10 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use cpal::{BufferSize, StreamConfig};
 use cpal::SampleFormat::F32;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::{Alignment, Element, Length, Sandbox, Settings, widget::Button, widget::Column, widget::Text};
+use iced::{Alignment, Application, Command, Element, executor, Length, Settings, Theme,
+           widget::Button, widget::Column, widget::Text};
 use iced::widget::{container, Row, Space};
 use midir::{MidiInput, MidiInputConnection};
 use rodio::{cpal, OutputStream};
@@ -13,12 +15,14 @@ use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
 use crate::stave::{events_to_notes, Stave};
+use crate::track::{Track, TrackTime};
 
 mod midi_vst;
 mod midi;
 mod engine;
 mod events;
 mod stave;
+mod track;
 
 pub fn main() {
     {
@@ -41,8 +45,15 @@ pub fn main() {
 
     // GUI
     Ed::run(Settings {
+        id: Option::None,
+        window: iced::window::Settings::default(),
+        flags: Init {},
+        default_font: Option::None,
+        default_text_size: 20.0,
+        text_multithreading: false,
         antialiasing: true,
-        ..Settings::default()
+        exit_on_close_request: true,
+        try_opengles_first: false,
     }).unwrap()
 }
 
@@ -83,7 +94,6 @@ fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Op
             break;
         }
     }
-
     if port_idx == None {
         println!("WARN No midi input selected.");
         return None;
@@ -116,11 +126,6 @@ fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Op
     ).unwrap())
 }
 
-/*
-  Using https://github.com/iced-rs/iced/blob/0.3/examples/counter/src/main.rs
-  as a stub implementation for starters.
-*/
-
 #[derive(Default)]
 struct Ed {
     stave: Stave,
@@ -128,38 +133,48 @@ struct Ed {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
+    ZoomIn(TrackTime),
+    ZoomOut(TrackTime),
     Stave,
-    IncrementPressed,
-    DecrementPressed,
 }
 
-impl Sandbox for Ed {
-    type Message = Message;
+pub struct Init {
+    // TODO Pass reference to the engine as init
+}
 
-    fn new() -> Self {
+impl Application for Ed {
+    type Executor = executor::Default;
+    type Message = Message;
+    type Theme = Theme;
+    type Flags = Init;
+
+    fn new(_init: Init) -> (Self, Command<Message>) {
         // TODO ???????????????????? Do not want to setup engine here. How to start it not using statics?
         // Load some sample data to show on stave. Should be read from same source as the engine's.
         let smf_data = std::fs::read("yellow.mid").unwrap();
         let events = midi::load_smf(&smf_data);
         let notes = events_to_notes(events.0);
-
-        Ed { stave: Stave { notes, time_scale: 12e-8f32 } }
+        (
+            Ed { stave: Stave { track: Track { notes }, time_scale: 12e-8f32 } },
+            Command::none()
+        )
     }
 
     fn title(&self) -> String {
         String::from("emmate")
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::IncrementPressed => {
+            Message::ZoomIn(_at) => {
                 self.stave.time_scale *= 1.05;
             }
-            Message::DecrementPressed => {
+            Message::ZoomOut(_at) => {
                 self.stave.time_scale *= 0.95;
             }
-            _ => ()
-        }
+            Message::Stave => ()
+        };
+        Command::none()
     }
 
     fn view(&self) -> Element<Message> {
@@ -174,12 +189,12 @@ impl Sandbox for Ed {
                     .align_items(Alignment::Start)
                     .push(
                         Button::new(Text::new("Zoom in"))
-                            .on_press(Message::IncrementPressed),
+                            .on_press(Message::ZoomIn(Duration::from_micros(0))),
                     )
                     .push(Space::new(10, 0))
                     .push(
                         Button::new(Text::new("Zoom out"))
-                            .on_press(Message::DecrementPressed),
+                            .on_press(Message::ZoomOut(Duration::from_micros(0))),
                     ))
             .into()
     }

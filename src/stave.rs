@@ -6,24 +6,13 @@ use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use palette::Srgba;
 use palette::Blend;
-
-type Pitch = u8;
-type Velocity = u8;
-
-#[derive(Debug)]
-pub struct Note {
-    pub pitch: Pitch,
-    pub velocity: Velocity,
-    // Since the track beginning.
-    pub on: Duration,
-    pub duration: Duration,
-}
+use crate::track::{Note, Pitch, Track, Velocity};
 
 #[derive(Debug, Default)]
 pub struct Stave {
     // Pixel/uSec
     pub time_scale: f32,
-    pub notes: Vec<Note>,
+    pub track: Track,
 }
 
 impl Stave {
@@ -71,7 +60,7 @@ impl canvas::Program<()> for Stave {
 
         // Notes
         let time_step = bounds.width * &self.time_scale;
-        for Note { on, duration, pitch, velocity } in &self.notes
+        for Note { on, duration, pitch, velocity } in &self.track.notes
         {
             let y = bottom_line - tone_step * (pitch - first_key) as f32;
             let x = on.as_micros() as f32 * time_step;
