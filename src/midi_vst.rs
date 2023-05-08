@@ -8,13 +8,9 @@ use vst::api::{Supported};
 use vst::host::{Host, HostBuffer, PluginInstance, PluginLoader};
 use vst::plugin::{CanDo, Plugin};
 
-// #[allow(dead_code)]
 pub struct VstHost;
 
 impl Host for VstHost {
-    // fn automate(&self, index: i32, value: f32) {
-    //     println!("VST Parameter {} had its value changed to {}", index, value);
-    // }
 }
 
 pub struct Vst {
@@ -56,8 +52,8 @@ impl Vst {
                 info.version, info.initial_delay, info.inputs, info.outputs
             );
             let params = plugin.get_parameter_object();
-            params.change_preset(4); // For pianoteq
-            // params.change_preset(1096); // For amsynth
+            params.change_preset(4); // A choice for pianoteq
+            // params.change_preset(1096); // A nice choice for amsynth
             println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
 
             plugin.init();

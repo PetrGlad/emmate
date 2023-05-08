@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use iced::widget::{canvas, Canvas};
@@ -12,7 +13,7 @@ use crate::track::{Note, Pitch, Track, Velocity};
 pub struct Stave {
     // Pixel/uSec
     pub time_scale: f32,
-    pub track: Track,
+    pub track: Arc<Box<Track>>,
 }
 
 impl Stave {
@@ -81,18 +82,18 @@ impl canvas::Program<()> for Stave {
     }
 }
 
-pub fn events_to_notes(events: Vec<TrackEvent<'static>>) -> Vec<Note> {
+pub fn events_to_notes(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<Note> {
     // TODO Think if we should use Note in the engine also - the calculations are very similar.
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
     let mut notes = vec![];
     let mut at: u64 = 0;
     for ev in events {
-        at += ev.delta.as_int() as u64;
+        at += ev.delta.as_int() as u64 * tick_duration;
         match ev.kind {
             TrackEventKind::Midi { message, .. } => {
                 match message {
                     MidiMessage::NoteOn { key, .. } => {
-                        ons.insert(key.as_int() as Pitch, (at.to_owned(), message));
+                        ons.insert(key.as_int() as Pitch, (at, message));
                     }
                     MidiMessage::NoteOff { key, .. } => {
                         let on = ons.remove(&(key.as_int() as Pitch));
@@ -100,7 +101,7 @@ pub fn events_to_notes(events: Vec<TrackEvent<'static>>) -> Vec<Note> {
                             Some((t, MidiMessage::NoteOn { key, vel })) => {
                                 notes.push(Note {
                                     on: Duration::from_micros(t),
-                                    duration: Duration::from_micros(at.to_owned() - t.to_owned()),
+                                    duration: Duration::from_micros(at - t),
                                     pitch: key.as_int() as Pitch,
                                     velocity: vel.as_int() as Velocity,
                                 });

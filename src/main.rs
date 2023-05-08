@@ -1,13 +1,15 @@
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use cpal::{BufferSize, StreamConfig};
-use cpal::SampleFormat::F32;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::{Alignment, Application, Command, Element, executor, Length, Settings, Theme,
-           widget::Button, widget::Column, widget::Text};
+use cpal::SampleFormat::F32;
+use cpal::{BufferSize, StreamConfig};
 use iced::widget::{container, Row, Space};
+use iced::{
+    executor, widget::Button, widget::Column, widget::Text, Alignment, Application, Command,
+    Element, Length, Settings, Theme,
+};
 use midir::{MidiInput, MidiInputConnection};
 use rodio::{cpal, OutputStream};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use vst::event::Event;
 use vst::event::MidiEvent;
 
@@ -15,12 +17,12 @@ use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
 use crate::stave::{events_to_notes, Stave};
-use crate::track::{Track, TrackTime};
+use crate::track::{Track, TrackSource, TrackTime};
 
-mod midi_vst;
-mod midi;
 mod engine;
 mod events;
+mod midi;
+mod midi_vst;
 mod stave;
 mod track;
 
@@ -32,10 +34,22 @@ pub fn main() {
     // Stream reference keeps it open.
     let (_stream, mut engine) = setup_audio_engine();
 
-    { // Play MIDI from an SMD file.
+    if false { // Want the section to compile still for now
+        // Play MIDI from an SMD file.
         let smf_data = std::fs::read("yellow.mid").unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
         engine.lock().unwrap().add(Box::new(smf_midi_source));
+    }
+
+    // This source does not support the damper controller yet.
+    let smf_data = std::fs::read("yellow.mid").unwrap();
+    let events = midi::load_smf(&smf_data);
+    let track = Arc::new(Box::new(Track {
+        notes: events_to_notes(events.0, events.1 as u64),
+    }));
+    {
+        let track_midi_source = TrackSource::new(track.clone());
+        engine.lock().unwrap().add(Box::new(track_midi_source));
     }
 
     let mut midi_inputs = vec![]; // Keeps inputs open
@@ -45,16 +59,17 @@ pub fn main() {
 
     // GUI
     Ed::run(Settings {
-        id: Option::None,
+        id: None,
         window: iced::window::Settings::default(),
-        flags: Init {},
+        flags: UiInit { track: track.clone() },
         default_font: Option::None,
         default_text_size: 20.0,
         text_multithreading: false,
         antialiasing: true,
         exit_on_close_request: true,
         try_opengles_first: false,
-    }).unwrap()
+    })
+    .unwrap()
 }
 
 fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
@@ -64,7 +79,7 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     println!("Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
     println!("Default output config: {:?}", out_conf);
-    assert!(out_conf.sample_format() == F32);
+    assert_eq!(out_conf.sample_format(), F32);
     let sample_format = F32; // To use with vst.
     let out_conf = StreamConfig {
         channels: out_conf.channels(),
@@ -75,12 +90,17 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     let (stream, stream_handle) =
         rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
     let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
-    stream_handle.play_raw(OutputSource::new(&vst, &buffer_size)).unwrap();
+    stream_handle
+        .play_raw(OutputSource::new(&vst, &buffer_size))
+        .unwrap();
     let engine = Engine::new(vst);
     (stream, engine.start())
 }
 
-fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Option<MidiInputConnection<()>> {
+fn midi_keyboard_input(
+    name_prefix: &str,
+    engine: &mut Arc<Mutex<Engine>>,
+) -> Option<MidiInputConnection<()>> {
     let input = MidiInput::new("midir").unwrap();
     let mut port_idx = None;
     println!("Midi input ports:");
@@ -98,32 +118,37 @@ fn midi_keyboard_input(name_prefix: &str, engine: &mut Arc<Mutex<Engine>>) -> Op
         println!("WARN No midi input selected.");
         return None;
     }
-    let port = ports.get(port_idx.unwrap())
-        .unwrap();
+    let port = ports.get(port_idx.unwrap()).unwrap();
     let seq_engine = engine.clone();
-    Some(input.connect(
-        &port,
-        "midi-input",
-        move |t, ev, _data| {
-            println!("MIDI event: {} {:?} {}", t, ev, ev.len());
-            if ev[0] == 254 { return; }
-            let mut ev_buf = [0u8; 3];
-            for (i, x) in ev.iter().enumerate() {
-                ev_buf[i] = *x;
-            }
-            let note = Event::Midi(MidiEvent {
-                data: ev_buf,
-                delta_frames: 0,
-                live: true,
-                note_length: None,
-                note_offset: None,
-                detune: 0,
-                note_off_velocity: 0,
-            });
-            seq_engine.lock().unwrap().process(note);
-        },
-        (),
-    ).unwrap())
+    Some(
+        input
+            .connect(
+                &port,
+                "midi-input",
+                move |t, ev, _data| {
+                    println!("MIDI event: {} {:?} {}", t, ev, ev.len());
+                    if ev[0] == 254 {
+                        return;
+                    }
+                    let mut ev_buf = [0u8; 3];
+                    for (i, x) in ev.iter().enumerate() {
+                        ev_buf[i] = *x;
+                    }
+                    let note = Event::Midi(MidiEvent {
+                        data: ev_buf,
+                        delta_frames: 0,
+                        live: true,
+                        note_length: None,
+                        note_offset: None,
+                        detune: 0,
+                        note_off_velocity: 0,
+                    });
+                    seq_engine.lock().unwrap().process(note);
+                },
+                (),
+            )
+            .unwrap(),
+    )
 }
 
 #[derive(Default)]
@@ -138,25 +163,25 @@ pub enum Message {
     Stave,
 }
 
-pub struct Init {
-    // TODO Pass reference to the engine as init
+pub struct UiInit {
+    track: Arc<Box<Track>>
 }
 
 impl Application for Ed {
     type Executor = executor::Default;
     type Message = Message;
     type Theme = Theme;
-    type Flags = Init;
+    type Flags = UiInit;
 
-    fn new(_init: Init) -> (Self, Command<Message>) {
-        // TODO ???????????????????? Do not want to setup engine here. How to start it not using statics?
-        // Load some sample data to show on stave. Should be read from same source as the engine's.
-        let smf_data = std::fs::read("yellow.mid").unwrap();
-        let events = midi::load_smf(&smf_data);
-        let notes = events_to_notes(events.0);
+    fn new(init: UiInit) -> (Self, Command<Message>) {
         (
-            Ed { stave: Stave { track: Track { notes }, time_scale: 12e-8f32 } },
-            Command::none()
+            Ed {
+                stave: Stave {
+                    track: init.track,
+                    time_scale: 5e-9f32,
+                },
+            },
+            Command::none(),
         )
     }
 
@@ -172,7 +197,7 @@ impl Application for Ed {
             Message::ZoomOut(_at) => {
                 self.stave.time_scale *= 0.95;
             }
-            Message::Stave => ()
+            Message::Stave => (),
         };
         Command::none()
     }
@@ -181,8 +206,7 @@ impl Application for Ed {
         Column::new()
             .padding(20)
             .spacing(20)
-            .push(container(Text::new("I cannot do this, Petr."))
-                .width(Length::Fill))
+            .push(container(Text::new("I cannot do this, Petr.")).width(Length::Fill))
             .push(self.stave.view().map(move |_message| Message::Stave))
             .push(
                 Row::new()
@@ -195,7 +219,8 @@ impl Application for Ed {
                     .push(
                         Button::new(Text::new("Zoom out"))
                             .on_press(Message::ZoomOut(Duration::from_micros(0))),
-                    ))
+                    ),
+            )
             .into()
     }
 }

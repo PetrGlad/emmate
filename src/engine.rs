@@ -1,29 +1,47 @@
+use crate::midi_vst::Vst;
+use midly::live::LiveEvent;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use vst::event::Event;
-use crate::midi_vst::Vst;
-use std::sync::{Arc, Mutex};
-use midly::live::LiveEvent;
 use vst::plugin::Plugin;
+
+/// uSecs from the start.
+pub type TransportTime = u64;
 
 /// An event to be rendered by the engine at given time
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct EngineEvent {
+    pub at: TransportTime,
     pub event: LiveEvent<'static>,
 }
 
-/// Micros from the start.
-pub type TransportTime = u64;
+impl Ord for EngineEvent {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Ideally the event should also be compared to make the comparison unambiguous.
+        // This should not matter for scheduling though.
+        other.at.cmp(&self.at)
+    }
+}
+
+impl PartialOrd for EngineEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 pub trait EventSource {
     /** Return false when no new events will be produced from the source. */
     fn is_running(&self) -> bool;
     /** Reset current source's time to this moment. */
     fn reset(&mut self, at: &TransportTime);
-    /** The next event to be played at the instant.
-                             On subsequent calls instants must not decrease unless a reset call sets another time.
+    /**
+    The next event to be played at the instant. On subsequent
+    calls instants must not decrease unless a reset call sets another time.
      */
-    fn next(&mut self, at: &TransportTime) -> Option<EngineEvent>;
+    fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>);
 }
 
 type EventSourceHandle = dyn EventSource + Send;
@@ -50,21 +68,28 @@ impl Engine {
         let engine2 = engine.clone();
         thread::spawn(move || {
             engine2.lock().unwrap().reset(0);
+            let mut queue: BinaryHeap<EngineEvent> = BinaryHeap::new();
             loop {
                 thread::sleep(Duration::from_micros(1_000));
                 let mut locked = engine2.lock().unwrap();
                 locked.sources.retain(|s| s.is_running());
-                let transport_time = locked.running_at.to_owned() + Instant::now()
-                    .duration_since(locked.reset_at.to_owned())
-                    .as_micros() as u64;
-                let mut batch = vec![];
+                let transport_time = locked.running_at.to_owned()
+                    + Instant::now()
+                        .duration_since(locked.reset_at.to_owned())
+                        .as_micros() as u64;
                 for s in locked.sources.iter_mut() {
-                    while let Some(ev) = s.next(&transport_time) {
-                        batch.push(smf_to_vst(ev.event));
-                    }
+                    // Alternatively could pass a small pre-allocated array to hold the output events.
+                    s.next(&transport_time, &mut queue);
                 }
-                for ev in batch.iter() {
-                    locked.process(*ev);
+                let mut batch = vec![];
+                while let Some(ev) = queue.peek() {
+                    if ev.at > transport_time {
+                        break;
+                    }
+                    batch.push(queue.pop().unwrap().event);
+                }
+                for ev in batch {
+                    locked.process(smf_to_vst(ev));
                 }
             }
         });
@@ -95,7 +120,8 @@ impl Engine {
 
 fn smf_to_vst(event: LiveEvent<'static>) -> Event<'static> {
     let mut ev_buf = Vec::new();
-    event.write(&mut ev_buf)
+    event
+        .write(&mut ev_buf)
         .expect("The live event should be writable.");
     Event::Midi(vst::event::MidiEvent {
         data: ev_buf.try_into().unwrap(),

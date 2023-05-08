@@ -1,6 +1,10 @@
-use std::time::{Duration};
-use midly::{Format, Smf, Timing, TrackEvent};
 use crate::engine::{EngineEvent, EventSource, TransportTime};
+use crate::track::{ChannelId, Pitch, Velocity};
+use midly::live::LiveEvent;
+use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
+use std::collections::BinaryHeap;
+use std::time::Duration;
+
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
     tick: Duration,
@@ -11,10 +15,21 @@ pub struct SmfSource {
 pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
     let smf = Smf::parse(smf_data).unwrap();
     println!("SMF header {:#?}", &smf.header);
-    println!("SMF file has {} tracks, format is {:?}.", smf.tracks.len(), smf.header.format);
-    assert!(&smf.header.format == &Format::SingleTrack,
-            "MIDI SMF format is not supported {:#?}", &smf.header.format);
-    assert!(smf.tracks.len() > 0, "No tracks in SMF file. At least one is required.");
+    println!(
+        "SMF file has {} tracks, format is {:?}.",
+        smf.tracks.len(),
+        smf.header.format
+    );
+    assert_eq!(
+        &smf.header.format,
+        &Format::SingleTrack,
+        "MIDI SMF format {:#?} is not supported.",
+        &smf.header.format
+    );
+    assert!(
+        smf.tracks.len() > 0,
+        "No tracks in SMF file. At least one is required."
+    );
     // println!("Starting events of the 1st track are {:#?}", &track[..10]);
     let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
     let mut events = vec![];
@@ -41,17 +56,19 @@ fn usec_per_midi_tick(timing: &Timing) -> u32 {
     let tick_per_beat = beat_duration(timing);
     let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
     let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
-    println!("t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-             &tick_per_beat, &beat_per_sec, &usec_per_tick);
+    println!(
+        "t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
+        &tick_per_beat, &beat_per_sec, &usec_per_tick
+    );
     usec_per_tick
 }
 
 fn beat_duration(timing: &Timing) -> u32 {
-    // TODO Also should support Tempo messages. Tempo messages set micros per beat.
+    // TODO Also maybe support Tempo messages. Tempo messages set micros per beat.
     // Default tempo is 120 beats per minute and default signature 4/4
     match timing {
         Timing::Metrical(d) => d.as_int() as u32,
-        _ => panic!("Timing format {:#?} is not supported.", timing)
+        _ => panic!("Timing format {:#?} is not supported.", timing),
     }
 }
 
@@ -61,24 +78,53 @@ impl EventSource for SmfSource {
     }
 
     fn reset(&mut self, at: &TransportTime) {
+        assert!(
+            self.running_at > *at,
+            "Back reset is not supported yet for SmfSource."
+        );
+        // TODO Seek index to a suitable previous position.
         self.running_at = at.to_owned();
     }
 
-    fn next(&mut self, at: &TransportTime) -> Option<EngineEvent> {
+    fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>) {
         let track = &self.events;
         while self.is_running() {
             let event = track[self.current_idx];
-            let running_at = self.running_at.to_owned() + self.tick.as_micros() as u64 * event.delta.as_int() as u64;
+            let running_at =
+                self.running_at + self.tick.as_micros() as u64 * event.delta.as_int() as u64;
             if running_at > *at {
-                return None;
+                return;
             }
             self.running_at = running_at;
             self.current_idx += 1;
             if let Some(lev) = event.kind.as_live_event() {
-                return Some(EngineEvent { event: lev });
+                queue.push(EngineEvent {
+                    at: *at,
+                    event: lev,
+                });
             }
         }
-        None
+    }
+}
+
+pub fn note_on(channel: ChannelId, pitch: Pitch, velocity: Velocity) -> LiveEvent<'static> {
+    LiveEvent::Midi {
+        channel: channel.into(),
+        message: MidiMessage::NoteOn {
+            key: pitch.into(),
+            vel: velocity.into(),
+        },
+    }
+}
+
+pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Velocity) -> LiveEvent<'static> {
+    LiveEvent::Midi {
+        channel: channel.into(),
+        message: MidiMessage::NoteOff {
+            key: pitch.into(),
+            // Not sure if this actually affects something.
+            vel: velocity.into(),
+        },
     }
 }
 
@@ -116,7 +162,6 @@ impl EventSource for SmfSource {
 //         }
 //     }
 // }
-
 
 // { // MIDI load/modify example
 //         let data = std::fs::read("yellow.mid").unwrap();
