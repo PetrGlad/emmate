@@ -34,13 +34,14 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] See how to use a hot key for an action.
-- [ ] Play/time selection cursor.
-- [ ] Share project's note data between stave pane and engine.
+- [ ] Play time cursor.
+- [ ] Support sustain pedal (as a note?).
 - [ ] Transport controls (play/pause, rewind, step, pause).
 - [ ] Scale stave time (horizontally) with mouse wheel.
 - [ ] Configuration file (VST plugin path and MIDI input configuration).
 - [ ] Time or note selection in UI.
+- [x] Share project's note data between stave pane and engine.
+- [x] See how to use a hot key for an action.
 - [x] A UI window with simple text message.
 - [x] Load/decode a MIDI file.
 - [x] Load a MIDI->PCM plugin (https://github.com/RustAudio/vst-rs/blob/master/examples/simple_host.rs).

@@ -40,6 +40,10 @@ impl TrackSource {
             running_at: 0,
         }
     }
+
+    fn note_on_time(&self, i: usize) -> u64 {
+        self.track.notes[i].on.as_micros() as u64
+    }
 }
 
 impl EventSource for TrackSource {
@@ -47,13 +51,21 @@ impl EventSource for TrackSource {
         self.current_idx < self.track.notes.len()
     }
 
-    fn reset(&mut self, at: &TransportTime) {
-        assert!(
-            self.running_at > *at,
-            "Back reset is not supported yet for SmfSource."
-        );
-        // TODO Seek index to a suitable previous position (can be behind the current one also).
-        self.running_at = at.to_owned();
+    fn seek(&mut self, at: &TransportTime) {
+        // TODO Handle simultaneous events case.
+        while *at < self.note_on_time(self.current_idx) {
+            self.current_idx -= 1;
+            if self.current_idx <= 0 {
+                break;
+            }
+        }
+        while *at > self.note_on_time(self.current_idx) {
+            self.current_idx += 1;
+            if self.track.notes.len() < self.current_idx {
+                break;
+            }
+        }
+        self.running_at = *at;
     }
 
     fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>) {

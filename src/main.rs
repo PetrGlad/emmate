@@ -1,11 +1,15 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
+use iced::keyboard::Event::KeyPressed;
+use iced::keyboard::{KeyCode};
 use iced::widget::{container, Row, Space};
 use iced::{
     executor, widget::Button, widget::Column, widget::Text, Alignment, Application, Command,
     Element, Length, Settings, Theme,
 };
+use iced_native::Event::Keyboard;
+use iced_native::Subscription;
 use midir::{MidiInput, MidiInputConnection};
 use rodio::{cpal, OutputStream};
 use std::sync::{Arc, Mutex};
@@ -34,7 +38,8 @@ pub fn main() {
     // Stream reference keeps it open.
     let (_stream, mut engine) = setup_audio_engine();
 
-    if false { // Want the section to compile still for now
+    if false {
+        // Want the section to compile still for now
         // Play MIDI from an SMD file.
         let smf_data = std::fs::read("yellow.mid").unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
@@ -61,7 +66,10 @@ pub fn main() {
     Ed::run(Settings {
         id: None,
         window: iced::window::Settings::default(),
-        flags: UiInit { track: track.clone() },
+        flags: UiInit {
+            engine: engine.clone(),
+            track: track.clone(),
+        },
         default_font: Option::None,
         default_text_size: 20.0,
         text_multithreading: false,
@@ -151,20 +159,22 @@ fn midi_keyboard_input(
     )
 }
 
-#[derive(Default)]
 struct Ed {
+    engine: Arc<Mutex<Engine>>,
     stave: Stave,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Message {
     ZoomIn(TrackTime),
     ZoomOut(TrackTime),
+    Event(iced_native::Event),
     Stave,
 }
 
 pub struct UiInit {
-    track: Arc<Box<Track>>
+    engine: Arc<Mutex<Engine>>,
+    track: Arc<Box<Track>>,
 }
 
 impl Application for Ed {
@@ -176,6 +186,7 @@ impl Application for Ed {
     fn new(init: UiInit) -> (Self, Command<Message>) {
         (
             Ed {
+                engine: init.engine,
                 stave: Stave {
                     track: init.track,
                     time_scale: 5e-9f32,
@@ -189,6 +200,10 @@ impl Application for Ed {
         String::from("emmate")
     }
 
+    fn subscription(&self) -> Subscription<Message> {
+        iced_native::subscription::events().map(Message::Event)
+    }
+
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::ZoomIn(_at) => {
@@ -197,6 +212,11 @@ impl Application for Ed {
             Message::ZoomOut(_at) => {
                 self.stave.time_scale *= 0.95;
             }
+            Message::Event(Keyboard(KeyPressed {
+                key_code: KeyCode::Space,
+                modifiers,
+            })) if modifiers.is_empty() => self.engine.lock().unwrap().toggle_pause(),
+            Message::Event(ev) => println!("System event {:?}", ev),
             Message::Stave => (),
         };
         Command::none()

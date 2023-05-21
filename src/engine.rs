@@ -1,8 +1,9 @@
 use crate::midi_vst::Vst;
 use midly::live::LiveEvent;
+use midly::MidiMessage;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 use vst::event::Event;
@@ -36,7 +37,7 @@ pub trait EventSource {
     /** Return false when no new events will be produced from the source. */
     fn is_running(&self) -> bool;
     /** Reset current source's time to this moment. */
-    fn reset(&mut self, at: &TransportTime);
+    fn seek(&mut self, at: &TransportTime);
     /**
     The next event to be played at the instant. On subsequent
     calls instants must not decrease unless a reset call sets another time.
@@ -51,6 +52,7 @@ pub struct Engine {
     sources: Vec<Box<EventSourceHandle>>,
     running_at: TransportTime,
     reset_at: Instant,
+    paused: bool,
 }
 
 impl Engine {
@@ -60,6 +62,7 @@ impl Engine {
             sources: Vec::new(),
             running_at: 0,
             reset_at: Instant::now(),
+            paused: false,
         }
     }
 
@@ -67,16 +70,31 @@ impl Engine {
         let engine = Arc::new(Mutex::new(self));
         let engine2 = engine.clone();
         thread::spawn(move || {
-            engine2.lock().unwrap().reset(0);
+            engine2.lock().unwrap().seek(0);
             let mut queue: BinaryHeap<EngineEvent> = BinaryHeap::new();
             loop {
-                thread::sleep(Duration::from_micros(1_000));
+                thread::sleep(Duration::from_micros(3_000));
                 let mut locked = engine2.lock().unwrap();
+                if locked.paused {
+                    // Mute ongoing notes before clearing.
+                    // TODO Avoid doing this at every iteration?
+                    for ev in queue.iter() {
+                        if let LiveEvent::Midi {
+                            message,
+                            channel: _,
+                        } = ev.event
+                        {
+                            if let MidiMessage::NoteOff { .. } = message {
+                                locked.process(smf_to_vst(ev.event));
+                            }
+                        }
+                    }
+                    queue.clear();
+                    continue;
+                };
                 locked.sources.retain(|s| s.is_running());
-                let transport_time = locked.running_at.to_owned()
-                    + Instant::now()
-                        .duration_since(locked.reset_at.to_owned())
-                        .as_micros() as u64;
+                Self::update_track_time(&mut locked);
+                let transport_time = locked.running_at;
                 for s in locked.sources.iter_mut() {
                     // Alternatively could pass a small pre-allocated array to hold the output events.
                     s.next(&transport_time, &mut queue);
@@ -96,12 +114,28 @@ impl Engine {
         engine
     }
 
-    pub fn reset(&mut self, at: TransportTime) {
-        self.running_at = at;
-        self.reset_at = Instant::now();
+    fn update_track_time(&mut self) {
+        self.running_at =
+            Instant::now().duration_since(self.reset_at).as_micros() as u64;
+    }
+
+    pub fn seek(&mut self, at: TransportTime) {
         for s in self.sources.iter_mut() {
-            s.reset(&at);
+            s.seek(&at);
         }
+        self.running_at = at;
+        self.update_realtime();
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.paused = !self.paused;
+        if !self.paused {
+            self.update_realtime();
+        }
+    }
+
+    pub fn update_realtime(&mut self) {
+        self.reset_at = Instant::now() - Duration::from_micros(self.running_at);
     }
 
     pub fn add(&mut self, source: Box<EventSourceHandle>) {
@@ -109,6 +143,7 @@ impl Engine {
     }
 
     /// Process the event immediately
+    /// TODO Remove? MIDI Event source can do that now.
     pub fn process(&self, event: Event) {
         let events_list = [event];
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
