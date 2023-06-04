@@ -21,7 +21,7 @@ use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
 use crate::stave::{events_to_notes, Stave};
-use crate::track::{Track, TrackSource, TrackTime};
+use crate::track::{Lane, TrackSource, TrackTime};
 
 mod engine;
 mod events;
@@ -49,8 +49,8 @@ pub fn main() {
     // This source does not support the damper controller yet.
     let smf_data = std::fs::read("yellow.mid").unwrap();
     let events = midi::load_smf(&smf_data);
-    let track = Arc::new(Box::new(Track {
-        notes: events_to_notes(events.0, events.1 as u64),
+    let track = Arc::new(Box::new(Lane {
+        events: events_to_notes(events.0, events.1 as u64),
     }));
     {
         let track_midi_source = TrackSource::new(track.clone());
@@ -174,7 +174,7 @@ pub enum Message {
 
 pub struct UiInit {
     engine: Arc<Mutex<Engine>>,
-    track: Arc<Box<Track>>,
+    track: Arc<Box<Lane>>,
 }
 
 impl Application for Ed {

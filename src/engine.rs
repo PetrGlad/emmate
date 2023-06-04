@@ -3,7 +3,7 @@ use midly::live::LiveEvent;
 use midly::MidiMessage;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use vst::event::Event;

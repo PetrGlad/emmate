@@ -1,5 +1,5 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::track::{ChannelId, Pitch, Velocity};
+use crate::track::{ChannelId, Pitch, Level};
 use midly::live::LiveEvent;
 use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
 use std::collections::BinaryHeap;
@@ -107,7 +107,7 @@ impl EventSource for SmfSource {
     }
 }
 
-pub fn note_on(channel: ChannelId, pitch: Pitch, velocity: Velocity) -> LiveEvent<'static> {
+pub fn note_on(channel: ChannelId, pitch: Pitch, velocity: Level) -> LiveEvent<'static> {
     LiveEvent::Midi {
         channel: channel.into(),
         message: MidiMessage::NoteOn {
@@ -117,7 +117,7 @@ pub fn note_on(channel: ChannelId, pitch: Pitch, velocity: Velocity) -> LiveEven
     }
 }
 
-pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Velocity) -> LiveEvent<'static> {
+pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Level) -> LiveEvent<'static> {
     LiveEvent::Midi {
         channel: channel.into(),
         message: MidiMessage::NoteOff {
