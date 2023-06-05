@@ -1,9 +1,10 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::track::{ChannelId, Pitch, Level};
+use crate::track::{ChannelId, ControllerId, Level, Pitch};
 use midly::live::LiveEvent;
 use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
 use std::collections::BinaryHeap;
 use std::time::Duration;
+use midly::MidiMessage::Controller;
 
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
@@ -124,6 +125,16 @@ pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Level) -> LiveEvent<
             key: pitch.into(),
             // Not sure if this actually affects something.
             vel: velocity.into(),
+        },
+    }
+}
+
+pub fn controller_set(channel: ChannelId, controller_id: ControllerId, value: Level) -> LiveEvent<'static> {
+    LiveEvent::Midi {
+        channel: channel.into(),
+        message: Controller {
+            controller: controller_id.into(),
+            value: value.into()
         },
     }
 }

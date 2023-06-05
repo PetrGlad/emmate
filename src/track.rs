@@ -1,11 +1,11 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::midi::{note_off, note_on};
+use crate::midi::{controller_set, note_off, note_on};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 
 pub type Pitch = u8;
-pub type ControllerId = u16;
+pub type ControllerId = u8;
 pub type Level = u8;
 pub type ChannelId = u8;
 pub type TrackTime = Duration;
@@ -18,15 +18,15 @@ pub struct Note {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct ControllerSet {
+pub struct ControllerSetValue {
     pub controller_id: ControllerId,
-    pub level: Level,
+    pub value: Level,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum LaneEventType {
     Note(Note),
-    Controller(ControllerSet),
+    Controller(ControllerSetValue),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -39,7 +39,7 @@ pub struct LaneEvent {
 #[derive(Debug, Default)]
 pub struct Lane {
     /**
-       Notes should always be ordered by start time ascending.
+       Notes should always be ordered by start time ascending. Not enforced yet.
     */
     pub events: Vec<LaneEvent>,
 }
@@ -108,7 +108,12 @@ impl EventSource for TrackSource {
                         event: note_off(1, note.pitch, note.velocity),
                     });
                 }
-                _ => println!("Event {:?} is not supported.", event),
+                LaneEventType::Controller(set_val) => {
+                    queue.push(EngineEvent {
+                        at: running_at as u64,
+                        event: controller_set(1, set_val.controller_id, set_val.value),
+                    });
+                }
             }
             self.current_idx += 1;
         }

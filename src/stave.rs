@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
-use iced::widget::{canvas, Canvas};
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
+use iced::widget::{canvas, Canvas};
+use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use palette::Blend;
 use palette::Srgba;
 
-use crate::track::{Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
+use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
 #[derive(Debug, Default)]
 pub struct Stave {
@@ -99,7 +99,7 @@ impl canvas::Program<()> for Stave {
                             .with_line_cap(LineCap::Round),
                     );
                 }
-                _ => print!("Event {:?} unsupported yet.", event),
+                _ => println!("Event {:?} not supported yet.", event),
             }
         }
 
@@ -112,7 +112,7 @@ impl canvas::Program<()> for Stave {
     }
 }
 
-pub fn events_to_notes(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
+pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
     // TODO Think if we should use Note in the engine also - the calculations are very similar.
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
     let mut lane_еvents = vec![];
@@ -137,11 +137,18 @@ pub fn events_to_notes(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> 
                                 }),
                             });
                         }
-                        Some(_) => (), // FIXME Need to convert controller events
                         None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev),
+                        _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
                     }
                 }
-                _ => (),
+                MidiMessage::Controller { controller, value } => lane_еvents.push(LaneEvent {
+                    at: Duration::from_micros(at),
+                    event: LaneEventType::Controller(ControllerSetValue {
+                        controller_id: controller.into(),
+                        value: value.into(),
+                    }),
+                }),
+                _ => eprintln!("DEBUG Event ignored {:?}", ev),
             },
             _ => (),
         };

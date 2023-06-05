@@ -2,7 +2,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
 use iced::keyboard::Event::KeyPressed;
-use iced::keyboard::{KeyCode};
+use iced::keyboard::KeyCode;
 use iced::widget::{container, Row, Space};
 use iced::{
     executor, widget::Button, widget::Column, widget::Text, Alignment, Application, Command,
@@ -11,6 +11,7 @@ use iced::{
 use iced_native::Event::Keyboard;
 use iced_native::Subscription;
 use midir::{MidiInput, MidiInputConnection};
+use midly::live::LiveEvent;
 use rodio::{cpal, OutputStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,7 +21,7 @@ use vst::event::MidiEvent;
 use crate::engine::Engine;
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
-use crate::stave::{events_to_notes, Stave};
+use crate::stave::{to_lane_events, Stave};
 use crate::track::{Lane, TrackSource, TrackTime};
 
 mod engine;
@@ -50,7 +51,7 @@ pub fn main() {
     let smf_data = std::fs::read("yellow.mid").unwrap();
     let events = midi::load_smf(&smf_data);
     let track = Arc::new(Box::new(Lane {
-        events: events_to_notes(events.0, events.1 as u64),
+        events: to_lane_events(events.0, events.1 as u64),
     }));
     {
         let track_midi_source = TrackSource::new(track.clone());
@@ -84,9 +85,9 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
     let out_device = audio_host.default_output_device().unwrap();
-    println!("Default output device: {:?}", out_device.name());
+    println!("INFO Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
-    println!("Default output config: {:?}", out_conf);
+    println!("INFO Default output config: {:?}", out_conf);
     assert_eq!(out_conf.sample_format(), F32);
     let sample_format = F32; // To use with vst.
     let out_conf = StreamConfig {
@@ -94,7 +95,7 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
         sample_rate: out_conf.sample_rate(),
         buffer_size: BufferSize::Fixed(buffer_size),
     };
-    println!("Output config: {:?}", out_conf);
+    println!("INFO Output config: {:?}", out_conf);
     let (stream, stream_handle) =
         rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
     let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
@@ -135,6 +136,14 @@ fn midi_keyboard_input(
                 "midi-input",
                 move |t, ev, _data| {
                     println!("MIDI event: {} {:?} {}", t, ev, ev.len());
+                    { ////// DEBUG
+                        let x = ev.clone();
+                        let le = LiveEvent::parse(x)
+                            .expect("Unparsable input controller event.")
+                            .to_static();
+                        println!("MIDI event parsed: {} {:?}", t, le);
+                        // MIDI event parsed: 22643573 Ok(Midi { channel: u4(0), message: Controller { controller: u7(66), value: u7(0) } })
+                    }
                     if ev[0] == 254 {
                         return;
                     }
