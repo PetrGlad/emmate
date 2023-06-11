@@ -115,7 +115,7 @@ impl canvas::Program<()> for Stave {
 pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
     // TODO Think if we should use Note in the engine also - the calculations are very similar.
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
-    let mut lane_еvents = vec![];
+    let mut lane_events = vec![];
     let mut at: u64 = 0;
     for ev in events {
         at += ev.delta.as_int() as u64 * tick_duration;
@@ -128,7 +128,7 @@ pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> V
                     let on = ons.remove(&(key.as_int() as Pitch));
                     match on {
                         Some((t, MidiMessage::NoteOn { key, vel })) => {
-                            lane_еvents.push(LaneEvent {
+                            lane_events.push(LaneEvent {
                                 at: Duration::from_micros(t),
                                 event: LaneEventType::Note(Note {
                                     duration: Duration::from_micros(at - t),
@@ -141,7 +141,7 @@ pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> V
                         _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
                     }
                 }
-                MidiMessage::Controller { controller, value } => lane_еvents.push(LaneEvent {
+                MidiMessage::Controller { controller, value } => lane_events.push(LaneEvent {
                     at: Duration::from_micros(at),
                     event: LaneEventType::Controller(ControllerSetValue {
                         controller_id: controller.into(),
@@ -153,5 +153,7 @@ pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> V
             _ => (),
         };
     }
-    lane_еvents
+    // Notes are collected after they complete, This mixes the ordering with immediate events.
+    lane_events.sort_by_key(|ev| ev.at.as_micros());
+    lane_events
 }

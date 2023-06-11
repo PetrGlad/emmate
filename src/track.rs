@@ -72,7 +72,6 @@ impl EventSource for TrackSource {
     fn seek(&mut self, at: &TransportTime) {
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. Should work if the target is both before and after the current one.
-        // TODO Handle simultaneous events case.
         while *at < self.note_on_time(self.current_idx) {
             self.current_idx -= 1;
             if self.current_idx <= 0 {

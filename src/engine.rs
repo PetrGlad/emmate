@@ -115,8 +115,7 @@ impl Engine {
     }
 
     fn update_track_time(&mut self) {
-        self.running_at =
-            Instant::now().duration_since(self.reset_at).as_micros() as u64;
+        self.running_at = Instant::now().duration_since(self.reset_at).as_micros() as u64;
     }
 
     pub fn seek(&mut self, at: TransportTime) {
