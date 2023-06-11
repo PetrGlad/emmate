@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use iced::{Color, Element, Length, Point, Rectangle, Theme};
-use iced::widget::{canvas, Canvas};
 use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
+use iced::widget::{canvas, Canvas};
+use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use palette::Blend;
 use palette::Srgba;
@@ -25,34 +25,14 @@ impl Stave {
             .height(Length::Fill)
             .into()
     }
-}
 
-fn note_color(velocity: &Level) -> Color {
-    let ratio = 1.0 - velocity.clone() as f32 / 128.0;
-    let slow = Color::from_rgb(0.8 * &ratio, 0.9 * &ratio, 0.9 * &ratio);
-    let fast = Color::from_rgb(0.02, 0.02, 0.02);
-    let l1 = Srgba::from(slow).into_linear();
-    let l2 = Srgba::from(fast).into_linear();
-    Color::from(Srgba::from_linear(l1.lighten(l2)))
-}
-
-impl canvas::Program<()> for Stave {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(bounds.size());
-        let key_count = 88 as Pitch;
-        // Tone 60 is C3, tones start at C-2
-        let first_key = 21 as Pitch;
-        let tone_step = bounds.height / key_count as f32;
-        let bottom_line = key_count as f32 * tone_step;
-
+    fn draw_grid(
+        frame: &mut Frame,
+        key_count: Pitch,
+        first_key: &Pitch,
+        tone_step: f32,
+        bottom_line: f32,
+    ) {
         // Grid
         let black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
         for key in 0..key_count {
@@ -73,9 +53,39 @@ impl canvas::Program<()> for Stave {
                 Stroke::default().with_color(color),
             );
         }
+    }
+}
+
+fn note_color(velocity: &Level) -> Color {
+    let ratio = 1.0 - velocity.clone() as f32 / 128.0;
+    let slow = Color::from_rgb(0.8 * &ratio, 0.8 * &ratio, 0.9 * &ratio);
+    let fast = Color::from_rgb(0.02, 0.02, 0.02);
+    let l1 = Srgba::from(slow).into_linear();
+    let l2 = Srgba::from(fast).into_linear();
+    Color::from(Srgba::from_linear(l1.lighten(l2)))
+}
+
+impl canvas::Program<()> for Stave {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Vec<Geometry> {
+        let key_count = 88 as Pitch;
+        // Tone 60 is C3, tones start at C-2
+        let first_key = 21 as Pitch;
+        let tone_step = bounds.height / key_count as f32;
+        let bottom_line = key_count as f32 * tone_step;
+        let time_step = bounds.width * &self.time_scale;
+        let mut frame = Frame::new(bounds.size());
+
+        Self::draw_grid(&mut frame, key_count, &first_key, tone_step, bottom_line);
 
         // Notes
-        let time_step = bounds.width * &self.time_scale;
         for LaneEvent { at, event } in &self.track.events {
             let x = at.as_micros() as f32 * time_step;
             match event {
@@ -102,6 +112,21 @@ impl canvas::Program<()> for Stave {
                 _ => println!("Event {:?} not supported yet.", event),
             }
         }
+
+        // Cursor
+        frame.stroke(
+            &Path::line(
+                Point { x: 100.0, y: 0.0 },
+                Point {
+                    x: 100.0,
+                    y: frame.height(),
+                },
+            ),
+            Stroke::default()
+                .with_color(Color { r: 0.1, g: 0.8, b: 0.1, a: 0.7 })
+                .with_width(3.0)
+                .with_line_cap(LineCap::Square),
+        );
 
         // let background = Path::rectangle(Point::ORIGIN, frame.size());
         // frame.fill(&background, Color::WHITE);
