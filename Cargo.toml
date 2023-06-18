@@ -8,8 +8,10 @@ edition = "2021"
 [dependencies]
 iced = { version = "0.9.0", features = ["canvas", "debug", "tokio"] }
 iced_native = { version = "0.10.3" }
-
 palette = "0.6.1"
+futures = "0.3.28"
+async-std = "1.12.0"
+
 
 # Deps from iced "game_of_life" example
 # https://github.com/iced-rs/iced/blob/master/examples/game_of_life/Cargo.toml

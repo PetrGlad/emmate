@@ -3,14 +3,21 @@ use midly::live::LiveEvent;
 use midly::MidiMessage;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use iced_native::subscription::Recipe;
 use vst::event::Event;
 use vst::plugin::Plugin;
 
 /// uSecs from the start.
 pub type TransportTime = u64;
+
+#[derive(Clone, Debug)]
+pub enum StatusEvent {
+    TransportTime(TransportTime)
+}
 
 /// An event to be rendered by the engine at given time
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -63,6 +70,7 @@ impl Engine {
             running_at: 0,
             reset_at: Instant::now(),
             paused: false,
+            // notifications: Stream
         }
     }
 

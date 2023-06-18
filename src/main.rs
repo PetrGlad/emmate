@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
+use iced::futures::stream::BoxStream;
 use iced::keyboard::Event::KeyPressed;
 use iced::keyboard::KeyCode;
 use iced::widget::{container, Row, Space};
@@ -8,17 +9,19 @@ use iced::{
     executor, widget::Button, widget::Column, widget::Text, Alignment, Application, Command,
     Element, Length, Settings, Theme,
 };
+use iced_native::subscription::Recipe;
 use iced_native::Event::Keyboard;
-use iced_native::Subscription;
+use iced_native::{subscription, Hasher, Subscription};
 use midir::{MidiInput, MidiInputConnection};
 use midly::live::LiveEvent;
 use rodio::{cpal, OutputStream};
+use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use vst::event::Event;
 use vst::event::MidiEvent;
 
-use crate::engine::Engine;
+use crate::engine::{Engine, StatusEvent};
 use crate::midi::SmfSource;
 use crate::midi_vst::{OutputSource, Vst};
 use crate::stave::{to_lane_events, Stave};
@@ -40,7 +43,7 @@ pub fn main() {
     let (_stream, mut engine) = setup_audio_engine();
 
     if false {
-        // Want the section to compile still for now
+        // Want the section to still be compilable for now
         // Play MIDI from an SMD file.
         let smf_data = std::fs::read("yellow.mid").unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
@@ -136,7 +139,8 @@ fn midi_keyboard_input(
                 "midi-input",
                 move |t, ev, _data| {
                     println!("MIDI event: {} {:?} {}", t, ev, ev.len());
-                    { ////// DEBUG
+                    {
+                        ////// DEBUG
                         let x = ev.clone();
                         let le = LiveEvent::parse(x)
                             .expect("Unparsable input controller event.")
@@ -177,8 +181,9 @@ struct Ed {
 pub enum Message {
     ZoomIn(TrackTime),
     ZoomOut(TrackTime),
-    Event(iced_native::Event),
+    NativeEvent(iced_native::Event),
     Stave,
+    EngineEvent(StatusEvent),
 }
 
 pub struct UiInit {
@@ -199,6 +204,7 @@ impl Application for Ed {
                 stave: Stave {
                     track: init.track,
                     time_scale: 5e-9f32,
+                    cursor_position: 0,
                 },
             },
             Command::none(),
@@ -209,10 +215,6 @@ impl Application for Ed {
         String::from("emmate")
     }
 
-    fn subscription(&self) -> Subscription<Message> {
-        iced_native::subscription::events().map(Message::Event)
-    }
-
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::ZoomIn(_at) => {
@@ -221,12 +223,13 @@ impl Application for Ed {
             Message::ZoomOut(_at) => {
                 self.stave.time_scale *= 0.95;
             }
-            Message::Event(Keyboard(KeyPressed {
+            Message::NativeEvent(Keyboard(KeyPressed {
                 key_code: KeyCode::Space,
                 modifiers,
             })) if modifiers.is_empty() => self.engine.lock().unwrap().toggle_pause(),
-            Message::Event(ev) => println!("System event {:?}", ev),
-            Message::Stave => (),
+            Message::EngineEvent(StatusEvent::TransportTime(t)) => self.stave.cursor_position = t,
+            Message::NativeEvent(ev) => println!("System event {:?}", ev),
+            _ => (),
         };
         Command::none()
     }
@@ -252,4 +255,94 @@ impl Application for Ed {
             )
             .into()
     }
+
+    fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch([
+            iced_native::subscription::events().map(Message::NativeEvent),
+            engine_subscription(),
+        ])
+    }
 }
+
+// ---------------------------------------------------------------
+// Experimental
+
+pub struct EngineSubscription {}
+
+impl Recipe<Hasher, crate::engine::StatusEvent> for EngineSubscription {
+    type Output = Message;
+
+    fn hash(&self, state: &mut Hasher) {
+        std::any::TypeId::of::<StatusEvent>().hash(state);
+        // self.id.hash(state);
+        todo!()
+    }
+
+    fn stream(self: Box<Self>, input: BoxStream<StatusEvent>) -> BoxStream<Self::Output> {
+        // iced_futures::boxed_stream((self.spawn)(input))
+        todo!()
+    }
+}
+
+fn engine_subscription() -> Subscription<Message> {
+    use iced_native::futures::channel::mpsc;
+    use iced_native::futures::sink::SinkExt;
+
+    struct EngineSubscription;
+    subscription::channel(
+        std::any::TypeId::of::<EngineSubscription>(),
+        100,
+        |mut output| async move {
+            // let (sender, receiver) = mpsc::channel(100);
+            let mut fake_time = 0;
+            loop {
+                output
+                    .send(Message::EngineEvent(StatusEvent::TransportTime(
+                        fake_time * 500_000,
+                    )))
+                    .await;
+                async_std::task::sleep(std::time::Duration::from_micros(500_000)).await;
+                fake_time += 1;
+            }
+        },
+    )
+}
+
+// fn some_worker() -> Subscription<Event> {
+//     struct SomeWorker;
+//
+//     subscription::channel(std::any::TypeId::of::<SomeWorker>(), 100, |mut output| async move {
+//         let mut state = State::Starting;
+//
+//         loop {
+//             match &mut state {
+//                 State::Starting => {
+//                     // Create channel
+//                     let (sender, receiver) = mpsc::channel(100);
+//
+//                     // Send the sender back to the application
+//                     output.send(Event::Ready(sender)).await;
+//
+//                     // We are ready to receive messages
+//                     state = State::Ready(receiver);
+//                 }
+//                 State::Ready(receiver) => {
+//                     use iced_native::futures::StreamExt;
+//
+//                     // Read next input sent from `Application`
+//                     let input = receiver.select_next_some().await;
+//
+//                     match input {
+//                         Input::DoSomeWork => {
+//                             // Do some async work...
+//
+//                             // Finally, we can optionally produce a message to tell the
+//                             // `Application` the work is done
+//                             output.send(Event::WorkFinished).await;
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     })
+// }

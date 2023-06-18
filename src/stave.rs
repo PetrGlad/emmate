@@ -13,9 +13,10 @@ use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, No
 
 #[derive(Debug, Default)]
 pub struct Stave {
-    // Pixel/uSec
+    /// Pixel/uSec
     pub time_scale: f32,
     pub track: Arc<Box<Lane>>,
+    pub cursor_position: u64,
 }
 
 impl Stave {
@@ -114,11 +115,12 @@ impl canvas::Program<()> for Stave {
         }
 
         // Cursor
+        let cursor_position_px = self.cursor_position as f32 * time_step;
         frame.stroke(
             &Path::line(
-                Point { x: 100.0, y: 0.0 },
+                Point { x: cursor_position_px, y: 0.0 },
                 Point {
-                    x: 100.0,
+                    x: cursor_position_px,
                     y: frame.height(),
                 },
             ),

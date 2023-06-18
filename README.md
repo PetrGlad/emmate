@@ -1,4 +1,4 @@
-# emmate (Emma makes mate tee)
+# emmate
 
 Off grid MIDI editor with following goals:
 
