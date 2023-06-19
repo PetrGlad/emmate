@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
@@ -8,10 +8,11 @@ use iced::{Color, Element, Length, Point, Rectangle, Theme};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use palette::Blend;
 use palette::Srgba;
+use crate::engine::StatusEvent;
 
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Stave {
     /// Pixel/uSec
     pub time_scale: f32,

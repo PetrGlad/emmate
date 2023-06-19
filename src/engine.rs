@@ -1,4 +1,6 @@
 use crate::midi_vst::Vst;
+use futures::Stream;
+use iced_native::subscription::Recipe;
 use midly::live::LiveEvent;
 use midly::MidiMessage;
 use std::cmp::Ordering;
@@ -7,7 +9,7 @@ use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use iced_native::subscription::Recipe;
+use iced_native::futures::channel::mpsc;
 use vst::event::Event;
 use vst::plugin::Plugin;
 
@@ -16,7 +18,7 @@ pub type TransportTime = u64;
 
 #[derive(Clone, Debug)]
 pub enum StatusEvent {
-    TransportTime(TransportTime)
+    TransportTime(TransportTime),
 }
 
 /// An event to be rendered by the engine at given time
@@ -60,17 +62,18 @@ pub struct Engine {
     running_at: TransportTime,
     reset_at: Instant,
     paused: bool,
+    status_sender: mpsc::Sender<StatusEvent>,
 }
 
 impl Engine {
-    pub fn new(vst: Vst) -> Engine {
+    pub fn new(vst: Vst, status_sender: mpsc::Sender<StatusEvent>) -> Engine {
         Engine {
             vst,
             sources: Vec::new(),
             running_at: 0,
             reset_at: Instant::now(),
             paused: false,
-            // notifications: Stream
+            status_sender
         }
     }
 

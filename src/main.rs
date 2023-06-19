@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use vst::event::Event;
 use vst::event::MidiEvent;
+use iced_native::futures::channel::mpsc;
+use iced_native::futures::sink::SinkExt;
 
 use crate::engine::{Engine, StatusEvent};
 use crate::midi::SmfSource;
@@ -40,7 +42,7 @@ pub fn main() {
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
     // Stream reference keeps it open.
-    let (_stream, mut engine) = setup_audio_engine();
+    let (_stream, mut engine, engine_status_receiver) = setup_audio_engine();
 
     if false {
         // Want the section to still be compilable for now
@@ -73,6 +75,7 @@ pub fn main() {
         flags: UiInit {
             engine: engine.clone(),
             track: track.clone(),
+            engine_status_receiver
         },
         default_font: Option::None,
         default_text_size: 20.0,
@@ -84,7 +87,7 @@ pub fn main() {
     .unwrap()
 }
 
-fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
+fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, mpsc::Receiver<StatusEvent>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
     let out_device = audio_host.default_output_device().unwrap();
@@ -105,8 +108,9 @@ fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();
-    let engine = Engine::new(vst);
-    (stream, engine.start())
+    let (sender, receiver) = iced_native::futures::channel::mpsc::channel(100);
+    let engine = Engine::new(vst, sender);
+    (stream, engine.start(), receiver)
 }
 
 fn midi_keyboard_input(
@@ -175,6 +179,7 @@ fn midi_keyboard_input(
 struct Ed {
     engine: Arc<Mutex<Engine>>,
     stave: Stave,
+    engine_status_receiver: mpsc::Receiver<StatusEvent>
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +194,7 @@ pub enum Message {
 pub struct UiInit {
     engine: Arc<Mutex<Engine>>,
     track: Arc<Box<Lane>>,
+    engine_status_receiver: mpsc::Receiver<StatusEvent>
 }
 
 impl Application for Ed {
@@ -206,6 +212,7 @@ impl Application for Ed {
                     time_scale: 5e-9f32,
                     cursor_position: 0,
                 },
+                engine_status_receiver: init.engine_status_receiver
             },
             Command::none(),
         )
@@ -259,7 +266,7 @@ impl Application for Ed {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             iced_native::subscription::events().map(Message::NativeEvent),
-            engine_subscription(),
+            engine_subscription_prototype(self.engine_status_receiver.into()),
         ])
     }
 }
@@ -280,27 +287,24 @@ impl Recipe<Hasher, crate::engine::StatusEvent> for EngineSubscription {
 
     fn stream(self: Box<Self>, input: BoxStream<StatusEvent>) -> BoxStream<Self::Output> {
         // iced_futures::boxed_stream((self.spawn)(input))
-        todo!()
+        todo!();
     }
 }
 
-fn engine_subscription() -> Subscription<Message> {
-    use iced_native::futures::channel::mpsc;
-    use iced_native::futures::sink::SinkExt;
-
+fn engine_subscription_prototype(mut status_receiver: mpsc::Receiver<StatusEvent>) -> Subscription<Message> {
     struct EngineSubscription;
     subscription::channel(
         std::any::TypeId::of::<EngineSubscription>(),
         100,
         |mut output| async move {
-            // let (sender, receiver) = mpsc::channel(100);
             let mut fake_time = 0;
             loop {
-                output
+                let _ = output
                     .send(Message::EngineEvent(StatusEvent::TransportTime(
                         fake_time * 500_000,
                     )))
                     .await;
+                status_receiver.try_next().unwrap(); // Maybe can just redirect in a receipe
                 async_std::task::sleep(std::time::Duration::from_micros(500_000)).await;
                 fake_time += 1;
             }
