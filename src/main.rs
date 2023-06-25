@@ -43,7 +43,7 @@ pub fn main() {
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
     // Stream reference keeps it open.
-    let (_stream, mut engine, engine_status_receiver) = setup_audio_engine();
+    let (_stream, mut engine) = setup_audio_engine();
 
     if false {
         // Want the section to still be compilable for now
@@ -87,11 +87,7 @@ pub fn main() {
     .unwrap()
 }
 
-fn setup_audio_engine() -> (
-    OutputStream,
-    Arc<Mutex<Engine>>,
-    mpsc::Receiver<StatusEvent>,
-) {
+fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
     let out_device = audio_host.default_output_device().unwrap();
@@ -114,7 +110,7 @@ fn setup_audio_engine() -> (
         .unwrap();
     let (sender, receiver) = iced_native::futures::channel::mpsc::channel(100);
     let engine = Engine::new(vst, sender);
-    (stream, engine.start(), receiver)
+    (stream, engine.start())
 }
 
 fn midi_keyboard_input(
@@ -267,7 +263,7 @@ impl Application for Ed {
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
             iced_native::subscription::events().map(Message::NativeEvent),
-            // TODO engine_subscription_prototype(self.engine_status_receiver),
+            engine_subscription_prototype(),
         ])
     }
 }
@@ -292,9 +288,7 @@ impl Recipe<Hasher, crate::engine::StatusEvent> for EngineSubscription {
     }
 }
 
-fn engine_subscription_prototype(
-    status_receiver: Box<mpsc::Receiver<StatusEvent>>,
-) -> Subscription<Message> {
+fn engine_subscription_prototype() -> Subscription<Message> {
     struct EngineSubscription;
     subscription::channel(
         std::any::TypeId::of::<EngineSubscription>(),
