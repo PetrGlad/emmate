@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
-use iced::widget::{canvas, Canvas};
 use iced::{Color, Element, Length, Point, Rectangle, Theme};
+use iced::widget::{canvas, Canvas};
+use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use palette::Blend;
 use palette::Srgba;
-use crate::engine::StatusEvent;
 
+use crate::engine::StatusEvent;
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
 #[derive(Debug)]
@@ -119,14 +119,22 @@ impl canvas::Program<()> for Stave {
         let cursor_position_px = self.cursor_position as f32 * time_step;
         frame.stroke(
             &Path::line(
-                Point { x: cursor_position_px, y: 0.0 },
+                Point {
+                    x: cursor_position_px,
+                    y: 0.0,
+                },
                 Point {
                     x: cursor_position_px,
                     y: frame.height(),
                 },
             ),
             Stroke::default()
-                .with_color(Color { r: 0.1, g: 0.8, b: 0.1, a: 0.7 })
+                .with_color(Color {
+                    r: 0.1,
+                    g: 0.8,
+                    b: 0.1,
+                    a: 0.7,
+                })
                 .with_width(3.0)
                 .with_line_cap(LineCap::Square),
         );

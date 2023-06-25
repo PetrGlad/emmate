@@ -1,17 +1,19 @@
-use crate::midi_vst::Vst;
-use futures::Stream;
-use iced_native::subscription::Recipe;
-use midly::live::LiveEvent;
-use midly::MidiMessage;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use futures::Stream;
 use iced_native::futures::channel::mpsc;
+use iced_native::subscription::Recipe;
+use midly::live::LiveEvent;
+use midly::MidiMessage;
 use vst::event::Event;
 use vst::plugin::Plugin;
+
+use crate::midi_vst::Vst;
 
 /// uSecs from the start.
 pub type TransportTime = u64;
@@ -27,6 +29,8 @@ pub struct EngineEvent {
     pub at: TransportTime,
     pub event: LiveEvent<'static>,
 }
+
+pub type StatusEventReceiver = dyn Fn(EngineEvent) -> ();
 
 impl Ord for EngineEvent {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -73,7 +77,7 @@ impl Engine {
             running_at: 0,
             reset_at: Instant::now(),
             paused: false,
-            status_sender
+            status_sender,
         }
     }
 
