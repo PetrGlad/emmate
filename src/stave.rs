@@ -1,13 +1,15 @@
+use eframe::egui::{self, Color32, Pos2, Rect, Response, Stroke, Ui};
+use egui::Rgba;
 use std::collections::HashMap;
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-use iced::{Color, Element, Length, Point, Rectangle, Theme};
-use iced::widget::{canvas, Canvas};
-use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
+// use iced::{Color, Element, Length, Point, Rectangle, Theme};
+// use iced::widget::{canvas, Canvas};
+// use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
-use palette::Blend;
-use palette::Srgba;
+// use palette::Blend;
+// use palette::Srgba;
 
 use crate::engine::StatusEvent;
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
@@ -20,72 +22,34 @@ pub struct Stave {
     pub cursor_position: u64,
 }
 
+impl PartialEq for Stave {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO Want this eq implementation so egui knows when not to re-render.
+        //   but comparing stave every time will be expensive. Need an optimization for that.
+        //   Not comparing Lane for now, but this will cause outdated view when the notes change.
+        self.time_scale == other.time_scale
+            && self.cursor_position == other.cursor_position
+    }
+}
+
 impl Stave {
-    pub fn view(&self) -> Element<()> {
-        Canvas::new(self)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    }
-
-    fn draw_grid(
-        frame: &mut Frame,
-        key_count: Pitch,
-        first_key: &Pitch,
-        tone_step: f32,
-        bottom_line: f32,
-    ) {
-        // Grid
-        let black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
-        for key in 0..key_count {
-            let color = if black_key(&(first_key + key)) {
-                Color::from_rgb(0.1, 0.1, 0.1)
-            } else {
-                Color::from_rgb(0.9, 0.9, 0.9)
-            };
-            let y = bottom_line - tone_step * key as f32;
-            frame.stroke(
-                &Path::line(
-                    Point { x: 0.0, y },
-                    Point {
-                        x: frame.width(),
-                        y,
-                    },
-                ),
-                Stroke::default().with_color(color),
-            );
-        }
-    }
-}
-
-fn note_color(velocity: &Level) -> Color {
-    let ratio = 1.0 - velocity.clone() as f32 / 128.0;
-    let slow = Color::from_rgb(0.8 * &ratio, 0.8 * &ratio, 0.9 * &ratio);
-    let fast = Color::from_rgb(0.02, 0.02, 0.02);
-    let l1 = Srgba::from(slow).into_linear();
-    let l2 = Srgba::from(fast).into_linear();
-    Color::from(Srgba::from_linear(l1.lighten(l2)))
-}
-
-impl canvas::Program<()> for Stave {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &Self::State,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: Cursor,
-    ) -> Vec<Geometry> {
+    pub fn view(&self, ui: &mut Ui) {
         let key_count = 88 as Pitch;
         // Tone 60 is C3, tones start at C-2
         let first_key = 21 as Pitch;
-        let tone_step = bounds.height / key_count as f32;
-        let bottom_line = key_count as f32 * tone_step;
-        let time_step = bounds.width * &self.time_scale;
-        let mut frame = Frame::new(bounds.size());
+        let bounds = ui.available_rect_before_wrap();
+        let half_tone_step = bounds.height() / key_count as f32;
+        let time_step = bounds.width() * &self.time_scale;
+        let bottom_line = bounds.max.y - half_tone_step / 2.0;
 
-        Self::draw_grid(&mut frame, key_count, &first_key, tone_step, bottom_line);
+        Self::draw_grid(
+            ui,
+            bounds,
+            key_count,
+            &first_key,
+            half_tone_step,
+            bottom_line,
+        );
 
         // Notes
         for LaneEvent { at, event } in &self.track.events {
@@ -96,19 +60,24 @@ impl canvas::Program<()> for Stave {
                     velocity,
                     duration,
                 }) => {
-                    let y = bottom_line - tone_step * (pitch - first_key) as f32;
-                    frame.stroke(
-                        &Path::line(
-                            Point { x, y },
-                            Point {
-                                x: x + (duration.as_micros() as f32 * time_step),
-                                y,
-                            },
-                        ),
-                        Stroke::default()
-                            .with_color(note_color(&velocity))
-                            .with_width(&tone_step * 0.9)
-                            .with_line_cap(LineCap::Round),
+                    let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
+                    let x_end = x + (duration.as_micros() as f32 * time_step);
+                    let stroke_width = &half_tone_step * 0.9;
+                    let stroke_color = note_color(&velocity);
+                    ui.painter().hline(
+                        x..=x_end,
+                        y,
+                        Stroke {
+                            width: stroke_width,
+                            color: stroke_color,
+                        },
+                    );
+                    ui.painter()
+                        .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
+                    ui.painter().circle_filled(
+                        Pos2::new(x_end, y),
+                        stroke_width / 2.0,
+                        stroke_color,
                     );
                 }
                 _ => println!("Event {:?} not supported yet.", event),
@@ -117,35 +86,50 @@ impl canvas::Program<()> for Stave {
 
         // Cursor
         let cursor_position_px = self.cursor_position as f32 * time_step;
-        frame.stroke(
-            &Path::line(
-                Point {
-                    x: cursor_position_px,
-                    y: 0.0,
-                },
-                Point {
-                    x: cursor_position_px,
-                    y: frame.height(),
-                },
-            ),
-            Stroke::default()
-                .with_color(Color {
-                    r: 0.1,
-                    g: 0.8,
-                    b: 0.1,
-                    a: 0.7,
-                })
-                .with_width(3.0)
-                .with_line_cap(LineCap::Square),
-        );
-
-        // let background = Path::rectangle(Point::ORIGIN, frame.size());
-        // frame.fill(&background, Color::WHITE);
-
-        // let circle = Path::circle(frame.center(), self.time_scale.into());
-        // frame.fill(&circle, Color::BLACK);
-        vec![frame.into_geometry()]
+        ui.painter().vline(
+            bounds.min.x + cursor_position_px,
+            bounds.y_range(),
+            Stroke {
+                width: 2.0,
+                color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
+            },
+        )
     }
+
+    fn draw_grid(
+        ui: &mut Ui,
+        bounds: Rect,
+        key_count: Pitch,
+        first_key: &Pitch,
+        tone_step: f32,
+        bottom_line: f32,
+    ) {
+        let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
+        for key in 0..key_count {
+            let color = if is_black_key(&(first_key + key)) {
+                Rgba::from_rgb(0.05, 0.05, 0.05)
+            } else {
+                Rgba::from_rgb(0.8, 0.8, 0.8)
+            };
+            let y = bottom_line - tone_step * key as f32;
+            ui.painter().hline(
+                bounds.min.x..=bounds.max.x,
+                y,
+                Stroke {
+                    width: 1.0,
+                    color: color.into(),
+                },
+            );
+        }
+    }
+}
+
+fn note_color(velocity: &Level) -> Color32 {
+    egui::lerp(
+        Rgba::from_rgb(0.4, 0.5, 0.5)..=Rgba::from_rgb(0.0, 0.0, 0.0),
+        *velocity as f32 / 128.0,
+    )
+    .into()
 }
 
 pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {

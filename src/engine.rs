@@ -5,9 +5,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use futures::Stream;
-use iced_native::futures::channel::mpsc;
-use iced_native::subscription::Recipe;
 use midly::live::LiveEvent;
 use midly::MidiMessage;
 use vst::event::Event;
@@ -66,18 +63,18 @@ pub struct Engine {
     running_at: TransportTime,
     reset_at: Instant,
     paused: bool,
-    status_sender: mpsc::Sender<StatusEvent>,
+    // status_sender: mpsc::Sender<StatusEvent>,
 }
 
 impl Engine {
-    pub fn new(vst: Vst, status_sender: mpsc::Sender<StatusEvent>) -> Engine {
+    pub fn new(vst: Vst/*, status_sender: mpsc::Sender<StatusEvent>*/) -> Engine {
         Engine {
             vst,
             sources: Vec::new(),
             running_at: 0,
             reset_at: Instant::now(),
             paused: false,
-            status_sender,
+            // status_sender,
         }
     }
 
