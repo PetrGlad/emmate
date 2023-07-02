@@ -1,15 +1,10 @@
-use eframe::egui::{self, Color32, Pos2, Rect, Response, Stroke, Ui};
+use eframe::egui::{self, Color32, Frame, Margin, Pos2, Rect, Response, Rounding, Stroke, Ui};
 use egui::Rgba;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-// use iced::{Color, Element, Length, Point, Rectangle, Theme};
-// use iced::widget::{canvas, Canvas};
-// use iced::widget::canvas::{Cursor, Frame, Geometry, LineCap, Path, Stroke};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
-// use palette::Blend;
-// use palette::Srgba;
 
 use crate::engine::StatusEvent;
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
@@ -27,73 +22,83 @@ impl PartialEq for Stave {
         // TODO Want this eq implementation so egui knows when not to re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
         //   Not comparing Lane for now, but this will cause outdated view when the notes change.
-        self.time_scale == other.time_scale
-            && self.cursor_position == other.cursor_position
+        self.time_scale == other.time_scale && self.cursor_position == other.cursor_position
     }
 }
 
 impl Stave {
     pub fn view(&self, ui: &mut Ui) {
-        let key_count = 88 as Pitch;
-        // Tone 60 is C3, tones start at C-2
-        let first_key = 21 as Pitch;
-        let bounds = ui.available_rect_before_wrap();
-        let half_tone_step = bounds.height() / key_count as f32;
-        let time_step = bounds.width() * &self.time_scale;
-        let bottom_line = bounds.max.y - half_tone_step / 2.0;
+        Frame::none()
+            .inner_margin(Margin::symmetric(4.0, 4.0))
+            .stroke(Stroke::NONE)
+            .show(ui, |ui| {
+                let bounds = ui.available_rect_before_wrap();
+                // ui.painter().rect_filled(
+                //     bounds,
+                //     Rounding::none(),
+                //     Rgba::from_rgb(0.5, 0.7, 0.8),
+                // );
 
-        Self::draw_grid(
-            ui,
-            bounds,
-            key_count,
-            &first_key,
-            half_tone_step,
-            bottom_line,
-        );
+                let key_count = 88 as Pitch;
+                // Tone 60 is C3, tones start at C-2
+                let first_key = 21 as Pitch;
+                let half_tone_step = bounds.height() / key_count as f32;
+                let time_step = bounds.width() * &self.time_scale;
+                let bottom_line = bounds.max.y - half_tone_step / 2.0;
 
-        // Notes
-        for LaneEvent { at, event } in &self.track.events {
-            let x = at.as_micros() as f32 * time_step;
-            match event {
-                LaneEventType::Note(Note {
-                    pitch,
-                    velocity,
-                    duration,
-                }) => {
-                    let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
-                    let x_end = x + (duration.as_micros() as f32 * time_step);
-                    let stroke_width = &half_tone_step * 0.9;
-                    let stroke_color = note_color(&velocity);
-                    ui.painter().hline(
-                        x..=x_end,
-                        y,
-                        Stroke {
-                            width: stroke_width,
-                            color: stroke_color,
-                        },
-                    );
-                    ui.painter()
-                        .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
-                    ui.painter().circle_filled(
-                        Pos2::new(x_end, y),
-                        stroke_width / 2.0,
-                        stroke_color,
-                    );
+                Self::draw_grid(
+                    ui,
+                    bounds,
+                    key_count,
+                    &first_key,
+                    half_tone_step,
+                    bottom_line,
+                );
+
+                // Notes
+                for LaneEvent { at, event } in &self.track.events {
+                    let x = bounds.min.x + at.as_micros() as f32 * time_step;
+                    match event {
+                        LaneEventType::Note(Note {
+                                                pitch,
+                                                velocity,
+                                                duration,
+                                            }) => {
+                            let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
+                            let x_end = x + (duration.as_micros() as f32 * time_step);
+                            let stroke_width = &half_tone_step * 0.9;
+                            let stroke_color = note_color(&velocity);
+                            ui.painter().hline(
+                                x..=x_end,
+                                y,
+                                Stroke {
+                                    width: stroke_width,
+                                    color: stroke_color,
+                                },
+                            );
+                            ui.painter()
+                                .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
+                            ui.painter().circle_filled(
+                                Pos2::new(x_end, y),
+                                stroke_width / 2.0,
+                                stroke_color,
+                            );
+                        }
+                        _ => println!("Event {:?} not supported yet.", event),
+                    }
                 }
-                _ => println!("Event {:?} not supported yet.", event),
-            }
-        }
 
-        // Cursor
-        let cursor_position_px = self.cursor_position as f32 * time_step;
-        ui.painter().vline(
-            bounds.min.x + cursor_position_px,
-            bounds.y_range(),
-            Stroke {
-                width: 2.0,
-                color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
-            },
-        )
+                // Cursor
+                let cursor_position_px = self.cursor_position as f32 * time_step;
+                ui.painter().vline(
+                    bounds.min.x + cursor_position_px,
+                    bounds.y_range(),
+                    Stroke {
+                        width: 2.0,
+                        color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
+                    },
+                )
+            });
     }
 
     fn draw_grid(

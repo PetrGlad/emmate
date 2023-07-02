@@ -30,7 +30,7 @@ pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();
-    // let (sender, receiver) = iced_native::futures::channel::mpsc::channel(100);
+    // TODO Send transport time notifications from engine to UI, so cursor position can be synced.
     let engine = Engine::new(vst /*, sender*/);
     (stream, engine.start())
 }
