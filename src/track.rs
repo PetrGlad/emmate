@@ -8,7 +8,6 @@ pub type Pitch = u8;
 pub type ControllerId = u8;
 pub type Level = u8;
 pub type ChannelId = u8;
-pub type TrackTime = Duration;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Note {

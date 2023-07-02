@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex, RwLock};
 
-use eframe::egui::Response;
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 

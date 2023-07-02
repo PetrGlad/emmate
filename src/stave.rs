@@ -33,12 +33,6 @@ impl Stave {
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
-                // ui.painter().rect_filled(
-                //     bounds,
-                //     Rounding::none(),
-                //     Rgba::from_rgb(0.5, 0.7, 0.8),
-                // );
-
                 let key_count = 88 as Pitch;
                 // Tone 60 is C3, tones start at C-2
                 let first_key = 21 as Pitch;
@@ -117,7 +111,7 @@ impl Stave {
             let color = if is_black_key(&(first_key + key)) {
                 Rgba::from_rgb(0.05, 0.05, 0.05)
             } else {
-                Rgba::from_rgb(0.8, 0.8, 0.8)
+                Rgba::from_rgb(0.55, 0.55, 0.55)
             };
             let y = bottom_line - tone_step * key as f32;
             ui.painter().hline(
