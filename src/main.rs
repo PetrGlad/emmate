@@ -1,15 +1,11 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use eframe::{egui, Theme};
-use midir::{MidiInputConnection};
-use rodio::{cpal, OutputStream};
 
 use crate::app::EmApp;
-use crate::engine::{Engine, StatusEvent};
 use crate::midi::SmfSource;
-use crate::midi_vst::{Vst};
-use crate::stave::{Stave, to_lane_events};
-use crate::track::{Lane, TrackSource, TrackTime};
+use crate::stave::{ to_lane_events};
+use crate::track::{Lane, TrackSource};
 
 mod app;
 mod audio_setup;
@@ -63,7 +59,7 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|_cc| Box::new(EmApp::new(ui_engine, ui_track))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, ui_engine, ui_track))),
     )
     .expect("Emmate UI")
 }

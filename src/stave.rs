@@ -1,12 +1,12 @@
-use eframe::egui::{self, Color32, Frame, Margin, Pos2, Rect, Response, Rounding, Stroke, Ui};
-use egui::Rgba;
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
+use eframe::egui::{self, Color32, Frame, Margin, Pos2, Rect, Stroke, Ui};
+use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
+use crate::engine::TransportTime;
 
-use crate::engine::StatusEvent;
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
 #[derive(Debug)]
@@ -14,7 +14,7 @@ pub struct Stave {
     /// Pixel/uSec
     pub time_scale: f32,
     pub track: Arc<Box<Lane>>,
-    pub cursor_position: u64,
+    pub cursor_position: TransportTime,
 }
 
 impl PartialEq for Stave {
@@ -60,10 +60,10 @@ impl Stave {
                     let x = bounds.min.x + at.as_micros() as f32 * time_step;
                     match event {
                         LaneEventType::Note(Note {
-                                                pitch,
-                                                velocity,
-                                                duration,
-                                            }) => {
+                            pitch,
+                            velocity,
+                            duration,
+                        }) => {
                             let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
                             let x_end = x + (duration.as_micros() as f32 * time_step);
                             let stroke_width = &half_tone_step * 0.9;
@@ -76,8 +76,11 @@ impl Stave {
                                     color: stroke_color,
                                 },
                             );
-                            ui.painter()
-                                .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
+                            ui.painter().circle_filled(
+                                Pos2::new(x, y),
+                                stroke_width / 2.0,
+                                stroke_color,
+                            );
                             ui.painter().circle_filled(
                                 Pos2::new(x_end, y),
                                 stroke_width / 2.0,

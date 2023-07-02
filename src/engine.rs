@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::hash::Hasher;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -27,7 +26,7 @@ pub struct EngineEvent {
     pub event: LiveEvent<'static>,
 }
 
-pub type StatusEventReceiver = dyn Fn(EngineEvent) -> ();
+pub type StatusEventReceiver = dyn Fn(StatusEvent) -> () + Send;
 
 impl Ord for EngineEvent {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -63,18 +62,18 @@ pub struct Engine {
     running_at: TransportTime,
     reset_at: Instant,
     paused: bool,
-    // status_sender: mpsc::Sender<StatusEvent>,
+    status_receiver: Option<Box<StatusEventReceiver>>,
 }
 
 impl Engine {
-    pub fn new(vst: Vst/*, status_sender: mpsc::Sender<StatusEvent>*/) -> Engine {
+    pub fn new(vst: Vst) -> Engine {
         Engine {
             vst,
             sources: Vec::new(),
             running_at: 0,
             reset_at: Instant::now(),
             paused: false,
-            // status_sender,
+            status_receiver: None,
         }
     }
 
@@ -128,6 +127,9 @@ impl Engine {
 
     fn update_track_time(&mut self) {
         self.running_at = Instant::now().duration_since(self.reset_at).as_micros() as u64;
+        self.status_receiver
+            .as_mut()
+            .map(|recv| recv(StatusEvent::TransportTime(self.running_at)));
     }
 
     pub fn seek(&mut self, at: TransportTime) {
@@ -154,13 +156,18 @@ impl Engine {
     }
 
     /// Process the event immediately
-    /// TODO Remove? MIDI Event source can do that now.
     pub fn process(&self, event: Event) {
+        // TODO Remove this method? MIDI Event source can do that now (for event types that we support).
+
         let events_list = [event];
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
         events_buffer.store_events(events_list);
         let mut plugin = self.vst.plugin.lock().unwrap();
         plugin.process_events(events_buffer.events());
+    }
+
+    pub fn set_status_receiver(&mut self, receiver: Option<Box<StatusEventReceiver>>) {
+        self.status_receiver = receiver;
     }
 }
 
