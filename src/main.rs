@@ -5,7 +5,8 @@ use eframe::{egui, Theme};
 use crate::app::EmApp;
 use crate::midi::SmfSource;
 use crate::stave::{ to_lane_events};
-use crate::track::{Lane, TrackSource};
+use crate::track::{Lane};
+use crate::track_source::TrackSource;
 
 mod app;
 mod audio_setup;
@@ -15,6 +16,7 @@ mod midi;
 mod midi_vst;
 mod stave;
 mod track;
+mod track_source;
 
 pub fn main() {
     {

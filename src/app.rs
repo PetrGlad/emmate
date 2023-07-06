@@ -25,6 +25,8 @@ impl EmApp {
             stave: Arc::new(RwLock::new(Stave {
                 track,
                 time_scale: 5e-9f32,
+                viewport_start_usec: 0,
+                viewport_end_usec: 10_000_000, // TODO Use Duraion instead?
                 cursor_position: 0,
             })),
         };

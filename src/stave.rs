@@ -11,9 +11,11 @@ use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, No
 
 #[derive(Debug)]
 pub struct Stave {
+    pub track: Arc<Box<Lane>>,
     /// Pixel/uSec
     pub time_scale: f32,
-    pub track: Arc<Box<Lane>>,
+    pub viewport_start_usec: u64,
+    pub viewport_end_usec: u64,
     pub cursor_position: TransportTime,
 }
 
@@ -81,7 +83,7 @@ impl Stave {
                                 stroke_color,
                             );
                         }
-                        _ => println!("Event {:?} not supported yet.", event),
+                        _ => println!("Not displaying event {:?}, unsupported type.", event),
                     }
                 }
 

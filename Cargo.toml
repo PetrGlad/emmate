@@ -13,7 +13,7 @@ egui_extras = { version = "0.22.0" }
 #tokio = { version = "1.0", features = ["sync"] }
 #itertools = "0.9"
 #rustc-hash = "1.1"
-# bytes = "1.4.0"
+#bytes = "1.4.0"
 
 # https://github.com/RustAudio/vst-rs
 vst = "0.3.0"
