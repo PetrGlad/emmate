@@ -57,8 +57,6 @@ impl Ord for LaneEvent {
 
 #[derive(Debug, Default)]
 pub struct Lane {
-    /**
-       Notes should always be ordered by start time ascending. Not enforced yet.
-    */
+    //       Notes should always be ordered by start time ascending. Not enforced yet.
     pub events: Vec<LaneEvent>,
 }

@@ -1,11 +1,12 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::engine::TransportTime;
 use eframe::egui::{self, Color32, Frame, Margin, Pos2, Rect, Stroke, Ui};
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
-use crate::engine::TransportTime;
 
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
@@ -14,8 +15,8 @@ pub struct Stave {
     pub track: Arc<Box<Lane>>,
     /// Pixel/uSec
     pub time_scale: f32,
-    pub viewport_start_usec: u64,
-    pub viewport_end_usec: u64,
+    pub viewport_left: f32,
+
     pub cursor_position: TransportTime,
 }
 
@@ -23,7 +24,7 @@ impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
         // TODO Want this eq implementation so egui knows when not to re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
-        //   Not comparing Lane for now, but this will cause outdated view when the notes change.
+        //   Not comparing Lane for now, but this should cause outdated view when the notes change.
         self.time_scale == other.time_scale && self.cursor_position == other.cursor_position
     }
 }
@@ -51,53 +52,69 @@ impl Stave {
                     bottom_line,
                 );
 
-                // Notes
+                let time_to_x = |at| bounds.min.x + (at as f32 - self.viewport_left) * time_step;
                 for LaneEvent { at, event } in &self.track.events {
-                    let x = bounds.min.x + at.as_micros() as f32 * time_step;
+                    let x = time_to_x(at.as_micros() as u64);
                     match event {
-                        LaneEventType::Note(Note {
-                            pitch,
-                            velocity,
-                            duration,
-                        }) => {
-                            let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
-                            let x_end = x + (duration.as_micros() as f32 * time_step);
-                            let stroke_width = &half_tone_step * 0.9;
-                            let stroke_color = note_color(&velocity);
-                            ui.painter().hline(
-                                x..=x_end,
-                                y,
-                                Stroke {
-                                    width: stroke_width,
-                                    color: stroke_color,
-                                },
-                            );
-                            ui.painter().circle_filled(
-                                Pos2::new(x, y),
-                                stroke_width / 2.0,
-                                stroke_color,
-                            );
-                            ui.painter().circle_filled(
-                                Pos2::new(x_end, y),
-                                stroke_width / 2.0,
-                                stroke_color,
+                        LaneEventType::Note(n) => {
+                            Self::draw_note(
+                                ui,
+                                first_key,
+                                &half_tone_step,
+                                time_step,
+                                bottom_line,
+                                x,
+                                n,
                             );
                         }
                         _ => println!("Not displaying event {:?}, unsupported type.", event),
                     }
                 }
 
-                // Cursor
-                let cursor_position_px = self.cursor_position as f32 * time_step;
-                ui.painter().vline(
-                    bounds.min.x + cursor_position_px,
-                    bounds.y_range(),
-                    Stroke {
-                        width: 2.0,
-                        color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
-                    },
-                )
+                self.draw_cursor(ui, bounds, time_to_x(self.cursor_position));
             });
+    }
+
+    fn draw_cursor(&self, ui: &mut Ui, bounds: Rect, x: f32) {
+        ui.painter().vline(
+            x,
+            bounds.y_range(),
+            Stroke {
+                width: 2.0,
+                color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
+            },
+        )
+    }
+
+    fn draw_note(
+        ui: &mut Ui,
+        first_key: Pitch,
+        half_tone_step: &f32,
+        time_step: f32,
+        bottom_line: f32,
+        x: f32,
+        Note {
+            pitch,
+            velocity,
+            duration,
+        }: &Note,
+    ) {
+        let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
+        let x_end = x + (duration.as_micros() as f32 * time_step);
+        let stroke_width = half_tone_step * 0.9;
+        let stroke_color = note_color(&velocity);
+        ui.painter().hline(
+            x..=x_end,
+            y,
+            Stroke {
+                width: stroke_width,
+                color: stroke_color,
+            },
+        );
+        ui.painter()
+            .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
+        ui.painter()
+            .circle_filled(Pos2::new(x_end, y), stroke_width / 2.0, stroke_color);
     }
 
     fn draw_grid(

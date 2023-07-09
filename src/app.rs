@@ -25,8 +25,7 @@ impl EmApp {
             stave: Arc::new(RwLock::new(Stave {
                 track,
                 time_scale: 5e-9f32,
-                viewport_start_usec: 0,
-                viewport_end_usec: 10_000_000, // TODO Use Duraion instead?
+                viewport_left: 0.0,
                 cursor_position: 0,
             })),
         };
@@ -78,6 +77,12 @@ impl eframe::App for EmApp {
                                 }
                                 if ui.button("Zoom out").clicked() {
                                     stave.time_scale /= 1.05;
+                                }
+                                if ui.button("< Shift <").clicked() {
+                                    stave.viewport_left -= 1_000_000.0;
+                                }
+                                if ui.button("> Shift >").clicked() {
+                                    stave.viewport_left += 1_000_000.0;
                                 }
                             });
                         })
