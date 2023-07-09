@@ -1,10 +1,9 @@
 use std::collections::HashMap;
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::engine::TransportTime;
-use eframe::egui::{self, Color32, Frame, Margin, Pos2, Rect, Stroke, Ui};
+use eframe::egui::{self, Color32, Frame, Margin, Painter, Pos2, Rect, Stroke, Ui};
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
@@ -42,9 +41,10 @@ impl Stave {
                 let half_tone_step = bounds.height() / key_count as f32;
                 let time_step = bounds.width() * &self.time_scale;
                 let bottom_line = bounds.max.y - half_tone_step / 2.0;
+                let painter = ui.painter_at(bounds);
 
                 Self::draw_grid(
-                    ui,
+                    &painter,
                     bounds,
                     key_count,
                     &first_key,
@@ -58,7 +58,7 @@ impl Stave {
                     match event {
                         LaneEventType::Note(n) => {
                             Self::draw_note(
-                                ui,
+                                &painter,
                                 first_key,
                                 &half_tone_step,
                                 time_step,
@@ -71,14 +71,14 @@ impl Stave {
                     }
                 }
 
-                self.draw_cursor(ui, bounds, time_to_x(self.cursor_position));
+                self.draw_cursor(&painter, bounds, time_to_x(self.cursor_position));
             });
     }
 
-    fn draw_cursor(&self, ui: &mut Ui, bounds: Rect, x: f32) {
-        ui.painter().vline(
+    fn draw_cursor(&self, painter: &Painter, bounds: Rect, x: f32) {
+        painter.vline(
             x,
-            bounds.y_range(),
+            painter.clip_rect().y_range(),
             Stroke {
                 width: 2.0,
                 color: Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
@@ -87,7 +87,7 @@ impl Stave {
     }
 
     fn draw_note(
-        ui: &mut Ui,
+        painter: &Painter,
         first_key: Pitch,
         half_tone_step: &f32,
         time_step: f32,
@@ -103,7 +103,7 @@ impl Stave {
         let x_end = x + (duration.as_micros() as f32 * time_step);
         let stroke_width = half_tone_step * 0.9;
         let stroke_color = note_color(&velocity);
-        ui.painter().hline(
+        painter.hline(
             x..=x_end,
             y,
             Stroke {
@@ -111,14 +111,12 @@ impl Stave {
                 color: stroke_color,
             },
         );
-        ui.painter()
-            .circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
-        ui.painter()
-            .circle_filled(Pos2::new(x_end, y), stroke_width / 2.0, stroke_color);
+        painter.circle_filled(Pos2::new(x, y), stroke_width / 2.0, stroke_color);
+        painter.circle_filled(Pos2::new(x_end, y), stroke_width / 2.0, stroke_color);
     }
 
     fn draw_grid(
-        ui: &mut Ui,
+        painter: &Painter,
         bounds: Rect,
         key_count: Pitch,
         first_key: &Pitch,
@@ -133,7 +131,7 @@ impl Stave {
                 Rgba::from_rgb(0.55, 0.55, 0.55)
             };
             let y = bottom_line - tone_step * key as f32;
-            ui.painter().hline(
+            painter.hline(
                 bounds.min.x..=bounds.max.x,
                 y,
                 Stroke {
