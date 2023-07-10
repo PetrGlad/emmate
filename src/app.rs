@@ -1,15 +1,22 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
-use crate::engine::{Engine, StatusEvent};
+use crate::engine::{Engine, StatusEvent, TransportTime};
 use crate::stave::Stave;
 use crate::track::Lane;
+
+enum Message {
+    UpdateTransportTime(TransportTime),
+}
 
 pub struct EmApp {
     engine: Arc<Mutex<Engine>>,
     stave: Arc<RwLock<Stave>>,
+    message_receiver: mpsc::Receiver<Message>,
+
+    follow_playback: bool,
 }
 
 impl PartialEq for EmApp {
@@ -19,29 +26,35 @@ impl PartialEq for EmApp {
 }
 
 impl EmApp {
-    pub fn new(ctx: &CreationContext, engine: Arc<Mutex<Engine>>, track: Arc<Box<Lane>>) -> EmApp {
+    pub fn new(
+        ctx: &CreationContext,
+        engine: Arc<Mutex<Engine>>,
+        track: Arc<Box<Lane>>,
+    ) -> EmApp {
+        let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
             engine,
             stave: Arc::new(RwLock::new(Stave {
                 track,
-                time_scale: 5e-9f32,
+                time_scale: 2e-6f32,
                 viewport_left: 0.0,
                 cursor_position: 0,
             })),
+            message_receiver,
+            follow_playback: false,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
-        let stave2 = app.stave.clone();
         app.engine
             .lock()
             .unwrap()
             .set_status_receiver(Some(Box::new(move |ev| {
-                // TODO Throttle updates (30..60 times per second should be enough).
+                // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
+                //      Should not miss one-off updates, maybe skip only in same-event-type runs.
                 match ev {
                     StatusEvent::TransportTime(t) => {
-                        if let Ok(mut locked) = stave2.try_write() {
-                            locked.cursor_position = t
-                        }
+                        // May likely ignore send error here
+                        message_sender.send(Message::UpdateTransportTime(t)).unwrap();
                     }
                 }
                 engine_receiver_ctx.request_repaint();
@@ -52,6 +65,22 @@ impl EmApp {
 
 impl eframe::App for EmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Ok(message) = self.message_receiver.try_recv() {
+            match message {
+                Message::UpdateTransportTime(t) => {
+                    if let Ok(mut locked) = self.stave.try_write() {
+                        // TODO Cursor position seem to be out of sync with dranw notes now :(
+                        locked.cursor_position = t
+                    }
+                    // TODO Update also stave when follow playback in the app is true.
+                    if self.follow_playback {
+                        // TODO Stave does not need locks (track - does).
+                        //      Can update track here directly.
+                    }
+                }
+            }
+        }
+
         ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
@@ -84,6 +113,7 @@ impl eframe::App for EmApp {
                                 if ui.button("> Shift >").clicked() {
                                     stave.viewport_left += 1_000_000.0;
                                 }
+                                ui.checkbox(&mut self.follow_playback, "Follow playback")
                             });
                         })
                     }

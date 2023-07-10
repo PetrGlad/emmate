@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 
 use eframe::{egui, Theme};
 

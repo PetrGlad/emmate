@@ -39,7 +39,6 @@ impl Stave {
                 // Tone 60 is C3, tones start at C-2
                 let first_key = 21 as Pitch;
                 let half_tone_step = bounds.height() / key_count as f32;
-                let time_step = bounds.width() * &self.time_scale;
                 let bottom_line = bounds.max.y - half_tone_step / 2.0;
                 let painter = ui.painter_at(bounds);
 
@@ -52,7 +51,8 @@ impl Stave {
                     bottom_line,
                 );
 
-                let time_to_x = |at| bounds.min.x + (at as f32 - self.viewport_left) * time_step;
+                let time_to_x =
+                    |at| bounds.min.x + (at as f32 - self.viewport_left) * &self.time_scale;
                 for LaneEvent { at, event } in &self.track.events {
                     let x = time_to_x(at.as_micros() as u64);
                     match event {
@@ -61,7 +61,7 @@ impl Stave {
                                 &painter,
                                 first_key,
                                 &half_tone_step,
-                                time_step,
+                                self.time_scale,
                                 bottom_line,
                                 x,
                                 n,
@@ -71,11 +71,11 @@ impl Stave {
                     }
                 }
 
-                self.draw_cursor(&painter, bounds, time_to_x(self.cursor_position));
+                self.draw_cursor(&painter, time_to_x(self.cursor_position));
             });
     }
 
-    fn draw_cursor(&self, painter: &Painter, bounds: Rect, x: f32) {
+    fn draw_cursor(&self, painter: &Painter, x: f32) {
         painter.vline(
             x,
             painter.clip_rect().y_range(),
