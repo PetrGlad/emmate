@@ -34,12 +34,12 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Play time cursor.
+- [ ] Time or note selection in UI.
+- [ ] Configuration file (VST plugin path and MIDI input configuration).
 - [ ] Support sustain pedal (as a note?).
 - [ ] Transport controls (play/pause, rewind, step, pause).
-- [ ] Scale stave time (horizontally) with mouse wheel.
-- [ ] Configuration file (VST plugin path and MIDI input configuration).
-- [ ] Time or note selection in UI.
+- [x] Play time cursor.
+- [x] Scale stave time (horizontally) with mouse wheel.
 - [x] Share project's note data between stave pane and engine.
 - [x] See how to use a hot key for an action.
 - [x] A UI window with simple text message.
