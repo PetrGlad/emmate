@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 
+use eframe::egui::{remap_clamp, Vec2};
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
@@ -50,9 +51,8 @@ impl EmApp {
                 //      Should not miss one-off updates, maybe skip only in same-event-type runs.
                 match ev {
                     StatusEvent::TransportTime(t) => {
-                        // Will try next time if this fails
                         match message_sender.send(Message::UpdateTransportTime(t)) {
-                            _ => (),
+                            _ => (), // Will try next time if failed.
                         }
                     }
                 }
@@ -84,6 +84,7 @@ impl eframe::App for EmApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                 // TODO Should handle failed lock gracefully.
+                //      Or maybe use a channel instead of locking again.
                 self.engine
                     .lock()
                     .expect("Lock engine for play/pause")
@@ -96,7 +97,25 @@ impl eframe::App for EmApp {
                 .vertical(|mut strip| {
                     if let Ok(mut stave) = self.stave.try_write() {
                         strip.cell(|ui| {
-                            stave.view(ui);
+                            let response = stave.view(ui);
+                            // TODO Stave is writable here. Move this zoom logic into that function.
+                            if let Some(hover_pos) = response.hover_pos() {
+                                // TODO Zoom relative to current mouse position.
+                                let zoom_factor = ui.input(|i| i.zoom_delta());
+                                if zoom_factor != 1.0 {
+                                    println!("[zoom] {:?}", zoom_factor);
+                                    stave.time_scale *= zoom_factor;
+                                }
+                                let scroll_delta = ui.input(|i| i.scroll_delta);
+                                if scroll_delta != Vec2::ZERO {
+                                    // Avoiding negative values. Can this be shorter?
+                                    println!("[scroll] {:?}", scroll_delta);
+                                    stave.viewport_left = (stave.viewport_left as i64
+                                        - (scroll_delta.x / stave.time_scale) as i64)
+                                        .clamp(0, i64::max_value())
+                                        as u64;
+                                }
+                            }
                         });
                         strip.cell(|ui| {
                             ui.horizontal(|ui| {

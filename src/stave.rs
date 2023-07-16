@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::engine::TransportTime;
-use eframe::egui::{self, Color32, Frame, Margin, Painter, Pos2, Rect, Stroke, Ui};
+use eframe::egui::{self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Sense, Stroke, Ui};
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
@@ -22,15 +22,15 @@ impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
         // TODO Want this eq implementation so egui knows when not to re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
+        //   Not comparing Lane for now, but this will cause outdated view when the notes change.
         self.time_scale == other.time_scale
             && self.viewport_left == other.viewport_left
             && self.cursor_position == other.cursor_position
-        //   Not comparing Lane for now, but this should cause outdated view when the notes change.
     }
 }
 
 impl Stave {
-    pub fn view(&self, ui: &mut Ui) {
+    pub fn view(&mut self, ui: &mut Ui) -> Response {
         Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
@@ -68,12 +68,14 @@ impl Stave {
                                 n,
                             );
                         }
-                        _ => println!("Not displaying event {:?}, unsupported type.", event),
+                        _ => () /*println!("Not displaying event {:?}, unsupported type.", event)*/,
                     }
                 }
 
                 self.draw_cursor(&painter, time_to_x(self.cursor_position));
-            });
+
+                ui.allocate_response(bounds.size(), Sense::hover())
+            }).inner
     }
 
     fn draw_cursor(&self, painter: &Painter, x: f32) {
