@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use eframe::{self, egui, CreationContext};
@@ -26,18 +27,14 @@ impl PartialEq for EmApp {
 }
 
 impl EmApp {
-    pub fn new(
-        ctx: &CreationContext,
-        engine: Arc<Mutex<Engine>>,
-        track: Arc<Box<Lane>>,
-    ) -> EmApp {
+    pub fn new(ctx: &CreationContext, engine: Arc<Mutex<Engine>>, track: Arc<Box<Lane>>) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
             engine,
             stave: Arc::new(RwLock::new(Stave {
                 track,
                 time_scale: 2e-6f32,
-                viewport_left: 0.0,
+                viewport_left: 0,
                 cursor_position: 0,
             })),
             message_receiver,
@@ -53,8 +50,10 @@ impl EmApp {
                 //      Should not miss one-off updates, maybe skip only in same-event-type runs.
                 match ev {
                     StatusEvent::TransportTime(t) => {
-                        // May likely ignore send error here
-                        message_sender.send(Message::UpdateTransportTime(t)).unwrap();
+                        // Will try next time if this fails
+                        match message_sender.send(Message::UpdateTransportTime(t)) {
+                            _ => (),
+                        }
                     }
                 }
                 engine_receiver_ctx.request_repaint();
@@ -65,7 +64,7 @@ impl EmApp {
 
 impl eframe::App for EmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Ok(message) = self.message_receiver.try_recv() {
+        if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
                 Message::UpdateTransportTime(t) => {
                     if let Ok(mut locked) = self.stave.try_write() {
@@ -108,10 +107,14 @@ impl eframe::App for EmApp {
                                     stave.time_scale /= 1.05;
                                 }
                                 if ui.button("< Shift <").clicked() {
-                                    stave.viewport_left -= 1_000_000.0;
+                                    if let Some(x) = stave.viewport_left.checked_sub(1_000_000) {
+                                        stave.viewport_left = x
+                                    }
                                 }
                                 if ui.button("> Shift >").clicked() {
-                                    stave.viewport_left += 1_000_000.0;
+                                    if let Some(x) = stave.viewport_left.checked_add(1_000_000) {
+                                        stave.viewport_left = x
+                                    }
                                 }
                                 ui.checkbox(&mut self.follow_playback, "Follow playback")
                             });

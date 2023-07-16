@@ -14,8 +14,7 @@ pub struct Stave {
     pub track: Arc<Box<Lane>>,
     /// Pixel/uSec
     pub time_scale: f32,
-    pub viewport_left: f32,
-
+    pub viewport_left: TransportTime,
     pub cursor_position: TransportTime,
 }
 
@@ -23,8 +22,10 @@ impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
         // TODO Want this eq implementation so egui knows when not to re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
+        self.time_scale == other.time_scale
+            && self.viewport_left == other.viewport_left
+            && self.cursor_position == other.cursor_position
         //   Not comparing Lane for now, but this should cause outdated view when the notes change.
-        self.time_scale == other.time_scale && self.cursor_position == other.cursor_position
     }
 }
 
@@ -52,7 +53,7 @@ impl Stave {
                 );
 
                 let time_to_x =
-                    |at| bounds.min.x + (at as f32 - self.viewport_left) * &self.time_scale;
+                    |at| bounds.min.x + (at as f32 - self.viewport_left as f32) * &self.time_scale;
                 for LaneEvent { at, event } in &self.track.events {
                     let x = time_to_x(at.as_micros() as u64);
                     match event {
