@@ -17,7 +17,6 @@ pub struct Stave {
     /// Pixel/uSec
     pub time_scale: f32,
     pub viewport_left: TransportTime,
-    pub viewport_right: TransportTime,
     pub cursor_position: TransportTime,
 }
 
@@ -77,10 +76,6 @@ impl Stave {
                 let time_to_x = |at| self.x_from_time(bounds.min.x, at);
                 for LaneEvent { at, event } in &self.track.events {
                     let x = time_to_x(at.as_micros() as u64);
-                    // TODO Use Duration everywhere? There arae too many conversions.
-                    if at.as_micros() as u64 >= self.viewport_right {
-                        break;
-                    }
                     match event {
                         LaneEventType::Note(n) => {
                             Self::draw_note(

@@ -1,11 +1,11 @@
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use eframe::{egui, Theme};
 
 use crate::app::EmApp;
 use crate::midi::SmfSource;
-use crate::stave::{ to_lane_events};
-use crate::track::{Lane};
+use crate::stave::to_lane_events;
+use crate::track::Lane;
 use crate::track_source::TrackSource;
 
 mod app;

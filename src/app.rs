@@ -1,6 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 
-use eframe::egui::{remap_clamp, Vec2};
+use eframe::egui::Vec2;
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
@@ -35,7 +35,6 @@ impl EmApp {
                 track,
                 time_scale: 2e-6f32,
                 viewport_left: 0,
-                viewport_right: 300_000_000,
                 cursor_position: 0,
             })),
             message_receiver,
