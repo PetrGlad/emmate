@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::engine::TransportTime;
-use eframe::egui::{self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Sense, Stroke, Ui};
+use eframe::egui::{
+    self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Sense, Stroke, Ui,
+};
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
@@ -15,6 +17,7 @@ pub struct Stave {
     /// Pixel/uSec
     pub time_scale: f32,
     pub viewport_left: TransportTime,
+    pub viewport_right: TransportTime,
     pub cursor_position: TransportTime,
 }
 
@@ -30,6 +33,25 @@ impl PartialEq for Stave {
 }
 
 impl Stave {
+    pub fn x_from_time(&self, view_left: f32, at: TransportTime) -> f32 {
+        view_left + (at as f32 - self.viewport_left as f32) * &self.time_scale
+    }
+
+    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: f32) {
+        // Zoom relative to the mouse position.
+        self.time_scale *= zoom_factor;
+        let d = (mouse_x / self.time_scale) as TransportTime;
+        let at = self.viewport_left + d;
+        self.viewport_left = at
+            .checked_sub((d as f32 / zoom_factor) as TransportTime)
+            .unwrap_or(0);
+    }
+
+    pub fn scroll(&mut self, dx: f32) {
+        self.viewport_left = (self.viewport_left as i64 - (dx / self.time_scale) as i64)
+            .clamp(0, i64::max_value()) as u64;
+    }
+
     pub fn view(&mut self, ui: &mut Ui) -> Response {
         Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
@@ -52,10 +74,13 @@ impl Stave {
                     bottom_line,
                 );
 
-                let time_to_x =
-                    |at| bounds.min.x + (at as f32 - self.viewport_left as f32) * &self.time_scale;
+                let time_to_x = |at| self.x_from_time(bounds.min.x, at);
                 for LaneEvent { at, event } in &self.track.events {
                     let x = time_to_x(at.as_micros() as u64);
+                    // TODO Use Duration everywhere? There arae too many conversions.
+                    if at.as_micros() as u64 >= self.viewport_right {
+                        break;
+                    }
                     match event {
                         LaneEventType::Note(n) => {
                             Self::draw_note(
@@ -68,14 +93,15 @@ impl Stave {
                                 n,
                             );
                         }
-                        _ => () /*println!("Not displaying event {:?}, unsupported type.", event)*/,
+                        _ => (), /*println!("Not displaying event {:?}, unsupported type.", event)*/
                     }
                 }
 
                 self.draw_cursor(&painter, time_to_x(self.cursor_position));
 
                 ui.allocate_response(bounds.size(), Sense::hover())
-            }).inner
+            })
+            .inner
     }
 
     fn draw_cursor(&self, painter: &Painter, x: f32) {
@@ -198,4 +224,9 @@ pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> V
     // Notes are collected after they complete, This mixes the ordering with immediate events.
     lane_events.sort_by_key(|ev| ev.at.as_micros());
     lane_events
+}
+
+// Could not find a simple library for this.
+fn ranges_intersect<T: Ord>(from_a: T, to_a: T, from_b: T, to_b: T) -> bool {
+    from_a < to_b && from_b < to_a
 }

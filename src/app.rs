@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use eframe::egui::{remap_clamp, Vec2};
@@ -36,6 +35,7 @@ impl EmApp {
                 track,
                 time_scale: 2e-6f32,
                 viewport_left: 0,
+                viewport_right: 300_000_000,
                 cursor_position: 0,
             })),
             message_receiver,
@@ -100,20 +100,15 @@ impl eframe::App for EmApp {
                             let response = stave.view(ui);
                             // TODO Stave is writable here. Move this zoom logic into that function.
                             if let Some(hover_pos) = response.hover_pos() {
-                                // TODO Zoom relative to current mouse position.
                                 let zoom_factor = ui.input(|i| i.zoom_delta());
                                 if zoom_factor != 1.0 {
                                     println!("[zoom] {:?}", zoom_factor);
-                                    stave.time_scale *= zoom_factor;
+                                    stave.zoom(zoom_factor, hover_pos.x - response.rect.min.x);
                                 }
                                 let scroll_delta = ui.input(|i| i.scroll_delta);
                                 if scroll_delta != Vec2::ZERO {
-                                    // Avoiding negative values. Can this be shorter?
                                     println!("[scroll] {:?}", scroll_delta);
-                                    stave.viewport_left = (stave.viewport_left as i64
-                                        - (scroll_delta.x / stave.time_scale) as i64)
-                                        .clamp(0, i64::max_value())
-                                        as u64;
+                                    stave.scroll(scroll_delta.x);
                                 }
                             }
                         });
