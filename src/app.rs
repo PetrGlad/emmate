@@ -51,11 +51,11 @@ impl EmApp {
                 match ev {
                     StatusEvent::TransportTime(t) => {
                         match message_sender.send(Message::UpdateTransportTime(t)) {
-                            _ => (), // Will try next time if failed.
+                            Ok(_) => engine_receiver_ctx.request_repaint(),
+                            _ => (), // Will try next time.
                         }
                     }
                 }
-                engine_receiver_ctx.request_repaint();
             })));
         app
     }
@@ -67,13 +67,11 @@ impl eframe::App for EmApp {
             match message {
                 Message::UpdateTransportTime(t) => {
                     if let Ok(mut locked) = self.stave.try_write() {
-                        // TODO Cursor position seem to be out of sync with dranw notes now :(
-                        locked.cursor_position = t
-                    }
-                    // TODO Update also stave when follow playback in the app is true.
-                    if self.follow_playback {
-                        // TODO Stave does not need locks (track - does).
-                        //      Can update track here directly.
+                        locked.cursor_position = t;
+                        if self.follow_playback {
+                            let at = locked.cursor_position;
+                            locked.scroll_to(at);
+                        }
                     }
                 }
             }
@@ -82,11 +80,9 @@ impl eframe::App for EmApp {
         ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
-                // TODO Should handle failed lock gracefully.
-                //      Or maybe use a channel instead of locking again.
                 self.engine
                     .lock()
-                    .expect("Lock engine for play/pause")
+                    .expect("TODO Locking engine for play/pause should not fail (use a channel instead?).")
                     .toggle_pause();
             }
             ui.heading(format!("Emmate at {} px/pt", ui.ctx().pixels_per_point()));
@@ -107,7 +103,7 @@ impl eframe::App for EmApp {
                                 let scroll_delta = ui.input(|i| i.scroll_delta);
                                 if scroll_delta != Vec2::ZERO {
                                     println!("[scroll] {:?}", scroll_delta);
-                                    stave.scroll(scroll_delta.x);
+                                    stave.scroll_by(scroll_delta.x);
                                 }
                             }
                         });

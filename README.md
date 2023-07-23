@@ -59,7 +59,9 @@ May explore following options for the next version
 
 # Implementation notes
 
-All integer-typed times are in microseconds unless stated otherwise.
+Unless stated/declared otherwise
+* Integer-typed times are in microseconds.
+* Ranges assumed to be half open (excluding end/highest value).
 
 # Notes
 

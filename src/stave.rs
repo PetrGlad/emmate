@@ -47,10 +47,18 @@ impl Stave {
             .unwrap_or(0);
     }
 
-    pub fn scroll(&mut self, dx: f32) {
+    pub fn scroll_by(&mut self, dx: f32) {
         self.viewport_left = (self.viewport_left as i64 - (dx / self.time_scale) as i64)
             .clamp(0, i64::max_value()) as u64;
     }
+
+    pub fn scroll_to(&mut self, at: TransportTime) {
+        // TODO OKOK... The stave does need to know its dimensions (at least width).
+        //      Is required to set the position as a fraction of width (e.g. at center).
+        self.viewport_left = (at as i64 - (50.0 / self.time_scale) as i64)
+             .clamp(0, i64::max_value()) as u64;
+    }
+
 
     pub fn view(&mut self, ui: &mut Ui) -> Response {
         Frame::none()
