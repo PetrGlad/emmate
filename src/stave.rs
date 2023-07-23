@@ -22,7 +22,7 @@ pub struct Stave {
 
 impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
-        // TODO Want this eq implementation so egui knows when not to re-render.
+        // TODO Want this eq implementation so egui knows when to not re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
         //   Not comparing Lane for now, but this will cause outdated view when the notes change.
         self.time_scale == other.time_scale
@@ -38,7 +38,8 @@ impl Stave {
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: f32) {
         // Zoom relative to the mouse position.
-        self.time_scale *= zoom_factor;
+        self.time_scale = (self.time_scale * zoom_factor).clamp(5e-9, 2e-4f32);
+
         let d = (mouse_x / self.time_scale) as TransportTime;
         let at = self.viewport_left + d;
         self.viewport_left = at
