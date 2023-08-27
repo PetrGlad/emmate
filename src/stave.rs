@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::Pix;
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Sense, Stroke, Ui,
 };
@@ -17,8 +18,8 @@ pub struct Stave {
     pub track: Arc<Box<Lane>>,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
-    pub view_left: f32,
-    pub view_right: f32,
+    pub view_left: Pix,
+    pub view_right: Pix,
     pub cursor_position: StaveTime,
 }
 
@@ -41,15 +42,15 @@ impl Stave {
         (self.view_right - self.view_left) / (self.time_right - self.time_left) as f32
     }
 
-    pub fn x_from_time(&self, time_scale: f32, at: StaveTime) -> f32 {
-        self.view_left + (at as f32 - self.time_left as f32) * time_scale
+    pub fn x_from_time(&self, at: StaveTime) -> Pix {
+        self.view_left + (at as f32 - self.time_left as f32) * self.time_scale()
     }
 
-    pub fn time_from_x(&self, x: f32) -> StaveTime {
+    pub fn time_from_x(&self, x: Pix) -> StaveTime {
         self.time_left + ((x - self.view_left) / self.time_scale()) as StaveTime
     }
 
-    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: f32) {
+    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that position under mouse pointer stays in place.
         let at = self.time_from_x(mouse_x);
         self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as StaveTime;
@@ -62,13 +63,13 @@ impl Stave {
         self.cursor_position += dt;
     }
 
-    pub fn scroll_by(&mut self, dx: f32) {
+    pub fn scroll_by(&mut self, dx: Pix) {
         self.scroll((dx / self.time_scale()) as StaveTime);
     }
 
     pub fn scroll_to(&mut self, at: StaveTime) {
         self.scroll(
-            at as i64 - ((self.time_right - self.time_left) as f32 * 0.1) as i64 - self.time_left,
+            at - ((self.time_right - self.time_left) as f32 * 0.1) as StaveTime - self.time_left,
         );
     }
 
@@ -96,8 +97,7 @@ impl Stave {
                     bottom_line,
                 );
 
-                let time_scale = self.time_scale();
-                let time_to_x = |at| self.x_from_time(time_scale, at);
+                let time_to_x = |at| self.x_from_time(at);
                 for LaneEvent { at, event } in &self.track.events {
                     let x = time_to_x(at.as_micros() as StaveTime);
                     match event {
@@ -106,7 +106,7 @@ impl Stave {
                                 &painter,
                                 first_key,
                                 &half_tone_step,
-                                time_scale,
+                                self.time_scale(),
                                 bottom_line,
                                 x,
                                 n,
@@ -123,7 +123,7 @@ impl Stave {
             .inner
     }
 
-    fn draw_cursor(&self, painter: &Painter, x: f32) {
+    fn draw_cursor(&self, painter: &Painter, x: Pix) {
         painter.vline(
             x,
             painter.clip_rect().y_range(),
@@ -139,15 +139,15 @@ impl Stave {
         first_key: Pitch,
         half_tone_step: &f32,
         time_step: f32,
-        bottom_line: f32,
-        x: f32,
+        bottom_line: Pix,
+        x: Pix,
         Note {
             pitch,
             velocity,
             duration,
         }: &Note,
     ) {
-        let y = bottom_line - half_tone_step * (pitch - first_key) as f32;
+        let y = bottom_line - half_tone_step * (pitch - first_key) as Pix;
         let x_end = x + (duration.as_micros() as f32 * time_step);
         let stroke_width = half_tone_step * 0.9;
         let stroke_color = note_color(&velocity);
@@ -168,8 +168,8 @@ impl Stave {
         bounds: Rect,
         key_count: Pitch,
         first_key: &Pitch,
-        tone_step: f32,
-        bottom_line: f32,
+        tone_step: Pix,
+        bottom_line: Pix,
     ) {
         let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
         for key in 0..key_count {
@@ -178,7 +178,7 @@ impl Stave {
             } else {
                 Rgba::from_rgb(0.55, 0.55, 0.55)
             };
-            let y = bottom_line - tone_step * key as f32;
+            let y = bottom_line - tone_step * key as Pix;
             painter.hline(
                 bounds.min.x..=bounds.max.x,
                 y,

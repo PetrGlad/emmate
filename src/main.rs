@@ -18,6 +18,7 @@ mod stave;
 mod track;
 mod track_source;
 
+pub type Pix = f32;
 pub fn main() {
     {
         // use log::*;
@@ -32,7 +33,8 @@ pub fn main() {
         let smf_midi_source = SmfSource::new(smf_data);
         engine.lock().unwrap().add(Box::new(smf_midi_source));
     }
-    let smf_data = std::fs::read("yellow.mid").unwrap();
+    // let smf_data = std::fs::read("yellow.mid").unwrap();
+    let smf_data = std::fs::read("2023-07-21-1856_7457.mid").unwrap();
     let events = midi::load_smf(&smf_data);
     let track = Arc::new(Box::new(Lane {
         events: to_lane_events(events.0, events.1 as u64),
