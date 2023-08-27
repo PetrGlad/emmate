@@ -1,11 +1,11 @@
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{Arc, mpsc, Mutex, RwLock};
 
+use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
-use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, StatusEvent, TransportTime};
-use crate::stave::Stave;
+use crate::stave::{Stave, StaveTime};
 use crate::track::Lane;
 
 enum Message {
@@ -33,8 +33,10 @@ impl EmApp {
             engine,
             stave: Arc::new(RwLock::new(Stave {
                 track,
-                time_scale: 2e-6f32,
-                viewport_left: 0,
+                time_left: 0,
+                time_right: 300_000_000,
+                view_left: 0.0,
+                view_right: 300.0,
                 cursor_position: 0,
             })),
             message_receiver,
@@ -67,10 +69,10 @@ impl eframe::App for EmApp {
             match message {
                 Message::UpdateTransportTime(t) => {
                     if let Ok(mut locked) = self.stave.try_write() {
-                        locked.cursor_position = t;
+                        locked.cursor_position = t as StaveTime;
                         if self.follow_playback {
                             let at = locked.cursor_position;
-                            locked.scroll_to(at);
+                            locked.scroll_to(at as StaveTime);
                         }
                     }
                 }
@@ -93,12 +95,11 @@ impl eframe::App for EmApp {
                     if let Ok(mut stave) = self.stave.try_write() {
                         strip.cell(|ui| {
                             let response = stave.view(ui);
-                            // TODO Stave is writable here. Move this zoom logic into that function.
                             if let Some(hover_pos) = response.hover_pos() {
                                 let zoom_factor = ui.input(|i| i.zoom_delta());
                                 if zoom_factor != 1.0 {
                                     println!("[zoom] {:?}", zoom_factor);
-                                    stave.zoom(zoom_factor, hover_pos.x - response.rect.min.x);
+                                    stave.zoom(zoom_factor, hover_pos.x);
                                 }
                                 let scroll_delta = ui.input(|i| i.scroll_delta);
                                 if scroll_delta != Vec2::ZERO {
@@ -109,21 +110,19 @@ impl eframe::App for EmApp {
                         });
                         strip.cell(|ui| {
                             ui.horizontal(|ui| {
+                                let left= ui.painter().clip_rect().min.x;
                                 if ui.button("Zoom in").clicked() {
-                                    stave.time_scale *= 1.05;
+                                    stave.zoom(1.05, left);
                                 }
                                 if ui.button("Zoom out").clicked() {
-                                    stave.time_scale /= 1.05;
+                                    stave.zoom(1.0 / 1.05, left);
                                 }
-                                if ui.button("< Shift <").clicked() {
-                                    if let Some(x) = stave.viewport_left.checked_sub(1_000_000) {
-                                        stave.viewport_left = x
-                                    }
+                                let scroll_step = ui.painter().clip_rect().size().x * 0.15;
+                                if ui.button("< Scroll <").clicked() {
+                                    stave.scroll_by(-scroll_step);
                                 }
-                                if ui.button("> Shift >").clicked() {
-                                    if let Some(x) = stave.viewport_left.checked_add(1_000_000) {
-                                        stave.viewport_left = x
-                                    }
+                                if ui.button("> Scroll >").clicked() {
+                                    stave.scroll_by(scroll_step);
                                 }
                                 ui.checkbox(&mut self.follow_playback, "Follow playback")
                             });

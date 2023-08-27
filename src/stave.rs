@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::engine::TransportTime;
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Sense, Stroke, Ui,
 };
@@ -11,13 +10,16 @@ use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
 use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
+pub type StaveTime = i64;
+
 #[derive(Debug)]
 pub struct Stave {
     pub track: Arc<Box<Lane>>,
-    /// Pixel/uSec
-    pub time_scale: f32,
-    pub viewport_left: TransportTime,
-    pub cursor_position: TransportTime,
+    pub time_left: StaveTime,
+    pub time_right: StaveTime,
+    pub view_left: f32,
+    pub view_right: f32,
+    pub cursor_position: StaveTime,
 }
 
 impl PartialEq for Stave {
@@ -25,40 +27,50 @@ impl PartialEq for Stave {
         // TODO Want this eq implementation so egui knows when to not re-render.
         //   but comparing stave every time will be expensive. Need an optimization for that.
         //   Not comparing Lane for now, but this will cause outdated view when the notes change.
-        self.time_scale == other.time_scale
-            && self.viewport_left == other.viewport_left
+        self.time_left == other.time_left
+            && self.time_right == other.time_right
             && self.cursor_position == other.cursor_position
+            && self.view_left == other.view_left
+            && self.view_right == other.view_right
     }
 }
 
 impl Stave {
-    pub fn x_from_time(&self, view_left: f32, at: TransportTime) -> f32 {
-        view_left + (at as f32 - self.viewport_left as f32) * &self.time_scale
+    /// Pixel/uSec, can be cached.
+    pub fn time_scale(&self) -> f32 {
+        (self.view_right - self.view_left) / (self.time_right - self.time_left) as f32
+    }
+
+    pub fn x_from_time(&self, time_scale: f32, at: StaveTime) -> f32 {
+        self.view_left + (at as f32 - self.time_left as f32) * time_scale
+    }
+
+    pub fn time_from_x(&self, x: f32) -> StaveTime {
+        self.time_left + ((x - self.view_left) / self.time_scale()) as StaveTime
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: f32) {
-        // Zoom relative to the mouse position.
-        self.time_scale = (self.time_scale * zoom_factor).clamp(5e-9, 2e-4f32);
+        // Zoom so that position under mouse pointer stays in place.
+        let at = self.time_from_x(mouse_x);
+        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as StaveTime;
+        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as StaveTime;
+    }
 
-        let d = (mouse_x / self.time_scale) as TransportTime;
-        let at = self.viewport_left + d;
-        self.viewport_left = at
-            .checked_sub((d as f32 / zoom_factor) as TransportTime)
-            .unwrap_or(0);
+    pub fn scroll(&mut self, dt: StaveTime) {
+        self.time_left += dt;
+        self.time_right += dt;
+        self.cursor_position += dt;
     }
 
     pub fn scroll_by(&mut self, dx: f32) {
-        self.viewport_left = (self.viewport_left as i64 - (dx / self.time_scale) as i64)
-            .clamp(0, i64::max_value()) as u64;
+        self.scroll((dx / self.time_scale()) as StaveTime);
     }
 
-    pub fn scroll_to(&mut self, at: TransportTime) {
-        // TODO OKOK... The stave does need to know its dimensions (at least width).
-        //      Is required to set the position as a fraction of width (e.g. at center).
-        self.viewport_left = (at as i64 - (50.0 / self.time_scale) as i64)
-             .clamp(0, i64::max_value()) as u64;
+    pub fn scroll_to(&mut self, at: StaveTime) {
+        self.scroll(
+            at as i64 - ((self.time_right - self.time_left) as f32 * 0.1) as i64 - self.time_left,
+        );
     }
-
 
     pub fn view(&mut self, ui: &mut Ui) -> Response {
         Frame::none()
@@ -66,6 +78,8 @@ impl Stave {
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
+                self.view_left = bounds.min.x;
+                self.view_right = bounds.max.x;
                 let key_count = 88 as Pitch;
                 // Tone 60 is C3, tones start at C-2
                 let first_key = 21 as Pitch;
@@ -82,16 +96,17 @@ impl Stave {
                     bottom_line,
                 );
 
-                let time_to_x = |at| self.x_from_time(bounds.min.x, at);
+                let time_scale = self.time_scale();
+                let time_to_x = |at| self.x_from_time(time_scale, at);
                 for LaneEvent { at, event } in &self.track.events {
-                    let x = time_to_x(at.as_micros() as u64);
+                    let x = time_to_x(at.as_micros() as StaveTime);
                     match event {
                         LaneEventType::Note(n) => {
                             Self::draw_note(
                                 &painter,
                                 first_key,
                                 &half_tone_step,
-                                self.time_scale,
+                                time_scale,
                                 bottom_line,
                                 x,
                                 n,
