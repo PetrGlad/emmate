@@ -61,6 +61,13 @@ impl EmApp {
             })));
         app
     }
+
+    fn toggle_pause(&mut self) {
+        self.engine
+            .lock()
+            .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
+            .toggle_pause();
+    }
 }
 
 impl eframe::App for EmApp {
@@ -82,10 +89,7 @@ impl eframe::App for EmApp {
         ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
-                self.engine
-                    .lock()
-                    .expect("TODO Locking engine for play/pause should not fail (use a channel instead?).")
-                    .toggle_pause();
+                self.toggle_pause();
             }
             ui.heading(format!("Emmate at {} px/pt", ui.ctx().pixels_per_point()));
             StripBuilder::new(ui)
@@ -124,7 +128,13 @@ impl eframe::App for EmApp {
                                 if ui.button("> Scroll >").clicked() {
                                     stave.scroll_by(scroll_step);
                                 }
-                                ui.checkbox(&mut self.follow_playback, "Follow playback")
+                                ui.checkbox(&mut self.follow_playback, "Follow playback");
+                                if ui.button("<!> Stop sounds").clicked() {
+                                    self.engine
+                                        .lock()
+                                        .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
+                                        .reset();
+                                }
                             });
                         })
                     }

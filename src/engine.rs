@@ -5,8 +5,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use midly::live::LiveEvent;
+use midly::live::SystemRealtime::Reset;
 use midly::MidiMessage;
 use vst::event::Event;
+use vst::host::Host;
 use vst::plugin::Plugin;
 
 use crate::midi_vst::Vst;
@@ -85,9 +87,14 @@ impl Engine {
             let mut queue: BinaryHeap<EngineEvent> = BinaryHeap::new();
             loop {
                 thread::sleep(Duration::from_micros(3_000));
-                let mut locked = engine2.lock().unwrap();
+                let lock = engine2.lock();
+                if let Err(_) = lock {
+                    continue;
+                }
+                let mut locked = lock.unwrap();
                 if locked.paused {
                     // Mute ongoing notes before clearing.
+                    // TODO Some sounds may still continue on sustain. Need a panic button.
                     // TODO Avoid doing this at every iteration?
                     for ev in queue.iter() {
                         if let LiveEvent::Midi {
@@ -147,6 +154,13 @@ impl Engine {
         }
     }
 
+    /// Stop all sounds.
+    pub fn reset(&mut self) {
+        self.paused = true;
+        // TODO Implement.
+        // self.vst.host.lock().unwrap().idle(); // This SIGSEVs. Use LV2 instead?
+    }
+
     pub fn update_realtime(&mut self) {
         self.reset_at = Instant::now() - Duration::from_micros(self.running_at);
     }
@@ -157,8 +171,6 @@ impl Engine {
 
     /// Process the event immediately
     pub fn process(&self, event: Event) {
-        // TODO Remove this method? MIDI Event source can do that now (for event types that we support).
-
         let events_list = [event];
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
         events_buffer.store_events(events_list);

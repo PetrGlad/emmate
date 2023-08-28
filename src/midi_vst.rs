@@ -60,7 +60,7 @@ impl Vst {
             println!("Initialized VST instance.");
             println!("Can receive MIDI events {}", plugin.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes);
 
-            // plugin.suspend();
+            plugin.suspend(); // Just to be explicit, the plugin is created in suspended state.
             plugin.set_sample_rate(sample_rate_f.to_owned());
             plugin.set_block_size(*buffer_size as i64);
             plugin.resume();
