@@ -26,7 +26,8 @@ pub fn main() {
     }
     // Stream reference keeps it open.
     let (_stream, mut engine) = audio_setup::setup_audio_engine();
-    if false { // Want the section to still be compilable.
+    if false {
+        // Want the section to still be compilable.
         // Play MIDI from an SMD file.
         let smf_data = std::fs::read("yellow.mid").unwrap();
         let smf_midi_source = SmfSource::new(smf_data);

@@ -1,18 +1,15 @@
-use alsa::card::Iter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use eframe::egui::PointerButton::Primary;
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
-use eframe::emath::Vec2;
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
-use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 use crate::Pix;
+use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
 pub type StaveTime = i64;
 
@@ -48,7 +45,7 @@ impl EventViewModel {
         ControllerSetValue { value, .. }: &ControllerSetValue,
     ) -> Rect {
         let y = *value as Pix / Level::MAX as Pix - 0.5;
-        // Stub: see how to represent these values.
+        // Stub: have to see how to better represent these values.
         Rect {
             min: Pos2 {
                 x: at as Pix,
