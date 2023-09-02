@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::egui::PointerButton::Primary;
-use eframe::egui::{self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui};
+use eframe::egui::{
+    self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
+};
 use eframe::emath::Vec2;
 use egui::Rgba;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
@@ -265,20 +267,27 @@ impl Stave {
         }: &Note,
         event_view: &EventViewModel,
     ) {
+        let y = bottom_line - half_tone_step * (pitch - first_key) as Pix;
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(event_view.rect.min.x as StaveTime),
-                y: event_view.rect.min.y * half_tone_step,
+                y: bottom_line
+                    - half_tone_step * 0.5
+                    - (event_view.rect.max.y - first_key as Pix) * half_tone_step
+                    + half_tone_step * 0.05,
             },
             max: Pos2 {
                 x: self.x_from_time(event_view.rect.max.x as StaveTime),
-                y: event_view.rect.max.y * half_tone_step,
+                y: bottom_line
+                    - half_tone_step * 0.5
+                    - (event_view.rect.min.y - first_key as Pix) * half_tone_step
+                    - half_tone_step * 0.05,
             },
         };
         let stroke_color = note_color(&velocity, event_view.selected);
-        painter.rect(paint_rect, Rounding::none(), stroke_color,Stroke::NONE);
+        painter.rect(paint_rect, Rounding::none(), stroke_color, Stroke::NONE);
 
-        // let y = bottom_line - half_tone_step * (pitch - first_key) as Pix;
+        //
         // let x_end = x + (duration.as_micros() as f32 * time_step);
         // let stroke_width = half_tone_step * 0.9;
         //
