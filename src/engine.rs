@@ -5,10 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use midly::live::LiveEvent;
-use midly::live::SystemRealtime::Reset;
 use midly::MidiMessage;
 use vst::event::Event;
-use vst::host::Host;
 use vst::plugin::Plugin;
 
 use crate::midi_vst::Vst;

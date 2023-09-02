@@ -31,14 +31,7 @@ impl EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
             engine,
-            stave: Arc::new(RwLock::new(Stave {
-                track,
-                time_left: 0,
-                time_right: 300_000_000,
-                view_left: 0.0,
-                view_right: 300.0,
-                cursor_position: 0,
-            })),
+            stave: Arc::new(RwLock::new(Stave::new(track))),
             message_receiver,
             follow_playback: false,
         };
@@ -91,7 +84,7 @@ impl eframe::App for EmApp {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                 self.toggle_pause();
             }
-            ui.heading(format!("Emmate at {} px/pt", ui.ctx().pixels_per_point()));
+            ui.heading(format!("[Emmate] Your next masterpiece here",));
             StripBuilder::new(ui)
                 .size(Size::remainder())
                 .size(Size::exact(25.0))
