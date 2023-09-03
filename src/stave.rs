@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,46 +19,38 @@ These can be used both to draw notes in view functions, and as means to determin
 clicks and selection/drag state of a note.
 Time step is 1 uSec, vertical half tone step is 1. Bottom-left 0,0 is origin.
 Control events in negative y coords, 1-width bands each. */
+
 #[derive(Debug)]
-pub struct EventViewModel {
+pub struct NoteView {
     rect: Rect,
     selected: bool,
 }
 
-impl From<&LaneEvent> for EventViewModel {
+#[derive(Debug)]
+pub struct ControllerView {
+    // Stub: have to see how to better represent these values.
+}
+
+// Does it make sense now to use a dyn Trait instead?
+#[derive(Debug)]
+pub enum EventView {
+    Note(NoteView),
+    Controller(ControllerView),
+}
+
+impl From<&LaneEvent> for EventView {
     fn from(event: &LaneEvent) -> Self {
         match &event.event {
-            LaneEventType::Note(n) => EventViewModel {
+            LaneEventType::Note(n) => EventView::Note(NoteView {
                 rect: Self::note_rect(event.at.as_micros() as StaveTime, n),
                 selected: false,
-            },
-            LaneEventType::Controller(c) => EventViewModel {
-                rect: Self::controller_value_rect(event.at.as_micros() as StaveTime, c),
-                selected: false,
-            },
+            }),
+            LaneEventType::Controller(c) => EventView::Controller(ControllerView {}),
         }
     }
 }
 
-impl EventViewModel {
-    pub fn controller_value_rect(
-        at: StaveTime,
-        ControllerSetValue { value, .. }: &ControllerSetValue,
-    ) -> Rect {
-        let y = *value as Pix / Level::MAX as Pix - 0.5;
-        // Stub: have to see how to better represent these values.
-        Rect {
-            min: Pos2 {
-                x: at as Pix,
-                y: y - 0.5,
-            },
-            max: Pos2 {
-                x: at as Pix,
-                y: y + 0.5,
-            },
-        }
-    }
-
+impl EventView {
     pub fn note_rect(
         at: StaveTime,
         Note {
@@ -80,31 +73,48 @@ impl EventViewModel {
 }
 
 #[derive(Debug)]
-pub struct TrackViewModel {
-    notes: Vec<EventViewModel>,
+pub struct TrackView {
+    events: Vec<EventView>,
     version: u64,
 }
 
-impl PartialEq<Self> for TrackViewModel {
+impl PartialEq<Self> for TrackView {
     fn eq(&self, other: &Self) -> bool {
         // Intended to check if updates are needed GUI.
         self.version == other.version
     }
 }
 
-impl From<&Lane> for TrackViewModel {
+impl From<&Lane> for TrackView {
     fn from(lane: &Lane) -> Self {
-        TrackViewModel {
-            notes: lane.events.iter().map(|ev| ev.into()).collect(),
+        TrackView {
+            events: lane.events.iter().map(|ev| ev.into()).collect(),
             version: 0,
         }
     }
 }
 
+// Tone 60 is C3, tones start at C-2
+const PIANO_KEYS: Range<Pitch> = 21..(21 + 88);
+
+fn key_line_ys(
+    view_y_range: RangeInclusive<Pix>,
+    pitches: Range<Pitch>,
+) -> (BTreeMap<Pitch, Pix>, Pix) {
+    let mut lines = BTreeMap::new();
+    let step = (view_y_range.end() - view_y_range.start()) / pitches.len() as Pix;
+    let mut y = view_y_range.end() - step / 2.0;
+    for p in pitches {
+        lines.insert(p, y);
+        y -= step;
+    }
+    (lines, step)
+}
+
 #[derive(Debug)]
 pub struct Stave {
     pub track: Arc<Box<Lane>>,
-    pub track_view_model: TrackViewModel,
+    pub track_view_model: TrackView,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
     pub view_left: Pix,
@@ -130,7 +140,7 @@ impl Stave {
     pub fn new(track: Arc<Box<Lane>>) -> Stave {
         Stave {
             track: track.clone(),
-            track_view_model: TrackViewModel::from(track.as_ref().as_ref()),
+            track_view_model: TrackView::from(track.as_ref().as_ref()),
             time_left: 0,
             time_right: 300_000_000,
             view_left: 0.0,
@@ -182,38 +192,27 @@ impl Stave {
                 let bounds = ui.available_rect_before_wrap();
                 self.view_left = bounds.min.x;
                 self.view_right = bounds.max.x;
-                let key_count = 88 as Pitch;
-                // Tone 60 is C3, tones start at C-2
-                let first_key = 21 as Pitch;
-                let half_tone_step = bounds.height() / key_count as f32;
-                let bottom_line = bounds.max.y - half_tone_step / 2.0;
+                assert_eq!(PIANO_KEYS.len(), 88);
+                let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEYS);
                 let painter = ui.painter_at(bounds);
 
-                Self::draw_grid(
-                    &painter,
-                    bounds,
-                    key_count,
-                    &first_key,
-                    half_tone_step,
-                    bottom_line,
-                );
+                Self::draw_grid(&painter, bounds, &key_ys);
 
-                assert_eq!(&self.track_view_model.notes.len(), &self.track.events.len());
+                assert_eq!(
+                    &self.track_view_model.events.len(),
+                    &self.track.events.len()
+                );
                 for i in 0..self.track.events.len() {
                     let event = &self.track.events[i];
-                    let event_view = &self.track_view_model.notes[i];
+                    let event_view = &self.track_view_model.events[i];
                     match &event.event {
                         LaneEventType::Note(note) => {
-                            Self::draw_note(
-                                self,
-                                &painter,
-                                first_key,
-                                &half_tone_step,
-                                self.time_scale(),
-                                bottom_line,
-                                note,
-                                event_view,
-                            );
+                            let EventView::Note(note_view) = event_view else {
+                                panic!("Mismatched view of an event {:?}", event_view);
+                            };
+                            if let Some(y) = key_ys.get(&note.pitch) {
+                                self.draw_note(&painter, note, note_view, y, half_tone_step);
+                            }
 
                             // {
                             //     // ///////////////// Notes/time selection prototype /////////////
@@ -253,32 +252,20 @@ impl Stave {
     fn draw_note(
         &self,
         painter: &Painter,
-        first_key: Pitch,
-        half_tone_step: &f32,
-        time_step: f32,
-        bottom_line: Pix,
-        Note {
-            pitch,
-            velocity,
-            duration,
-        }: &Note,
-        event_view: &EventViewModel,
+        Note { velocity, .. }: &Note,
+        event_view: &NoteView,
+        y: &Pix,
+        half_tone_step: Pix,
     ) {
-        let y = bottom_line - half_tone_step * (pitch - first_key) as Pix;
+        let h = event_view.rect.height() * half_tone_step;
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(event_view.rect.min.x as StaveTime),
-                y: bottom_line
-                    - half_tone_step * 0.5
-                    - (event_view.rect.max.y - first_key as Pix) * half_tone_step
-                    + half_tone_step * 0.05,
+                y: y - h * 0.45,
             },
             max: Pos2 {
                 x: self.x_from_time(event_view.rect.max.x as StaveTime),
-                y: bottom_line
-                    - half_tone_step * 0.5
-                    - (event_view.rect.min.y - first_key as Pix) * half_tone_step
-                    - half_tone_step * 0.05,
+                y: y + h * 0.45,
             },
         };
         let stroke_color = note_color(&velocity, event_view.selected);
@@ -301,30 +288,24 @@ impl Stave {
         // painter.circle_filled(Pos2::new(x_end, y), half_width, stroke_color);
     }
 
-    fn draw_grid(
-        painter: &Painter,
-        bounds: Rect,
-        key_count: Pitch,
-        first_key: &Pitch,
-        tone_step: Pix,
-        bottom_line: Pix,
-    ) {
+    fn draw_grid(painter: &Painter, bounds: Rect, keys: &BTreeMap<Pitch, Pix>) {
         let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
-        for key in 0..key_count {
-            let color = if is_black_key(&(first_key + key)) {
+        let mut i = 0;
+        for (pitch, y) in keys {
+            let color = if is_black_key(&pitch) {
                 Rgba::from_rgb(0.05, 0.05, 0.05)
             } else {
                 Rgba::from_rgb(0.55, 0.55, 0.55)
             };
-            let y = bottom_line - tone_step * key as Pix;
             painter.hline(
                 bounds.min.x..=bounds.max.x,
-                y,
+                *y,
                 Stroke {
                     width: 1.0,
                     color: color.into(),
                 },
             );
+            i += 1;
         }
     }
 }
