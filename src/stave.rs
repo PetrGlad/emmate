@@ -1,16 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
-use std::time::Duration;
-
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
-use midly::{MidiMessage, TrackEvent, TrackEventKind};
-
 use crate::Pix;
-use crate::track::{ControllerSetValue, Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
+use crate::track::{Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 
 pub type StaveTime = i64;
 
@@ -45,7 +41,7 @@ impl From<&LaneEvent> for EventView {
                 rect: Self::note_rect(event.at.as_micros() as StaveTime, n),
                 selected: false,
             }),
-            LaneEventType::Controller(c) => EventView::Controller(ControllerView {}),
+            LaneEventType::Controller(_) => EventView::Controller(ControllerView {}),
         }
     }
 }
@@ -117,8 +113,7 @@ pub struct Stave {
     pub track_view_model: TrackView,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
-    pub view_left: Pix,
-    pub view_right: Pix,
+    pub view_rect: Rect,
     pub cursor_position: StaveTime,
 }
 
@@ -131,8 +126,7 @@ impl PartialEq for Stave {
             && self.time_left == other.time_left
             && self.time_right == other.time_right
             && self.cursor_position == other.cursor_position
-            && self.view_left == other.view_left
-            && self.view_right == other.view_right
+            && self.view_rect == other.view_rect
     }
 }
 
@@ -143,23 +137,22 @@ impl Stave {
             track_view_model: TrackView::from(track.as_ref().as_ref()),
             time_left: 0,
             time_right: 300_000_000,
-            view_left: 0.0,
-            view_right: 300.0,
+            view_rect: Rect::NOTHING,
             cursor_position: 0,
         }
     }
 
     /// Pixel/uSec, can be cached.
     pub fn time_scale(&self) -> f32 {
-        (self.view_right - self.view_left) / (self.time_right - self.time_left) as f32
+        self.view_rect.width() / (self.time_right - self.time_left) as f32
     }
 
     pub fn x_from_time(&self, at: StaveTime) -> Pix {
-        self.view_left + (at as f32 - self.time_left as f32) * self.time_scale()
+        self.view_rect.min.x + (at as f32 - self.time_left as f32) * self.time_scale()
     }
 
     pub fn time_from_x(&self, x: Pix) -> StaveTime {
-        self.time_left + ((x - self.view_left) / self.time_scale()) as StaveTime
+        self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as StaveTime
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
@@ -190,14 +183,11 @@ impl Stave {
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
-                self.view_left = bounds.min.x;
-                self.view_right = bounds.max.x;
-                assert_eq!(PIANO_KEYS.len(), 88);
+                self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEYS);
                 let painter = ui.painter_at(bounds);
 
                 Self::draw_grid(&painter, bounds, &key_ys);
-
                 assert_eq!(
                     &self.track_view_model.events.len(),
                     &self.track.events.len()
@@ -255,9 +245,9 @@ impl Stave {
         Note { velocity, .. }: &Note,
         event_view: &NoteView,
         y: &Pix,
-        half_tone_step: Pix,
+        height: Pix,
     ) {
-        let h = event_view.rect.height() * half_tone_step;
+        let h = event_view.rect.height() * height;
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(event_view.rect.min.x as StaveTime),
@@ -270,27 +260,10 @@ impl Stave {
         };
         let stroke_color = note_color(&velocity, event_view.selected);
         painter.rect(paint_rect, Rounding::none(), stroke_color, Stroke::NONE);
-
-        //
-        // let x_end = x + (duration.as_micros() as f32 * time_step);
-        // let stroke_width = half_tone_step * 0.9;
-        //
-        // painter.hline(
-        //     x..=x_end,
-        //     y,
-        //     Stroke {
-        //         width: stroke_width,
-        //         color: stroke_color,
-        //     },
-        // );
-        // let half_width = stroke_width / 2.0;
-        // painter.circle_filled(Pos2::new(x, y), half_width, stroke_color);
-        // painter.circle_filled(Pos2::new(x_end, y), half_width, stroke_color);
     }
 
     fn draw_grid(painter: &Painter, bounds: Rect, keys: &BTreeMap<Pitch, Pix>) {
         let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
-        let mut i = 0;
         for (pitch, y) in keys {
             let color = if is_black_key(&pitch) {
                 Rgba::from_rgb(0.05, 0.05, 0.05)
@@ -305,7 +278,6 @@ impl Stave {
                     color: color.into(),
                 },
             );
-            i += 1;
         }
     }
 }
@@ -317,52 +289,6 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
         Rgba::from_rgb(0.4, 0.5, 0.5)
     };
     egui::lerp(c..=Rgba::from_rgb(0.0, 0.0, 0.0), *velocity as f32 / 128.0).into()
-}
-
-pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
-    // TODO The offset calculations are very similar to ones in the engine. Can these be shared.
-    let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
-    let mut lane_events = vec![];
-    let mut at: u64 = 0;
-    for ev in events {
-        at += ev.delta.as_int() as u64 * tick_duration;
-        match ev.kind {
-            TrackEventKind::Midi { message, .. } => match message {
-                MidiMessage::NoteOn { key, .. } => {
-                    ons.insert(key.as_int() as Pitch, (at, message));
-                }
-                MidiMessage::NoteOff { key, .. } => {
-                    let on = ons.remove(&(key.as_int() as Pitch));
-                    match on {
-                        Some((t, MidiMessage::NoteOn { key, vel })) => {
-                            lane_events.push(LaneEvent {
-                                at: Duration::from_micros(t),
-                                event: LaneEventType::Note(Note {
-                                    duration: Duration::from_micros(at - t),
-                                    pitch: key.as_int() as Pitch,
-                                    velocity: vel.as_int() as Level,
-                                }),
-                            });
-                        }
-                        None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev),
-                        _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
-                    }
-                }
-                MidiMessage::Controller { controller, value } => lane_events.push(LaneEvent {
-                    at: Duration::from_micros(at),
-                    event: LaneEventType::Controller(ControllerSetValue {
-                        controller_id: controller.into(),
-                        value: value.into(),
-                    }),
-                }),
-                _ => eprintln!("DEBUG Event ignored {:?}", ev),
-            },
-            _ => (),
-        };
-    }
-    // Notes are collected after they complete, This mixes the ordering with immediate events.
-    lane_events.sort_by_key(|ev| ev.at.as_micros());
-    lane_events
 }
 
 // Could not find a simple library for this.

@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 use std::time::Duration;
+use midly::{MidiMessage, TrackEvent, TrackEventKind};
+use std::collections::HashMap;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -59,4 +61,50 @@ impl Ord for LaneEvent {
 pub struct Lane {
     // Notes should always be ordered by start time ascending. Not enforced yet.
     pub events: Vec<LaneEvent>,
+}
+
+pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
+    // TODO The offset calculations are very similar to ones in the engine. Can these be shared.
+    let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
+    let mut lane_events = vec![];
+    let mut at: u64 = 0;
+    for ev in events {
+        at += ev.delta.as_int() as u64 * tick_duration;
+        match ev.kind {
+            TrackEventKind::Midi { message, .. } => match message {
+                MidiMessage::NoteOn { key, .. } => {
+                    ons.insert(key.as_int() as Pitch, (at, message));
+                }
+                MidiMessage::NoteOff { key, .. } => {
+                    let on = ons.remove(&(key.as_int() as Pitch));
+                    match on {
+                        Some((t, MidiMessage::NoteOn { key, vel })) => {
+                            lane_events.push(LaneEvent {
+                                at: Duration::from_micros(t),
+                                event: LaneEventType::Note(Note {
+                                    duration: Duration::from_micros(at - t),
+                                    pitch: key.as_int() as Pitch,
+                                    velocity: vel.as_int() as Level,
+                                }),
+                            });
+                        }
+                        None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev),
+                        _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
+                    }
+                }
+                MidiMessage::Controller { controller, value } => lane_events.push(LaneEvent {
+                    at: Duration::from_micros(at),
+                    event: LaneEventType::Controller(ControllerSetValue {
+                        controller_id: controller.into(),
+                        value: value.into(),
+                    }),
+                }),
+                _ => eprintln!("DEBUG Event ignored {:?}", ev),
+            },
+            _ => (),
+        };
+    }
+    // Notes are collected after they complete, This mixes the ordering with immediate events.
+    lane_events.sort_by_key(|ev| ev.at.as_micros());
+    lane_events
 }
