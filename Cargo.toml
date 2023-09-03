@@ -46,3 +46,5 @@ midir = "0.8.0"
 
 log = "0.4.17"
 stderrlog = "0.5.3"
+
+ordered-float = "3.9.1"

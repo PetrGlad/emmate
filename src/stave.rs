@@ -1,12 +1,17 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
+
 use eframe::egui::{
-    self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
+    self, Color32, Frame, Margin, Painter, PointerButton, Pos2, Rect, Response, Rounding, Sense,
+    Stroke, Ui,
 };
 use egui::Rgba;
-use crate::Pix;
+use ordered_float::OrderedFloat;
+
 use crate::track::{Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
+use crate::Pix;
 
 pub type StaveTime = i64;
 
@@ -185,9 +190,22 @@ impl Stave {
                 let bounds = ui.available_rect_before_wrap();
                 self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEYS);
-                let painter = ui.painter_at(bounds);
+                let mut pitch_hovered = None;
+                let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+                if let Some(pointer_pos) = pointer_pos {
+                    pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
+                    println!("Pitch hovered {:?}", pitch_hovered);
+                }
 
-                Self::draw_grid(&painter, bounds, &key_ys);
+                // TODO Implement note selection
+                // let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+                // if clicked && pointer_pos.is_some() && note_rect.contains(pointer_pos.unwrap())
+                // {
+                //     println!("Click {:?}", n);
+                // }
+
+                let painter = ui.painter_at(bounds);
+                Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
                 assert_eq!(
                     &self.track_view_model.events.len(),
                     &self.track.events.len()
@@ -203,18 +221,6 @@ impl Stave {
                             if let Some(y) = key_ys.get(&note.pitch) {
                                 self.draw_note(&painter, note, note_view, y, half_tone_step);
                             }
-
-                            // {
-                            //     // ///////////////// Notes/time selection prototype /////////////
-                            //     let pointer_pos = ui.input(|i| i.pointer.hover_pos());
-                            //     let clicked = ui.input(|i| i.pointer.button_clicked(Primary));
-                            //     if clicked
-                            //         && pointer_pos.is_some()
-                            //         && note_rect.contains(pointer_pos.unwrap())
-                            //     {
-                            //         println!("Click {:?}", n);
-                            //     }
-                            // }
                         }
                         _ => (), /*println!("Not displaying event {:?}, unsupported type.", event)*/
                     }
@@ -223,7 +229,7 @@ impl Stave {
                 self.draw_cursor(
                     &painter,
                     self.x_from_time(self.cursor_position),
-                    Rgba::from_rgba_unmultiplied(0.1, 0.8, 0.1, 0.8).into(),
+                    Rgba::from_rgba_unmultiplied(0.1, 0.7, 0.1, 0.7).into(),
                 );
 
                 ui.allocate_response(bounds.size(), Sense::click())
@@ -262,14 +268,24 @@ impl Stave {
         painter.rect(paint_rect, Rounding::none(), stroke_color, Stroke::NONE);
     }
 
-    fn draw_grid(painter: &Painter, bounds: Rect, keys: &BTreeMap<Pitch, Pix>) {
+    fn draw_grid(
+        painter: &Painter,
+        bounds: Rect,
+        keys: &BTreeMap<Pitch, Pix>,
+        pitch_hovered: &Option<Pitch>,
+    ) {
         let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
         for (pitch, y) in keys {
-            let color = if is_black_key(&pitch) {
+            let mut color = if is_black_key(&pitch) {
                 Rgba::from_rgb(0.05, 0.05, 0.05)
             } else {
                 Rgba::from_rgb(0.55, 0.55, 0.55)
             };
+            if let Some(p) = pitch_hovered {
+                if pitch == p {
+                    color = Rgba::from_rgb(0.1, 0.3, 0.4)
+                }
+            }
             painter.hline(
                 bounds.min.x..=bounds.max.x,
                 *y,
@@ -280,6 +296,14 @@ impl Stave {
             );
         }
     }
+}
+
+fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
+    *pitch_ys
+        .iter()
+        .min_by_key(|(_, &y)| OrderedFloat((y - pointer_pos.y).abs()))
+        .unwrap()
+        .0
 }
 
 fn note_color(velocity: &Level, selected: bool) -> Color32 {
