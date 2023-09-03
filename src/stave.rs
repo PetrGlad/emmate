@@ -1,15 +1,15 @@
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
+use std::time::Duration;
 
 use eframe::egui::{
-    self, Color32, Frame, Margin, Painter, PointerButton, Pos2, Rect, Response, Rounding, Sense,
-    Stroke, Ui,
+    self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 
+use crate::engine::TransportTime;
 use crate::track::{Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
 use crate::Pix;
 
@@ -135,6 +135,10 @@ impl PartialEq for Stave {
     }
 }
 
+const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
+// TODO Hovered color should be a function (takes normal color and highlights it slightly)
+const COLOR_HOVERED: Rgba = COLOR_SELECTED; // Rgba::from_rgba_unmultiplied(0.3, 0.4, 0.7, 0.5);
+
 impl Stave {
     pub fn new(track: Arc<Box<Lane>>) -> Stave {
         Stave {
@@ -191,10 +195,12 @@ impl Stave {
                 self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEYS);
                 let mut pitch_hovered = None;
+                let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
                 if let Some(pointer_pos) = pointer_pos {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
                     println!("Pitch hovered {:?}", pitch_hovered);
+                    time_hovered = Some(self.time_from_x(pointer_pos.x));
                 }
 
                 // TODO Implement note selection
@@ -216,13 +222,27 @@ impl Stave {
                     match &event.event {
                         LaneEventType::Note(note) => {
                             let EventView::Note(note_view) = event_view else {
-                                panic!("Mismatched view of an event {:?}", event_view);
+                                panic!("Mismatched view of an event {:?}", event_view); // XXX
                             };
                             if let Some(y) = key_ys.get(&note.pitch) {
-                                self.draw_note(&painter, note, note_view, y, half_tone_step);
+                                // TODO Implement note selection
+                                // Stub:
+                                let selected = if let Some(t) = &time_hovered {
+                                    if let Some(p) = pitch_hovered {
+                                        event.is_active(Duration::from_micros(*t as TransportTime))
+                                        && p == note.pitch
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+                                let nv = NoteView { rect: note_view.rect.clone(), selected };
+
+                                self.draw_note(&painter, note, &nv, y, half_tone_step);
                             }
                         }
-                        _ => (), /*println!("Not displaying event {:?}, unsupported type.", event)*/
+                        _ => (), /* println!("Not displaying event {:?}, the type is not supported yet.", event) */
                     }
                 }
 
@@ -283,7 +303,7 @@ impl Stave {
             };
             if let Some(p) = pitch_hovered {
                 if pitch == p {
-                    color = Rgba::from_rgb(0.1, 0.3, 0.4)
+                    color = COLOR_HOVERED
                 }
             }
             painter.hline(
@@ -308,7 +328,7 @@ fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
 
 fn note_color(velocity: &Level, selected: bool) -> Color32 {
     let c = if selected {
-        Rgba::from_rgba_unmultiplied(0.3, 0.4, 0.7, 0.5)
+        COLOR_SELECTED
     } else {
         Rgba::from_rgb(0.4, 0.5, 0.5)
     };

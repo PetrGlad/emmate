@@ -35,7 +35,7 @@ pub struct LaneEvent {
 }
 
 impl LaneEvent {
-    pub fn event_active(&self, at: Duration) -> bool {
+    pub fn is_active(&self, at: Duration) -> bool {
         match &self.event {
             LaneEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
             _ => false,

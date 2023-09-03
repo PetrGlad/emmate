@@ -1011,6 +1011,7 @@ dependencies = [
  "midir",
  "midly",
  "ordered-float",
+ "rand",
  "rodio",
  "stderrlog",
  "vst",
