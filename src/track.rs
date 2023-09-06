@@ -1,12 +1,21 @@
-use std::cmp::Ordering;
-use std::time::Duration;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
+use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::time::Duration;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
 pub type Level = u8;
 pub type ChannelId = u8;
+
+pub const MIDI_CC_MODWHEEL: ControllerId = 1;
+pub const MIDI_CC_SUSTAIN: ControllerId = 64;
+
+pub fn switch_cc_on(x: Level) -> bool {
+    // Pianoteq seem to support continuous damper values, may support this later.
+    // Not using crappy SLP3-D anyway.
+    x >= 64
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Note {
@@ -64,7 +73,7 @@ pub struct Lane {
 }
 
 pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: u64) -> Vec<LaneEvent> {
-    // TODO The offset calculations are very similar to ones in the engine. Can these be shared.
+    // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
     let mut lane_events = vec![];
     let mut at: u64 = 0;

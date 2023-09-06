@@ -75,3 +75,9 @@ Diagnostic commands
 * `amidi --list-devices`
 * `aseqdump --list`
 * `aseqdump --port='24:0'`
+
+MIDI CC controllers list
+* https://nickfever.com/music/midi-cc-list
+* https://soundslikejoe.com/2014/03/midi-cc-reference-chart/
+* https://www.whippedcreamsounds.com/midi-cc-list/
+* https://anotherproducer.com/online-tools-for-musicians/midi-cc-list/

@@ -3,6 +3,7 @@ use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::time::Duration;
 
+use eframe::egui::plot::Polygon;
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
@@ -10,7 +11,9 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
-use crate::track::{Lane, LaneEvent, LaneEventType, Level, Note, Pitch};
+use crate::track::{
+    switch_cc_on, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
+};
 use crate::Pix;
 
 pub type StaveTime = i64;
@@ -24,6 +27,7 @@ Control events in negative y coords, 1-width bands each. */
 #[derive(Debug)]
 pub struct NoteView {
     rect: Rect,
+    // TODO Implement selection, maybe this could be a separate bag of notes instead.
     selected: bool,
 }
 
@@ -82,6 +86,7 @@ pub struct TrackView {
 impl PartialEq<Self> for TrackView {
     fn eq(&self, other: &Self) -> bool {
         // Intended to check if updates are needed GUI.
+        // Comparing the whole tract would be expensive, update operations should increase the version.
         self.version == other.version
     }
 }
@@ -95,8 +100,10 @@ impl From<&Lane> for TrackView {
     }
 }
 
-// Tone 60 is C3, tones start at C-2
-const PIANO_KEYS: Range<Pitch> = 21..(21 + 88);
+// Tone 60 is C3, tones start at C-2 (21)
+// TODO (cleanup) Allocating bottom line for damper, need some explicit declaration for CC controllers.
+const PIANO_KEY_LINES: Range<Pitch> = 20..(20 + 88);
+const PIANO_DAMPER_LINE: Pitch = 20;
 
 fn key_line_ys(
     view_y_range: RangeInclusive<Pix>,
@@ -124,9 +131,7 @@ pub struct Stave {
 
 impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
-        // TODO Want this eq implementation so egui knows when to not re-render.
-        //   but comparing stave every time will be expensive. Need an optimization for that.
-        //   Not comparing Lane for now, but this will cause outdated view when the notes change.
+        // Want this eq implementation so egui knows when not to re-render.
         self.track_view_model == other.track_view_model
             && self.time_left == other.time_left
             && self.time_right == other.time_right
@@ -193,7 +198,7 @@ impl Stave {
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
                 self.view_rect = bounds;
-                let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEYS);
+                let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEY_LINES);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
@@ -222,7 +227,8 @@ impl Stave {
                     match &event.event {
                         LaneEventType::Note(note) => {
                             let EventView::Note(note_view) = event_view else {
-                                panic!("Mismatched view of an event {:?}", event_view); // XXX
+                                panic!("Mismatched view of an event {:?}", event_view);
+                                // XXX
                             };
                             if let Some(y) = key_ys.get(&note.pitch) {
                                 // TODO Implement note selection
@@ -230,19 +236,30 @@ impl Stave {
                                 let selected = if let Some(t) = &time_hovered {
                                     if let Some(p) = pitch_hovered {
                                         event.is_active(Duration::from_micros(*t as TransportTime))
-                                        && p == note.pitch
+                                            && p == note.pitch
                                     } else {
                                         false
                                     }
                                 } else {
                                     false
                                 };
-                                let nv = NoteView { rect: note_view.rect.clone(), selected };
+                                let nv = NoteView {
+                                    rect: note_view.rect.clone(),
+                                    selected,
+                                };
 
                                 self.draw_note(&painter, note, &nv, y, half_tone_step);
                             }
                         }
-                        _ => (), /* println!("Not displaying event {:?}, the type is not supported yet.", event) */
+                        LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN => {
+                            if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+                                self.draw_cc(&painter, event.at.as_micros() as StaveTime, v.value, *y, half_tone_step);
+                            }
+                        }
+                        _ => () /*println!(
+                            "Not displaying event {:?}, the event type is not supported yet.",
+                            event
+                        )*/,
                     }
                 }
 
@@ -263,6 +280,7 @@ impl Stave {
             painter.clip_rect().y_range(),
             Stroke { width: 2.0, color },
         )
+
     }
 
     fn draw_note(
@@ -286,6 +304,24 @@ impl Stave {
         };
         let stroke_color = note_color(&velocity, event_view.selected);
         painter.rect(paint_rect, Rounding::none(), stroke_color, Stroke::NONE);
+    }
+
+    fn draw_cc(&self, painter: &Painter, at: StaveTime, value: Level, y: Pix, height: Pix) {
+        let h = height * 0.95;
+        let on = switch_cc_on(value);
+        painter.circle(
+            Pos2::new(
+                self.x_from_time(at),
+                if on { y - (h / 4.0) } else { y + (h / 4.0) },
+            ),
+            h / 4.0,
+            if on {
+                Rgba::from_rgb(0.3, 0.1, 0.1)
+            } else {
+                Rgba::from_rgb(0.1, 0.1, 0.3)
+            },
+            Stroke::NONE,
+        )
     }
 
     fn draw_grid(
