@@ -1,10 +1,12 @@
-use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::track::{ChannelId, ControllerId, Level, Pitch};
-use midly::live::LiveEvent;
-use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
 use std::collections::BinaryHeap;
 use std::time::Duration;
+
+use midly::live::LiveEvent;
 use midly::MidiMessage::Controller;
+use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
+
+use crate::engine::{EngineEvent, EventSource, TransportTime};
+use crate::track::{ChannelId, ControllerId, Level, Pitch};
 
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
@@ -39,6 +41,10 @@ pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
         events.push(event);
     }
     (events, usec_per_tick)
+}
+
+pub fn serialize_smf(events: Vec<TrackEvent<'static>>, usec_per_tick: &u32) -> Vec<u8> {
+    todo!()
 }
 
 impl SmfSource {
@@ -129,12 +135,16 @@ pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Level) -> LiveEvent<
     }
 }
 
-pub fn controller_set(channel: ChannelId, controller_id: ControllerId, value: Level) -> LiveEvent<'static> {
+pub fn controller_set(
+    channel: ChannelId,
+    controller_id: ControllerId,
+    value: Level,
+) -> LiveEvent<'static> {
     LiveEvent::Midi {
         channel: channel.into(),
         message: Controller {
             controller: controller_id.into(),
-            value: value.into()
+            value: value.into(),
         },
     }
 }

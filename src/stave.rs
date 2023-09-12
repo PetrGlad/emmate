@@ -3,7 +3,6 @@ use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::time::Duration;
 
-use eframe::egui::plot::Polygon;
 use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
@@ -11,8 +10,10 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
+use crate::midi::serialize_smf;
 use crate::track::{
-    switch_cc_on, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
+    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
+    MIDI_CC_SUSTAIN,
 };
 use crate::Pix;
 
@@ -156,6 +157,12 @@ impl Stave {
         }
     }
 
+    pub fn save_to(&self, file_name: &str, usec_per_tick: u32) {
+        let midi_events = to_midi_events(self.track.events, &usec_per_tick);
+        let binary = serialize_smf(midi_events, &usec_per_tick);
+        std::fs::write(file_name, binary).expect(&*format!("Cannot save to {}", file_name));
+    }
+
     /// Pixel/uSec, can be cached.
     pub fn time_scale(&self) -> f32 {
         self.view_rect.width() / (self.time_right - self.time_left) as f32
@@ -227,8 +234,8 @@ impl Stave {
                     match &event.event {
                         LaneEventType::Note(note) => {
                             let EventView::Note(note_view) = event_view else {
+                                // XXX Would want to keep the data and presentation separate is there a way to guarantee the arrays match.
                                 panic!("Mismatched view of an event {:?}", event_view);
-                                // XXX
                             };
                             if let Some(y) = key_ys.get(&note.pitch) {
                                 // TODO Implement note selection
@@ -253,13 +260,19 @@ impl Stave {
                         }
                         LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN => {
                             if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                                self.draw_cc(&painter, event.at.as_micros() as StaveTime, v.value, *y, half_tone_step);
+                                self.draw_cc(
+                                    &painter,
+                                    event.at.as_micros() as StaveTime,
+                                    v.value,
+                                    *y,
+                                    half_tone_step,
+                                );
                             }
                         }
-                        _ => () /*println!(
-                            "Not displaying event {:?}, the event type is not supported yet.",
-                            event
-                        )*/,
+                        _ => (), /*println!(
+                                     "Not displaying event {:?}, the event type is not supported yet.",
+                                     event
+                                 )*/
                     }
                 }
 
@@ -280,7 +293,6 @@ impl Stave {
             painter.clip_rect().y_range(),
             Stroke { width: 2.0, color },
         )
-
     }
 
     fn draw_note(

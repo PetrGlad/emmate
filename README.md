@@ -34,10 +34,11 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+Prototype checklist
 - [ ] Time or note selection in UI.
 - [ ] Configuration file (VST plugin path and MIDI input configuration).
-- [ ] Support sustain pedal (as a note?).
 - [ ] Transport controls (play/pause, rewind, step, pause).
+- [x] Support sustain pedal (as a note?).
 - [x] Play time cursor.
 - [x] Scale stave time (horizontally) with mouse wheel.
 - [x] Share project's note data between stave pane and engine.
@@ -50,16 +51,22 @@ I use Pianoteq, but that is a commercial product.
 - [x] Piano roll.
 - [x] Paint notes.
 
-May explore following options for the next version
+Have to explore following options for the further development
 
 * Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of spinning in a thread.
 * Or, be based on [Dropseed](https://github.com/MeadowlarkDAW/dropseed) (which is used in MeadowlarkDAW)
 * Or, ideally, participate in [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark) - but I am not comfortable to
   take on that yet.
+* Think if using midi events directly makes sense. See e.g. `track::to_lane_events`. 
+  This will require
+    * To handle ignored/unused events along with notes and sustain.
+    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. range tree) that
+      would help to find absolute timings of the midi events.
 
 # Implementation notes
 
 Unless stated/declared otherwise
+
 * Integer-typed times are in microseconds.
 * Ranges assumed to be half open (excluding end/highest value).
 
@@ -77,6 +84,7 @@ Diagnostic commands
 * `aseqdump --port='24:0'`
 
 MIDI CC controllers list
+
 * https://nickfever.com/music/midi-cc-list
 * https://soundslikejoe.com/2014/03/midi-cc-reference-chart/
 * https://www.whippedcreamsounds.com/midi-cc-list/
