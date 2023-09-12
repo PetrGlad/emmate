@@ -52,7 +52,7 @@ pub fn serialize_smf(
 ) -> WriteResult<Vec<u8>> {
     let mut track = Track::new();
     track.copy_from_slice(events.as_slice());
-    let timing = timing_from_tick_usec(usec_per_tick); // TODO What is the default for usec_per_tick?
+    let timing = timing_from_tick_usec(usec_per_tick);
     let header = Header::new(Format::SingleTrack, timing);
     let mut smf = Smf::new(header);
     smf.tracks.push(track);
@@ -148,7 +148,7 @@ pub fn note_off(channel: ChannelId, pitch: Pitch, velocity: Level) -> LiveEvent<
         channel: channel.into(),
         message: MidiMessage::NoteOff {
             key: pitch.into(),
-            // Not sure if this actually affects something.
+            // Not sure if this actually affects anything.
             vel: velocity.into(),
         },
     }
