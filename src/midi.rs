@@ -1,9 +1,11 @@
 use std::collections::BinaryHeap;
 use std::time::Duration;
 
+use midly::io::WriteResult;
 use midly::live::LiveEvent;
+use midly::num::u15;
 use midly::MidiMessage::Controller;
-use midly::{Format, MidiMessage, Smf, Timing, TrackEvent};
+use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
 
 use crate::engine::{EngineEvent, EventSource, TransportTime};
 use crate::track::{ChannelId, ControllerId, Level, Pitch};
@@ -43,8 +45,18 @@ pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
     (events, usec_per_tick)
 }
 
-pub fn serialize_smf(events: Vec<TrackEvent<'static>>, usec_per_tick: &u32) -> Vec<u8> {
-    todo!()
+pub fn serialize_smf(
+    events: Vec<TrackEvent<'static>>,
+    usec_per_tick: &u32,
+    out: &mut Vec<u8>,
+) -> WriteResult<Vec<u8>> {
+    let mut track = Track::new();
+    track.copy_from_slice(events.as_slice());
+    let timing = timing_from_tick_usec(usec_per_tick); // TODO What is the default for usec_per_tick?
+    let header = Header::new(Format::SingleTrack, timing);
+    let mut smf = Smf::new(header);
+    smf.tracks.push(track);
+    smf.write(out)
 }
 
 impl SmfSource {
@@ -59,24 +71,31 @@ impl SmfSource {
     }
 }
 
+// Default SMF tempo is 120 beats per minute and default signature 4/4
+const DEFAULT_BEATS_PER_SEC: u32 = 120 / 60;
+
 fn usec_per_midi_tick(timing: &Timing) -> u32 {
     let tick_per_beat = beat_duration(timing);
-    let beat_per_sec = 120 / 60; // Default is 120 beats/minute.
-    let usec_per_tick = 1_000_000 / (beat_per_sec * tick_per_beat);
+    let usec_per_tick = 1_000_000 / (DEFAULT_BEATS_PER_SEC * tick_per_beat);
     println!(
         "t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-        &tick_per_beat, &beat_per_sec, &usec_per_tick
+        &tick_per_beat, &DEFAULT_BEATS_PER_SEC, &usec_per_tick
     );
     usec_per_tick
 }
 
 fn beat_duration(timing: &Timing) -> u32 {
     // TODO Also maybe support Tempo messages. Tempo messages set micros per beat.
-    // Default tempo is 120 beats per minute and default signature 4/4
     match timing {
         Timing::Metrical(d) => d.as_int() as u32,
         _ => panic!("Timing format {:#?} is not supported.", timing),
     }
+}
+
+fn timing_from_tick_usec(midi_tick_usecs: &u32) -> Timing {
+    Timing::Metrical(u15::from(
+        (1_000_000f32 / (*midi_tick_usecs as f32 * DEFAULT_BEATS_PER_SEC as f32)) as u16,
+    ))
 }
 
 impl EventSource for SmfSource {
@@ -210,3 +229,17 @@ pub fn controller_set(
 //
 //         smf.save("rewritten.mid").unwrap();
 //     }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_conversion() {
+        let timing = Timing::Metrical(u15::from(1000u16));
+        assert_eq!(usec_per_midi_tick(&timing), 500);
+
+        let timing = Timing::Metrical(u15::from(1234u16));
+        assert_eq!(timing_from_tick_usec(&usec_per_midi_tick(&timing)), timing);
+    }
+}

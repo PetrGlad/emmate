@@ -120,7 +120,7 @@ pub fn to_lane_events(events: Vec<TrackEvent<'static>>, tick_duration: Transport
 }
 
 /// Reverse of to_lane_events
-pub fn to_midi_events(events: Vec<LaneEvent>, usec_per_tick: &u32) -> Vec<TrackEvent<'static>> {
+pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: &u32) -> Vec<TrackEvent<'static>> {
     let mut midi_events: Vec<TrackEvent<'static>> = vec![];
     todo!();
     // for ev in events {

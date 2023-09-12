@@ -128,9 +128,9 @@ impl eframe::App for EmApp {
                                         .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
                                         .reset();
                                 }
-                                if ui.button("Save") {
+                                if ui.button("Save").clicked() {
                                     // XXX Hardcoding value, see see usec_per_midi_tick. Either make this a constant or maybe keep the value from input file if that is available.
-                                    self.stave.read().unwrap().save_to("saved.mid", 222222u64);
+                                    self.stave.read().unwrap().save_to("saved.mid", 222222u32);
                                 }
                             });
                         })

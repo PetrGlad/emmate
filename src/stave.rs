@@ -158,8 +158,9 @@ impl Stave {
     }
 
     pub fn save_to(&self, file_name: &str, usec_per_tick: u32) {
-        let midi_events = to_midi_events(self.track.events, &usec_per_tick);
-        let binary = serialize_smf(midi_events, &usec_per_tick);
+        let midi_events = to_midi_events(&self.track.events, &usec_per_tick);
+        let mut binary = vec![];
+        serialize_smf(midi_events, &usec_per_tick, &mut binary).expect("Cannot serialize midi track.");
         std::fs::write(file_name, binary).expect(&*format!("Cannot save to {}", file_name));
     }
 
