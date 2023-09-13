@@ -6,6 +6,7 @@ use midly::live::LiveEvent;
 use midly::num::u15;
 use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
+use midly::Format::SingleTrack;
 
 use crate::engine::{EngineEvent, EventSource, TransportTime};
 use crate::track::{ChannelId, ControllerId, Level, Pitch};
@@ -36,7 +37,7 @@ pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
         "No tracks in SMF file. At least one is required."
     );
     // println!("Starting events of the 1st track are {:#?}", &track[..10]);
-    let usec_per_tick = usec_per_midi_tick(&smf.header.timing);
+    let usec_per_tick = usec_per_tick(&smf.header.timing);
     let mut events = vec![];
     for me in &smf.tracks[0] {
         let event = me.to_static();
@@ -47,12 +48,12 @@ pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
 
 pub fn serialize_smf(
     events: Vec<TrackEvent<'static>>,
-    usec_per_tick: &u32,
+    usec_per_tick: u32,
     out: &mut Vec<u8>,
 ) -> WriteResult<Vec<u8>> {
     let mut track = Track::new();
-    track.copy_from_slice(events.as_slice());
-    let timing = timing_from_tick_usec(usec_per_tick);
+    track.extend_from_slice(events.as_slice());
+    let timing = timing_from_usec_per_tick(usec_per_tick);
     let header = Header::new(Format::SingleTrack, timing);
     let mut smf = Smf::new(header);
     smf.tracks.push(track);
@@ -74,17 +75,17 @@ impl SmfSource {
 // Default SMF tempo is 120 beats per minute and default signature 4/4
 const DEFAULT_BEATS_PER_SEC: u32 = 120 / 60;
 
-fn usec_per_midi_tick(timing: &Timing) -> u32 {
-    let tick_per_beat = beat_duration(timing);
+fn usec_per_tick(timing: &Timing) -> u32 {
+    let tick_per_beat = ticks_per_beat(timing);
     let usec_per_tick = 1_000_000 / (DEFAULT_BEATS_PER_SEC * tick_per_beat);
     println!(
-        "t/b {:#?}, b/s  {:#?}, usec/tick {:#?}",
-        &tick_per_beat, &DEFAULT_BEATS_PER_SEC, &usec_per_tick
+        "tick/beat {:#?}, beat/second  {:#?}, usec/tick {:#?}",
+        tick_per_beat, DEFAULT_BEATS_PER_SEC, usec_per_tick
     );
     usec_per_tick
 }
 
-fn beat_duration(timing: &Timing) -> u32 {
+fn ticks_per_beat(timing: &Timing) -> u32 {
     // TODO Also maybe support Tempo messages. Tempo messages set micros per beat.
     match timing {
         Timing::Metrical(d) => d.as_int() as u32,
@@ -92,9 +93,9 @@ fn beat_duration(timing: &Timing) -> u32 {
     }
 }
 
-fn timing_from_tick_usec(midi_tick_usecs: &u32) -> Timing {
+fn timing_from_usec_per_tick(usec_per_tick: u32) -> Timing {
     Timing::Metrical(u15::from(
-        (1_000_000f32 / (*midi_tick_usecs as f32 * DEFAULT_BEATS_PER_SEC as f32)) as u16,
+        (1_000_000f32 / (usec_per_tick as f32 * DEFAULT_BEATS_PER_SEC as f32)) as u16,
     ))
 }
 
@@ -237,9 +238,9 @@ mod tests {
     #[test]
     fn timing_conversion() {
         let timing = Timing::Metrical(u15::from(1000u16));
-        assert_eq!(usec_per_midi_tick(&timing), 500);
+        assert_eq!(usec_per_tick(&timing), 500);
 
         let timing = Timing::Metrical(u15::from(1234u16));
-        assert_eq!(timing_from_tick_usec(&usec_per_midi_tick(&timing)), timing);
+        assert_eq!(timing_from_usec_per_tick(&usec_per_tick(&timing)), timing);
     }
 }

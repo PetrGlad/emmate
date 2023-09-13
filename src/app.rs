@@ -1,7 +1,7 @@
-use std::sync::{Arc, mpsc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
-use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
+use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, StatusEvent, TransportTime};
@@ -87,7 +87,8 @@ impl eframe::App for EmApp {
             ui.heading(format!("[Emmate] Your next masterpiece here",));
             StripBuilder::new(ui)
                 .size(Size::remainder())
-                .size(Size::exact(25.0))
+                .size(Size::exact(20.0))
+                .size(Size::exact(20.0))
                 .vertical(|mut strip| {
                     if let Ok(mut stave) = self.stave.try_write() {
                         strip.cell(|ui| {
@@ -121,7 +122,15 @@ impl eframe::App for EmApp {
                                 if ui.button("> Scroll >").clicked() {
                                     stave.scroll_by(scroll_step);
                                 }
+                            });
+                            ui.horizontal(|ui| {
                                 ui.checkbox(&mut self.follow_playback, "Follow playback");
+                                if ui.button("Rewind").clicked() {
+                                    self.engine
+                                        .lock()
+                                        .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
+                                        .seek(0);
+                                }
                                 if ui.button("<!> Stop sounds").clicked() {
                                     self.engine
                                         .lock()
@@ -129,8 +138,7 @@ impl eframe::App for EmApp {
                                         .reset();
                                 }
                                 if ui.button("Save").clicked() {
-                                    // XXX Hardcoding value, see see usec_per_midi_tick. Either make this a constant or maybe keep the value from input file if that is available.
-                                    stave.save_to("saved.mid", 222222u32);
+                                    stave.save_to("saved.mid");
                                 }
                             });
                         })

@@ -8,6 +8,8 @@ use track::to_lane_events;
 use crate::track::Lane;
 use crate::track_source::TrackSource;
 
+use std::env;
+
 mod app;
 mod audio_setup;
 mod engine;
@@ -24,17 +26,22 @@ pub fn main() {
         // use log::*;
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
+    let args: Vec<String> = env::args().collect();
+    // let default_input_file_name = "2023-07-21-1856_7457.mid".to_string();
+    let default_input_file_name = "yellow.mid".to_string();
+    let midi_file_name = args.get(1).unwrap_or(&default_input_file_name);
+    println!("MIDI file name {}", midi_file_name);
     // Stream reference keeps it open.
     let (_stream, mut engine) = audio_setup::setup_audio_engine();
     if false {
         // Want the section to still be compilable.
         // Play MIDI from an SMD file.
-        let smf_data = std::fs::read("yellow.mid").unwrap();
+        let smf_data = std::fs::read(midi_file_name).unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
         engine.lock().unwrap().add(Box::new(smf_midi_source));
     }
     // let smf_data = std::fs::read("yellow.mid").unwrap();
-    let smf_data = std::fs::read("2023-07-21-1856_7457.mid").unwrap();
+    let smf_data = std::fs::read(midi_file_name).unwrap();
     let events = midi::load_smf(&smf_data);
     let track = Arc::new(Box::new(Lane {
         events: to_lane_events(events.0, events.1 as u64),

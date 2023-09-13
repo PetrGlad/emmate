@@ -143,6 +143,7 @@ impl Engine {
         }
         self.running_at = at;
         self.update_realtime();
+        self.update_track_time();
     }
 
     pub fn toggle_pause(&mut self) {

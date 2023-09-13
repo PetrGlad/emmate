@@ -157,10 +157,12 @@ impl Stave {
         }
     }
 
-    pub fn save_to(&self, file_name: &str, usec_per_tick: u32) {
-        let midi_events = to_midi_events(&self.track.events, &usec_per_tick);
-        let mut binary = vec![];
-        serialize_smf(midi_events, &usec_per_tick, &mut binary).expect("Cannot serialize midi track.");
+    pub fn save_to(&self, file_name: &str) {
+        let usec_per_tick = 26u32;
+        let midi_events = to_midi_events(&self.track.events, usec_per_tick);
+        let mut binary = Vec::new();
+        serialize_smf(midi_events, usec_per_tick, &mut binary)
+            .expect("Cannot serialize midi track.");
         std::fs::write(file_name, binary).expect(&*format!("Cannot save to {}", file_name));
     }
 
@@ -212,7 +214,6 @@ impl Stave {
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
                 if let Some(pointer_pos) = pointer_pos {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
-                    println!("Pitch hovered {:?}", pitch_hovered);
                     time_hovered = Some(self.time_from_x(pointer_pos.x));
                 }
 

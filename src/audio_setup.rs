@@ -39,9 +39,9 @@ pub fn midi_keyboard_input(
     name_prefix: &str,
     engine: &mut Arc<Mutex<Engine>>,
 ) -> Option<MidiInputConnection<()>> {
-    let input = MidiInput::new("midir").unwrap();
+    let input = MidiInput::new("emmate").unwrap();
     let mut port_idx = None;
-    println!("Midi input ports:");
+    println!("Available MIDI input ports:");
     let ports = input.ports();
     for (i, port) in ports.iter().enumerate() {
         let name = input.port_name(&port).unwrap();
@@ -66,13 +66,10 @@ pub fn midi_keyboard_input(
                 move |t, ev, _data| {
                     println!("MIDI event: {} {:?} {}", t, ev, ev.len());
                     {
-                        ////// DEBUG
-                        let x = ev.clone();
-                        let le = LiveEvent::parse(x)
-                            .expect("Unparsable input controller event.")
+                        let le = LiveEvent::parse(ev)
+                            .expect("Unparseable input controller event.")
                             .to_static();
                         println!("MIDI event parsed: {} {:?}", t, le);
-                        // MIDI event parsed: 22643573 Ok(Midi { channel: u4(0), message: Controller { controller: u7(66), value: u7(0) } })
                     }
                     if ev[0] == 254 {
                         return;
