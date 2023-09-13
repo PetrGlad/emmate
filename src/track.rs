@@ -78,7 +78,7 @@ pub fn to_lane_events(
     events: Vec<TrackEvent<'static>>,
     tick_duration: TransportTime,
 ) -> Vec<LaneEvent> {
-    dbg!(&events[0..50]);
+    dbg!(&events[0..10]);
     // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
     let mut lane_events = vec![];
@@ -176,6 +176,6 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
         });
         running_at = at;
     }
-    dbg!(&midi_events[0..50]);
+    dbg!(&midi_events[0..10]);
     midi_events
 }

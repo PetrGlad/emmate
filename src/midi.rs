@@ -4,9 +4,9 @@ use std::time::Duration;
 use midly::io::WriteResult;
 use midly::live::LiveEvent;
 use midly::num::u15;
+use midly::Format::SingleTrack;
 use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
-use midly::Format::SingleTrack;
 
 use crate::engine::{EngineEvent, EventSource, TransportTime};
 use crate::track::{ChannelId, ControllerId, Level, Pitch};
@@ -55,6 +55,7 @@ pub fn serialize_smf(
     track.extend_from_slice(events.as_slice());
     let timing = timing_from_usec_per_tick(usec_per_tick);
     let header = Header::new(Format::SingleTrack, timing);
+    dbg!(header);
     let mut smf = Smf::new(header);
     smf.tracks.push(track);
     smf.write(out)
@@ -239,8 +240,10 @@ mod tests {
     fn timing_conversion() {
         let timing = Timing::Metrical(u15::from(1000u16));
         assert_eq!(usec_per_tick(&timing), 500);
+        let timing = Timing::Metrical(u15::from(19200u16));
+        assert_eq!(usec_per_tick(&timing), 26);
 
         let timing = Timing::Metrical(u15::from(1234u16));
-        assert_eq!(timing_from_usec_per_tick(&usec_per_tick(&timing)), timing);
+        assert_eq!(timing_from_usec_per_tick(usec_per_tick(&timing)), timing);
     }
 }

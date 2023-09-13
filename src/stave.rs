@@ -10,7 +10,7 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
-use crate::midi::serialize_smf;
+use crate::midi::{load_smf, serialize_smf};
 use crate::track::{
     switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
     MIDI_CC_SUSTAIN,
@@ -163,7 +163,7 @@ impl Stave {
         let mut binary = Vec::new();
         serialize_smf(midi_events, usec_per_tick, &mut binary)
             .expect("Cannot serialize midi track.");
-        std::fs::write(file_name, binary).expect(&*format!("Cannot save to {}", file_name));
+        std::fs::write(&file_name, binary).expect(&*format!("Cannot save to {}", &file_name));
     }
 
     /// Pixel/uSec, can be cached.
