@@ -126,7 +126,7 @@ pub fn to_lane_events(
 
 /// Reverse of to_lane_events
 pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackEvent<'static>> {
-    let channel = u4::from(0); // XXX Channel hard coded.
+    let channel = u4::from(0); // Channel hard coded.
     let mut buffer: Vec<(TransportTime, TrackEventKind)> = vec![];
     for ev in events {
         match &ev.event {

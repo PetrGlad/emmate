@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::ops::{Range, RangeInclusive};
+use std::ops::{Deref, Range, RangeInclusive};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,10 +7,11 @@ use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
+use midir::Ignore::Time;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
-use crate::midi::{load_smf, serialize_smf};
+use crate::midi::serialize_smf;
 use crate::track::{
     switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
     MIDI_CC_SUSTAIN,
@@ -38,6 +39,7 @@ pub struct ControllerView {
 }
 
 // Does it make sense now to use a dyn Trait instead?
+// Is it really needed. Likely will not be using it for selection.
 #[derive(Debug)]
 pub enum EventView {
     Note(NoteView),
@@ -120,6 +122,12 @@ fn key_line_ys(
     (lines, step)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TimeSelection {
+    pub from: StaveTime,
+    pub to: StaveTime,
+}
+
 #[derive(Debug)]
 pub struct Stave {
     pub track: Arc<Box<Lane>>,
@@ -128,6 +136,7 @@ pub struct Stave {
     pub time_right: StaveTime,
     pub view_rect: Rect,
     pub cursor_position: StaveTime,
+    pub time_selection: Option<TimeSelection>,
 }
 
 impl PartialEq for Stave {
@@ -154,6 +163,11 @@ impl Stave {
             time_right: 300_000_000,
             view_rect: Rect::NOTHING,
             cursor_position: 0,
+            time_selection: Some(TimeSelection {
+                // TODO Mouse drag selection
+                from: 10_000_000,
+                to: 20_000_000,
+            }),
         }
     }
 
@@ -217,6 +231,28 @@ impl Stave {
                     time_hovered = Some(self.time_from_x(pointer_pos.x));
                 }
 
+                let painter = ui.painter_at(bounds);
+
+                let drag = ui.input(|i| {
+                    dbg!(i.pointer.delta(), i.pointer.interact_pos(), i.pointer.hover_pos());
+                    if let Some(orig) = i.pointer.interact_pos() {
+                        if let Some(here) = i.pointer.hover_pos() {
+                            return Some((orig, here));
+                        }
+                    }
+                    None
+                });
+                if let Some((from, to)) = drag {
+                    dbg!((from, to));
+                    painter.line_segment(
+                        [from, to],
+                        Stroke {
+                            width: 2.0,
+                            color: Color32::from_rgb(250, 0, 0),
+                        },
+                    );
+                };
+
                 // TODO Implement note selection
                 // let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
                 // if clicked && pointer_pos.is_some() && note_rect.contains(pointer_pos.unwrap())
@@ -224,8 +260,10 @@ impl Stave {
                 //     println!("Click {:?}", n);
                 // }
 
-                let painter = ui.painter_at(bounds);
                 Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
+                if let Some(s) = &self.time_selection {
+                    self.draw_time_selection(&painter, &s);
+                }
                 assert_eq!(
                     &self.track_view_model.events.len(),
                     &self.track.events.len()
@@ -365,6 +403,38 @@ impl Stave {
                 },
             );
         }
+    }
+
+    pub fn draw_time_selection(&self, painter: &Painter, selection: &TimeSelection) {
+        let clip = painter.clip_rect();
+        let area = Rect {
+            min: Pos2 {
+                x: self.x_from_time(selection.from),
+                y: clip.min.y,
+            },
+            max: Pos2 {
+                x: self.x_from_time(selection.to),
+                y: clip.max.y,
+            },
+        };
+        let color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
+        painter.rect(area, Rounding::none(), color, Stroke::NONE);
+        painter.vline(
+            area.min.x,
+            clip.y_range(),
+            Stroke {
+                width: 1.0,
+                color: color.gamma_multiply(2.0),
+            },
+        );
+        painter.vline(
+            area.max.x,
+            clip.y_range(),
+            Stroke {
+                width: 1.0,
+                color: color.gamma_multiply(2.0),
+            },
+        )
     }
 }
 
