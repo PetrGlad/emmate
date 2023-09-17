@@ -215,8 +215,9 @@ impl Stave {
         );
     }
 
+    // Widget would require fn ui(self, ui: &mut Ui) -> Response
     pub fn view(&mut self, ui: &mut Ui) -> Response {
-        Frame::none()
+        let response = Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
@@ -234,7 +235,11 @@ impl Stave {
                 let painter = ui.painter_at(bounds);
 
                 let drag = ui.input(|i| {
-                    dbg!(i.pointer.delta(), i.pointer.interact_pos(), i.pointer.hover_pos());
+                    dbg!(
+                        i.pointer.delta(),
+                        i.pointer.interact_pos(),
+                        i.pointer.hover_pos()
+                    );
                     if let Some(orig) = i.pointer.interact_pos() {
                         if let Some(here) = i.pointer.hover_pos() {
                             return Some((orig, here));
@@ -322,9 +327,32 @@ impl Stave {
                     Rgba::from_rgba_unmultiplied(0.1, 0.7, 0.1, 0.7).into(),
                 );
 
-                ui.allocate_response(bounds.size(), Sense::click())
+                ui.allocate_response(bounds.size(), Sense::click_and_drag())
             })
-            .inner
+            .inner;
+
+        // TODO Is this how drag is supposed to be implemented?
+        let hover_pos = &response.hover_pos();
+        if response.drag_started() {
+            let Pos2 { x, .. } = hover_pos.unwrap();
+            let time = self.time_from_x(x);
+            self.time_selection = Some(TimeSelection {
+                from: time,
+                to: time,
+            });
+        } else if response.drag_released() {
+            dbg!(&self.time_selection);
+            self.time_selection = None;
+        } else if response.dragged() {
+            if let Some(Pos2 { x, .. }) = hover_pos {
+                let time = self.time_from_x(*x);
+                let selection = self.time_selection.as_mut().unwrap();
+                // TODO Also support right-to-left drag (probably in TimeSelection impl).
+                selection.to = time;
+            }
+        }
+
+        response
     }
 
     fn draw_cursor(&self, painter: &Painter, x: Pix, color: Color32) {

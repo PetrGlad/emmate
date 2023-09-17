@@ -1,7 +1,7 @@
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{Arc, mpsc, Mutex, RwLock};
 
+use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
-use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, StatusEvent, TransportTime};
@@ -84,7 +84,7 @@ impl eframe::App for EmApp {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                 self.toggle_pause();
             }
-            ui.heading(format!("[Emmate] Your next masterpiece here",));
+            ui.heading(format!("[Emmate] Your next masterpiece here"));
             StripBuilder::new(ui)
                 .size(Size::remainder())
                 .size(Size::exact(20.0))
@@ -143,7 +143,7 @@ impl eframe::App for EmApp {
                             });
                         })
                     }
-                })
+                });
         });
     }
 }
