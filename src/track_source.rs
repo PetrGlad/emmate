@@ -26,7 +26,7 @@ impl TrackSource {
 
 impl EventSource for TrackSource {
     fn is_running(&self) -> bool {
-        self.current_idx < self.track.events.len()
+        true
     }
 
     fn seek(&mut self, at: &TransportTime) {

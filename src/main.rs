@@ -4,9 +4,9 @@ use eframe::{egui, Theme};
 
 use crate::app::EmApp;
 use crate::midi::SmfSource;
-use track::to_lane_events;
 use crate::track::Lane;
 use crate::track_source::TrackSource;
+use track::to_lane_events;
 
 use std::env;
 
@@ -21,6 +21,7 @@ mod track;
 mod track_source;
 
 pub type Pix = f32;
+
 pub fn main() {
     {
         // use log::*;
@@ -31,14 +32,16 @@ pub fn main() {
     let default_input_file_name = "yellow.mid".to_string();
     let midi_file_name = args.get(1).unwrap_or(&default_input_file_name);
     println!("MIDI file name {}", midi_file_name);
-    // Stream reference keeps it open.
-    let (_stream, mut engine) = audio_setup::setup_audio_engine();
+    // Stream and engine references keep them open.
+    let (_stream, mut engine, engine_command_sender) = audio_setup::setup_audio_engine();
     if false {
         // Want the section to still be compilable.
         // Play MIDI from an SMD file.
         let smf_data = std::fs::read(midi_file_name).unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
-        engine.lock().unwrap().add(Box::new(smf_midi_source));
+        engine_command_sender
+            .send(Box::new(|engine| engine.add(Box::new(smf_midi_source)))).unwrap();
+
     }
     // let smf_data = std::fs::read("yellow.mid").unwrap();
     let smf_data = std::fs::read(midi_file_name).unwrap();
@@ -48,7 +51,8 @@ pub fn main() {
     }));
     {
         let track_midi_source = TrackSource::new(track.clone());
-        engine.lock().unwrap().add(Box::new(track_midi_source));
+        engine_command_sender
+            .send(Box::new(|engine| engine.add(Box::new(track_midi_source)))).unwrap();
     }
 
     let mut midi_inputs = vec![]; // Keeps inputs open
@@ -70,7 +74,7 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, ui_engine, ui_track))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track))),
     )
     .expect("Emmate UI")
 }

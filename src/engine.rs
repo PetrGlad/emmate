@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex};
+use std::ops::DerefMut;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,12 +15,13 @@ use crate::midi_vst::Vst;
 /// uSecs from the start.
 pub type TransportTime = u64;
 
+/** Event that is produced by engine. */
 #[derive(Clone, Debug)]
 pub enum StatusEvent {
     TransportTime(TransportTime),
 }
 
-/// An event to be rendered by the engine at given time
+/// A sound event to be rendered by the engine at given time.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct EngineEvent {
     pub at: TransportTime,
@@ -36,6 +38,8 @@ impl Ord for EngineEvent {
     }
 }
 
+pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
+
 impl PartialOrd for EngineEvent {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -43,14 +47,13 @@ impl PartialOrd for EngineEvent {
 }
 
 pub trait EventSource {
-    /** Return false when no new events will be produced from the source. */
+    /** Return false when no events will be produced from the source anymore.
+    Use this to detach it from the engine. */
     fn is_running(&self) -> bool;
     /** Reset current source's time to this moment. */
     fn seek(&mut self, at: &TransportTime);
-    /**
-    The next event to be played at the instant. On subsequent
-    calls instants must not decrease unless a reset call sets another time.
-     */
+    /** The next event to be played at the instant. On subsequent
+    calls instants must not decrease unless a reset call sets another time. */
     fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>);
 }
 
@@ -63,10 +66,11 @@ pub struct Engine {
     reset_at: Instant,
     paused: bool,
     status_receiver: Option<Box<StatusEventReceiver>>,
+    commands: mpsc::Receiver<Box<EngineCommand>>,
 }
 
 impl Engine {
-    pub fn new(vst: Vst) -> Engine {
+    pub fn new(vst: Vst, commands: mpsc::Receiver<Box<EngineCommand>>) -> Engine {
         Engine {
             vst,
             sources: Vec::new(),
@@ -74,6 +78,7 @@ impl Engine {
             reset_at: Instant::now(),
             paused: false,
             status_receiver: None,
+            commands,
         }
     }
 
@@ -90,6 +95,11 @@ impl Engine {
                     continue;
                 }
                 let mut locked = lock.unwrap();
+                let pending_commands: Vec<Box<EngineCommand>> =
+                    locked.commands.try_iter().collect();
+                for command in pending_commands {
+                    command(&mut locked);
+                }
                 if locked.paused {
                     // Mute ongoing notes before clearing.
                     // TODO Some sounds may still continue on sustain. Need a panic button.

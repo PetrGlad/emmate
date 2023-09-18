@@ -163,11 +163,7 @@ impl Stave {
             time_right: 300_000_000,
             view_rect: Rect::NOTHING,
             cursor_position: 0,
-            time_selection: Some(TimeSelection {
-                // TODO Mouse drag selection
-                from: 10_000_000,
-                to: 20_000_000,
-            }),
+            time_selection: None,
         }
     }
 
@@ -233,30 +229,6 @@ impl Stave {
                 }
 
                 let painter = ui.painter_at(bounds);
-
-                let drag = ui.input(|i| {
-                    dbg!(
-                        i.pointer.delta(),
-                        i.pointer.interact_pos(),
-                        i.pointer.hover_pos()
-                    );
-                    if let Some(orig) = i.pointer.interact_pos() {
-                        if let Some(here) = i.pointer.hover_pos() {
-                            return Some((orig, here));
-                        }
-                    }
-                    None
-                });
-                if let Some((from, to)) = drag {
-                    dbg!((from, to));
-                    painter.line_segment(
-                        [from, to],
-                        Stroke {
-                            width: 2.0,
-                            color: Color32::from_rgb(250, 0, 0),
-                        },
-                    );
-                };
 
                 // TODO Implement note selection
                 // let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
@@ -341,13 +313,11 @@ impl Stave {
                 to: time,
             });
         } else if response.drag_released() {
-            dbg!(&self.time_selection);
             self.time_selection = None;
         } else if response.dragged() {
             if let Some(Pos2 { x, .. }) = hover_pos {
                 let time = self.time_from_x(*x);
                 let selection = self.time_selection.as_mut().unwrap();
-                // TODO Also support right-to-left drag (probably in TimeSelection impl).
                 selection.to = time;
             }
         }

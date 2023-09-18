@@ -1,10 +1,10 @@
-use std::sync::{Arc, mpsc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
-use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
+use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
-use crate::engine::{Engine, StatusEvent, TransportTime};
+use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
 use crate::stave::{Stave, StaveTime};
 use crate::track::Lane;
 
@@ -13,10 +13,9 @@ enum Message {
 }
 
 pub struct EmApp {
-    engine: Arc<Mutex<Engine>>,
     stave: Arc<RwLock<Stave>>,
+    engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
-
     follow_playback: bool,
 }
 
@@ -27,39 +26,42 @@ impl PartialEq for EmApp {
 }
 
 impl EmApp {
-    pub fn new(ctx: &CreationContext, engine: Arc<Mutex<Engine>>, track: Arc<Box<Lane>>) -> EmApp {
+    pub fn new(
+        ctx: &CreationContext,
+        engine_command_send: mpsc::Sender<Box<EngineCommand>>,
+        track: Arc<Box<Lane>>,
+    ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
-            engine,
             stave: Arc::new(RwLock::new(Stave::new(track))),
+            engine_command_send,
             message_receiver,
             follow_playback: false,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
-        app.engine
-            .lock()
-            .unwrap()
-            .set_status_receiver(Some(Box::new(move |ev| {
-                // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
-                //      Should not miss one-off updates, maybe skip only in same-event-type runs.
-                match ev {
-                    StatusEvent::TransportTime(t) => {
-                        match message_sender.send(Message::UpdateTransportTime(t)) {
-                            Ok(_) => engine_receiver_ctx.request_repaint(),
-                            _ => (), // Will try next time.
-                        }
+        let engine_status_receiver =Box::new(move |ev| {
+            // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
+            //      Should not miss one-off updates, maybe skip only in same-event-type runs.
+            match ev {
+                StatusEvent::TransportTime(t) => {
+                    match message_sender.send(Message::UpdateTransportTime(t)) {
+                        Ok(_) => engine_receiver_ctx.request_repaint(),
+                        _ => (), // Will try next time.
                     }
                 }
-            })));
+            }
+        });
+        app.engine_command_send.send(Box::new(|engine| {
+            engine.set_status_receiver(Some(engine_status_receiver));
+        })).unwrap();
+
         app
     }
 
     fn toggle_pause(&mut self) {
-        self.engine
-            .lock()
-            .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
-            .toggle_pause();
+        self.engine_command_send
+            .send(Box::new(|engine| engine.toggle_pause())).unwrap();
     }
 }
 
@@ -96,12 +98,10 @@ impl eframe::App for EmApp {
                             if let Some(hover_pos) = response.hover_pos() {
                                 let zoom_factor = ui.input(|i| i.zoom_delta());
                                 if zoom_factor != 1.0 {
-                                    println!("[zoom] {:?}", zoom_factor);
                                     stave.zoom(zoom_factor, hover_pos.x);
                                 }
                                 let scroll_delta = ui.input(|i| i.scroll_delta);
                                 if scroll_delta != Vec2::ZERO {
-                                    println!("[scroll] {:?}", scroll_delta);
                                     stave.scroll_by(scroll_delta.x);
                                 }
                             }
@@ -126,16 +126,12 @@ impl eframe::App for EmApp {
                             ui.horizontal(|ui| {
                                 ui.checkbox(&mut self.follow_playback, "Follow playback");
                                 if ui.button("Rewind").clicked() {
-                                    self.engine
-                                        .lock()
-                                        .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
-                                        .seek(0);
+                                    self.engine_command_send
+                                        .send(Box::new(|engine| engine.seek(0))).unwrap();
                                 }
                                 if ui.button("<!> Stop sounds").clicked() {
-                                    self.engine
-                                        .lock()
-                                        .expect("TODO Locking engine for commands should not fail (use a channel instead?).")
-                                        .reset();
+                                    self.engine_command_send
+                                        .send(Box::new(Engine::reset)).unwrap();
                                 }
                                 if ui.button("Save").clicked() {
                                     stave.save_to("saved.mid");

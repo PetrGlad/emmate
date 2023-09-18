@@ -1,15 +1,16 @@
 use rodio::OutputStream;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, mpsc, Mutex};
+use std::sync::mpsc::Sender;
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
 use midir::{MidiInput, MidiInputConnection};
 use midly::live::LiveEvent;
 use vst::event::{Event, MidiEvent};
 use cpal::traits::{DeviceTrait, HostTrait};
-use crate::engine::Engine;
+use crate::engine::{Engine, EngineCommand};
 use crate::midi_vst::{OutputSource, Vst};
 
-pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
+pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
     let out_device = audio_host.default_output_device().unwrap();
@@ -26,13 +27,13 @@ pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>) {
     println!("INFO Output config: {:?}", out_conf);
     let (stream, stream_handle) =
         rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
+    let (command_sender, command_receiver) = mpsc::channel();
     let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();
-    // TODO Send transport time notifications from engine to UI, so cursor position can be synced.
-    let engine = Engine::new(vst /*, sender*/);
-    (stream, engine.start())
+    let engine = Engine::new(vst, command_receiver);
+    (stream, engine.start(), command_sender)
 }
 
 pub fn midi_keyboard_input(
