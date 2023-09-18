@@ -70,7 +70,6 @@ pub fn main() {
         ..Default::default()
     };
     let ui_track = track.clone();
-    let ui_engine = engine.clone();
     eframe::run_native(
         "emmate",
         native_options,

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::ops::{Deref, Range, RangeInclusive};
+use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,16 +7,15 @@ use eframe::egui::{
     self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
-use midir::Ignore::Time;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
 use crate::midi::serialize_smf;
-use crate::track::{
-    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
-    MIDI_CC_SUSTAIN,
-};
 use crate::Pix;
+use crate::track::{
+    Lane, LaneEvent, LaneEventType, Level, MIDI_CC_SUSTAIN, Note, Pitch, switch_cc_on,
+    to_midi_events,
+};
 
 pub type StaveTime = i64;
 

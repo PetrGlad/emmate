@@ -1,7 +1,7 @@
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{Arc, mpsc, RwLock};
 
+use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
-use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
@@ -40,7 +40,7 @@ impl EmApp {
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
-        let engine_status_receiver =Box::new(move |ev| {
+        let engine_status_receiver = Box::new(move |ev| {
             // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
             //      Should not miss one-off updates, maybe skip only in same-event-type runs.
             match ev {
@@ -52,16 +52,19 @@ impl EmApp {
                 }
             }
         });
-        app.engine_command_send.send(Box::new(|engine| {
-            engine.set_status_receiver(Some(engine_status_receiver));
-        })).unwrap();
+        app.engine_command_send
+            .send(Box::new(|engine| {
+                engine.set_status_receiver(Some(engine_status_receiver));
+            }))
+            .unwrap();
 
         app
     }
 
     fn toggle_pause(&mut self) {
         self.engine_command_send
-            .send(Box::new(|engine| engine.toggle_pause())).unwrap();
+            .send(Box::new(|engine| engine.toggle_pause()))
+            .unwrap();
     }
 }
 
@@ -108,7 +111,7 @@ impl eframe::App for EmApp {
                         });
                         strip.cell(|ui| {
                             ui.horizontal(|ui| {
-                                let left= ui.painter().clip_rect().min.x;
+                                let left = ui.painter().clip_rect().min.x;
                                 if ui.button("Zoom in").clicked() {
                                     stave.zoom(1.05, left);
                                 }
@@ -127,11 +130,13 @@ impl eframe::App for EmApp {
                                 ui.checkbox(&mut self.follow_playback, "Follow playback");
                                 if ui.button("Rewind").clicked() {
                                     self.engine_command_send
-                                        .send(Box::new(|engine| engine.seek(0))).unwrap();
+                                        .send(Box::new(|engine| engine.seek(0)))
+                                        .unwrap();
                                 }
                                 if ui.button("<!> Stop sounds").clicked() {
                                     self.engine_command_send
-                                        .send(Box::new(Engine::reset)).unwrap();
+                                        .send(Box::new(Engine::reset))
+                                        .unwrap();
                                 }
                                 if ui.button("Save").clicked() {
                                     stave.save_to("saved.mid");

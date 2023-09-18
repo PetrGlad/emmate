@@ -1,8 +1,8 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
 use crate::midi::{controller_set, note_off, note_on};
+use crate::track::{Lane, LaneEventType};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
-use crate::track::{Lane, LaneEventType};
 
 pub struct TrackSource {
     track: Arc<Box<Lane>>,
