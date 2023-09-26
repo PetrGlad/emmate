@@ -1,21 +1,21 @@
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeInclusive};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui::{
-    self, Color32, Frame, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
+    self, Color32, Frame, Key, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
 use crate::midi::serialize_smf;
-use crate::Pix;
 use crate::track::{
-    Lane, LaneEvent, LaneEventType, Level, MIDI_CC_SUSTAIN, Note, Pitch, switch_cc_on,
-    to_midi_events,
+    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
+    MIDI_CC_SUSTAIN,
 };
+use crate::{track, Pix};
 
 pub type StaveTime = i64;
 
@@ -127,9 +127,22 @@ pub struct TimeSelection {
     pub to: StaveTime,
 }
 
+fn to_transport_time(value: StaveTime) -> TransportTime {
+    value.max(0) as TransportTime
+}
+
+impl From<&TimeSelection> for track::TimeSelection {
+    fn from(value: &TimeSelection) -> Self {
+        track::TimeSelection {
+            from: to_transport_time(value.from),
+            to: to_transport_time(value.to),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Stave {
-    pub track: Arc<Box<Lane>>,
+    pub track: Arc<Mutex<Lane>>,
     pub track_view_model: TrackView,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
@@ -154,10 +167,10 @@ const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED; // Rgba::from_rgba_unmultiplied(0.3, 0.4, 0.7, 0.5);
 
 impl Stave {
-    pub fn new(track: Arc<Box<Lane>>) -> Stave {
+    pub fn new(track: Arc<Mutex<Lane>>) -> Stave {
         Stave {
             track: track.clone(),
-            track_view_model: TrackView::from(track.as_ref().as_ref()),
+            track_view_model: TrackView::from(track.lock().clone()),
             time_left: 0,
             time_right: 300_000_000,
             view_rect: Rect::NOTHING,
@@ -210,7 +223,7 @@ impl Stave {
         );
     }
 
-    // Widget would require fn ui(self, ui: &mut Ui) -> Response
+    // (Widget would require fn ui(self, ui: &mut Ui) -> Response)
     pub fn view(&mut self, ui: &mut Ui) -> Response {
         let response = Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
@@ -302,9 +315,25 @@ impl Stave {
             })
             .inner;
 
-        // TODO Is this how drag is supposed to be implemented?
+        self.update_time_selection(&response);
+        self.handle_commands(&response);
+
+        response
+    }
+
+    fn handle_commands(&mut self, response: &Response) {
+        if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
+            if let Some(time_selection) = &self.time_selection {
+                self.track.tape_cut(&time_selection.into());
+            }
+        }
+    }
+
+    fn update_time_selection(&mut self, response: &Response) {
         let hover_pos = &response.hover_pos();
-        if response.drag_started() {
+        if response.clicked() {
+            self.time_selection = None;
+        } else if response.drag_started() {
             let Pos2 { x, .. } = hover_pos.unwrap();
             let time = self.time_from_x(x);
             self.time_selection = Some(TimeSelection {
@@ -312,7 +341,7 @@ impl Stave {
                 to: time,
             });
         } else if response.drag_released() {
-            self.time_selection = None;
+            // Just documenting how it can be handled
         } else if response.dragged() {
             if let Some(Pos2 { x, .. }) = hover_pos {
                 let time = self.time_from_x(*x);
@@ -320,8 +349,6 @@ impl Stave {
                 selection.to = time;
             }
         }
-
-        response
     }
 
     fn draw_cursor(&self, painter: &Painter, x: Pix, color: Color32) {

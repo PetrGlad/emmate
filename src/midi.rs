@@ -106,10 +106,9 @@ impl EventSource for SmfSource {
 
     fn seek(&mut self, at: &TransportTime) {
         assert!(
-            self.running_at >= *at,
-            "SmfSource back reset is not supported yet."
+            self.running_at > *at,
+            "SmfSource back reset is not supported."
         );
-        // TODO Seek index to a suitable previous position (required on rewind and long jumps).
         self.running_at = at.to_owned();
     }
 

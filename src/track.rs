@@ -68,10 +68,24 @@ impl Ord for LaneEvent {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TimeSelection {
+    pub from: TransportTime,
+    pub to: TransportTime,
+}
+
+
 #[derive(Debug, Default)]
 pub struct Lane {
     // Notes should always be ordered by start time ascending. Not enforced yet.
     pub events: Vec<LaneEvent>,
+}
+
+impl Lane {
+    pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
+        dbg!(time_selection);
+        todo!()
+    }
 }
 
 pub fn to_lane_events(
