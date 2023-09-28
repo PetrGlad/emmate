@@ -43,20 +43,21 @@ pub fn main() {
         let smf_data = std::fs::read(midi_file_name).unwrap();
         let smf_midi_source = SmfSource::new(smf_data);
         engine_command_sender
-            .send(Box::new(|engine| engine.add(Box::new(smf_midi_source)))).unwrap();
-
+            .send(Box::new(|engine| engine.add(Box::new(smf_midi_source))))
+            .unwrap();
     }
     // let smf_data = std::fs::read("yellow.mid").unwrap();
     let smf_data = std::fs::read(midi_file_name).unwrap();
     let events = midi::load_smf(&smf_data);
-    let track = Arc::new(RwLock::new(Lane {
-        events: to_lane_events(events.0, events.1 as u64),
-        version: 0
-    }));
+    let track = Arc::new(RwLock::new(Lane::new(to_lane_events(
+        events.0,
+        events.1 as u64,
+    ))));
     {
         let track_midi_source = TrackSource::new(track.clone());
         engine_command_sender
-            .send(Box::new(|engine| engine.add(Box::new(track_midi_source)))).unwrap();
+            .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
+            .unwrap();
     }
 
     let mut midi_inputs = vec![]; // Keeps inputs open

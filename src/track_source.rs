@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn empty_lane() {
-        let lane = Arc::new(RwLock::new(Lane { events: vec![], version: 0 }));
+        let lane = Arc::new(RwLock::new(Lane::default()));
         let mut source = TrackSource::new(lane);
         source.seek(&100_000u64);
         assert_eq!(source.running_at, 100_000);

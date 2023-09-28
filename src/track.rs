@@ -74,15 +74,21 @@ pub struct TimeSelection {
     pub to: TransportTime,
 }
 
-
 #[derive(Debug, Default)]
 pub struct Lane {
     // Notes should always be ordered by start time ascending. Not enforced yet.
     pub events: Vec<LaneEvent>,
-    pub version: u64,
+    version: u64,
 }
 
 impl Lane {
+    pub fn new(events: Vec<LaneEvent>) -> Lane {
+        Lane {
+            events,
+            version: 0,
+        }
+    }
+
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!(time_selection);
         self.version += 1;
