@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::ops::{Range, RangeInclusive};
-use std::sync::{Arc, Mutex};
+use std::ops::{Deref, Range, RangeInclusive};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use eframe::egui::{
@@ -9,13 +9,13 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 
+use crate::{Pix, track};
 use crate::engine::TransportTime;
 use crate::midi::serialize_smf;
 use crate::track::{
-    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
-    MIDI_CC_SUSTAIN,
+    Lane, LaneEvent, LaneEventType, Level, MIDI_CC_SUSTAIN, Note, Pitch, switch_cc_on,
+    to_midi_events,
 };
-use crate::{track, Pix};
 
 pub type StaveTime = i64;
 
@@ -38,7 +38,7 @@ pub struct ControllerView {
 }
 
 // Does it make sense now to use a dyn Trait instead?
-// Is it really needed. Likely will not be using it for selection.
+// Is it really needed? Likely will not be using it for selection.
 #[derive(Debug)]
 pub enum EventView {
     Note(NoteView),
@@ -103,9 +103,10 @@ impl From<&Lane> for TrackView {
 }
 
 // Tone 60 is C3, tones start at C-2 (21)
-// TODO (cleanup) Allocating bottom line for damper, need some explicit declaration for CC controllers.
-const PIANO_KEY_LINES: Range<Pitch> = 20..(20 + 88);
-const PIANO_DAMPER_LINE: Pitch = 20;
+const PIANO_LOWEST_KEY: Pitch = 21;
+const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + 88);
+// TODO (cleanup) Allocating bottom line for damper, need some explicit declaration/struct for CC values.
+const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
 
 fn key_line_ys(
     view_y_range: RangeInclusive<Pix>,
@@ -142,7 +143,7 @@ impl From<&TimeSelection> for track::TimeSelection {
 
 #[derive(Debug)]
 pub struct Stave {
-    pub track: Arc<Mutex<Lane>>,
+    pub track: Arc<RwLock<Lane>>,
     pub track_view_model: TrackView,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
@@ -167,10 +168,11 @@ const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED; // Rgba::from_rgba_unmultiplied(0.3, 0.4, 0.7, 0.5);
 
 impl Stave {
-    pub fn new(track: Arc<Mutex<Lane>>) -> Stave {
+    pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
+        let lock = track.read().expect("Cannot read track.");
         Stave {
             track: track.clone(),
-            track_view_model: TrackView::from(track.lock().clone()),
+            track_view_model: TrackView::from(lock.deref()),
             time_left: 0,
             time_right: 300_000_000,
             view_rect: Rect::NOTHING,
@@ -181,7 +183,10 @@ impl Stave {
 
     pub fn save_to(&self, file_name: &str) {
         let usec_per_tick = 26u32;
-        let midi_events = to_midi_events(&self.track.events, usec_per_tick);
+        let midi_events = to_midi_events(
+            &self.track.read().expect("Cannot read track.").events,
+            usec_per_tick,
+        );
         let mut binary = Vec::new();
         serialize_smf(midi_events, usec_per_tick, &mut binary)
             .expect("Cannot serialize midi track.");
@@ -253,12 +258,10 @@ impl Stave {
                 if let Some(s) = &self.time_selection {
                     self.draw_time_selection(&painter, &s);
                 }
-                assert_eq!(
-                    &self.track_view_model.events.len(),
-                    &self.track.events.len()
-                );
-                for i in 0..self.track.events.len() {
-                    let event = &self.track.events[i];
+                let track = self.track.read().expect("Cannot read track.");
+                assert_eq!(&self.track_view_model.events.len(), &track.events.len());
+                for i in 0..track.events.len() {
+                    let event = &track.events[i];
                     let event_view = &self.track_view_model.events[i];
                     match &event.event {
                         LaneEventType::Note(note) => {
@@ -279,9 +282,11 @@ impl Stave {
                                 } else {
                                     false
                                 };
-                                let nv = NoteView {
-                                    rect: note_view.rect.clone(),
-                                    selected,
+                                let nv = {
+                                    NoteView {
+                                        rect: note_view.rect.clone(),
+                                        selected,
+                                    }
                                 };
 
                                 self.draw_note(&painter, note, &nv, y, half_tone_step);
@@ -324,7 +329,10 @@ impl Stave {
     fn handle_commands(&mut self, response: &Response) {
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
             if let Some(time_selection) = &self.time_selection {
-                self.track.tape_cut(&time_selection.into());
+                self.track
+                    .write()
+                    .expect("Cannot write to track.")
+                    .tape_cut(&time_selection.into());
             }
         }
     }

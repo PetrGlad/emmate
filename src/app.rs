@@ -1,4 +1,4 @@
-use std::sync::{Arc, mpsc, Mutex, RwLock};
+use std::sync::{Arc, mpsc, RwLock};
 
 use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
@@ -29,7 +29,7 @@ impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
-        track: Arc<Mutex<Lane>>,
+        track: Arc<RwLock<Lane>>,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {

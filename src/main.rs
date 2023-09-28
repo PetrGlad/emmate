@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use eframe::{egui, Theme};
 
@@ -28,8 +28,11 @@ pub fn main() {
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
     let args: Vec<String> = env::args().collect();
+
     // let default_input_file_name = "2023-07-21-1856_7457.mid".to_string();
     let default_input_file_name = "yellow.mid".to_string();
+    // let default_input_file_name = "short.mid".to_string();
+
     let midi_file_name = args.get(1).unwrap_or(&default_input_file_name);
     println!("MIDI file name {}", midi_file_name);
     // Stream and engine references keep them open.
@@ -46,8 +49,9 @@ pub fn main() {
     // let smf_data = std::fs::read("yellow.mid").unwrap();
     let smf_data = std::fs::read(midi_file_name).unwrap();
     let events = midi::load_smf(&smf_data);
-    let track = Arc::new(Box::new(Lane {
+    let track = Arc::new(RwLock::new(Lane {
         events: to_lane_events(events.0, events.1 as u64),
+        version: 0
     }));
     {
         let track_midi_source = TrackSource::new(track.clone());
