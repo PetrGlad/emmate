@@ -236,6 +236,7 @@ impl Stave {
                     match &event.event {
                         LaneEventType::Note(note) => {
                             let EventView::Note(note_view) = event_view else {
+                                // TODO Move draw logic into event_view
                                 panic!("Mismatched view of an event {:?}", event_view);
                             };
                             // TODO Implement note selection, here is a hover demo instead:
