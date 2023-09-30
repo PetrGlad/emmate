@@ -102,13 +102,13 @@ impl Lane {
     }
 
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
-        dbg!(time_selection);
+        dbg!("tape_cut", time_selection);
         self.version += 1;
         let d = time_selection.length();
         self.events.retain(|ev| !time_selection.contains(ev.at));
-        for mut ev in &self.events {
+        for ev in &mut self.events {
             if time_selection.before(ev.at) {
-                todo!() //  ev.at -= d;
+                ev.at -= d;
             }
         }
     }

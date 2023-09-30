@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::ops::{Deref, Range, RangeInclusive};
+use std::ops::{Range, RangeInclusive};
 use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
@@ -48,7 +48,7 @@ impl From<&LaneEvent> for EventView {
     fn from(event: &LaneEvent) -> Self {
         match &event.event {
             LaneEventType::Note(n) => EventView::Note(NoteView {
-                rect: Self::note_rect(event.at as StaveTime, n),
+                rect: NoteView::note_rect(event.at as StaveTime, n),
                 selected: false,
             }),
             LaneEventType::Controller(_) => EventView::Controller(ControllerView {}),
@@ -56,7 +56,7 @@ impl From<&LaneEvent> for EventView {
     }
 }
 
-impl EventView {
+impl NoteView {
     pub fn note_rect(
         at: StaveTime,
         Note {
@@ -78,33 +78,9 @@ impl EventView {
     }
 }
 
-#[derive(Debug)]
-pub struct TrackView {
-    events: Vec<EventView>,
-    version: u64,
-}
-
-impl PartialEq<Self> for TrackView {
-    fn eq(&self, other: &Self) -> bool {
-        // Intended to check if updates are needed GUI.
-        // Comparing the whole tract would be expensive, update operations should increase the version.
-        self.version == other.version
-    }
-}
-
-impl From<&Lane> for TrackView {
-    fn from(lane: &Lane) -> Self {
-        TrackView {
-            events: lane.events.iter().map(|ev| ev.into()).collect(),
-            version: 0,
-        }
-    }
-}
-
 // Tone 60 is C3, tones start at C-2 (21)
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + 88);
-// TODO (cleanup) Allocating bottom line for damper, need some explicit declaration/struct for CC values.
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
 
 fn key_line_ys(
@@ -143,7 +119,6 @@ impl From<&TimeSelection> for track::TimeSelection {
 #[derive(Debug)]
 pub struct Stave {
     pub track: Arc<RwLock<Lane>>,
-    pub track_view_model: TrackView,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
     pub view_rect: Rect,
@@ -153,9 +128,8 @@ pub struct Stave {
 
 impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
-        // Want this eq implementation so egui knows when not to re-render.
-        self.track_view_model == other.track_view_model
-            && self.time_left == other.time_left
+        // This eq implementation helps so egui knows when not to re-render.
+        self.time_left == other.time_left
             && self.time_right == other.time_right
             && self.cursor_position == other.cursor_position
             && self.view_rect == other.view_rect
@@ -168,10 +142,8 @@ const COLOR_HOVERED: Rgba = COLOR_SELECTED; // Rgba::from_rgba_unmultiplied(0.3,
 
 impl Stave {
     pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
-        let lock = track.read().expect("Cannot read track.");
         Stave {
             track: track.clone(),
-            track_view_model: TrackView::from(lock.deref()),
             time_left: 0,
             time_right: 300_000_000,
             view_rect: Rect::NOTHING,
@@ -258,18 +230,16 @@ impl Stave {
                     self.draw_time_selection(&painter, &s);
                 }
                 let track = self.track.read().expect("Cannot read track.");
-                assert_eq!(&self.track_view_model.events.len(), &track.events.len());
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
-                    let event_view = &self.track_view_model.events[i];
+                    let event_view = event.into();
                     match &event.event {
                         LaneEventType::Note(note) => {
                             let EventView::Note(note_view) = event_view else {
-                                // XXX Would want to keep the data and presentation separate is there a way to guarantee the arrays match.
                                 panic!("Mismatched view of an event {:?}", event_view);
                             };
+                            // TODO Implement note selection, here is a hover demo instead:
                             if let Some(y) = key_ys.get(&note.pitch) {
-                                // TODO Implement note selection
                                 // Stub:
                                 let selected = if let Some(t) = &time_hovered {
                                     if let Some(p) = pitch_hovered {
