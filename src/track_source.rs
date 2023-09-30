@@ -18,10 +18,6 @@ impl TrackSource {
             running_at: 0,
         }
     }
-
-    // fn note_on_time(&self, i: usize) -> Option<u64> {
-    //     self.track.events.get(i).map(|ev| ev.at.as_micros() as u64)
-    // }
 }
 
 impl EventSource for TrackSource {
@@ -32,7 +28,7 @@ impl EventSource for TrackSource {
     fn seek(&mut self, at: &TransportTime) {
         let track = self.track.read().expect("Cannot read track.");
         let note_on_time = |i: usize| {
-            track.events.get(i).map(|ev| ev.at.as_micros() as u64)
+            track.events.get(i).map(|ev| ev.at)
         };
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. Should work if the target is both before and after the current one.
@@ -65,7 +61,7 @@ impl EventSource for TrackSource {
         while self.current_idx < track.events.len() {
             let notes = &track.events;
             let event = &notes[self.current_idx];
-            let running_at = event.at.as_micros() as u64;
+            let running_at = event.at;
             if running_at > *at {
                 return;
             }
@@ -77,7 +73,7 @@ impl EventSource for TrackSource {
                         event: note_on(1, note.pitch, note.velocity),
                     });
                     queue.push(EngineEvent {
-                        at: running_at + note.duration.as_micros() as u64,
+                        at: running_at + note.duration,
                         event: note_off(1, note.pitch, note.velocity),
                     });
                 }

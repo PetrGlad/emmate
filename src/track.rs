@@ -1,9 +1,10 @@
-use crate::engine::TransportTime;
-use midly::num::u4;
-use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::time::Duration;
+
+use midly::{MidiMessage, TrackEvent, TrackEventKind};
+use midly::num::u4;
+
+use crate::engine::TransportTime;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -23,7 +24,7 @@ pub fn switch_cc_on(x: Level) -> bool {
 pub struct Note {
     pub pitch: Pitch,
     pub velocity: Level,
-    pub duration: Duration,
+    pub duration: TransportTime,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -41,12 +42,12 @@ pub enum LaneEventType {
 #[derive(Debug, Eq, PartialEq)]
 pub struct LaneEvent {
     /// Since the track beginning.
-    pub at: Duration,
+    pub at: TransportTime,
     pub event: LaneEventType,
 }
 
 impl LaneEvent {
-    pub fn is_active(&self, at: Duration) -> bool {
+    pub fn is_active(&self, at: TransportTime) -> bool {
         match &self.event {
             LaneEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
             _ => false,
@@ -74,6 +75,20 @@ pub struct TimeSelection {
     pub to: TransportTime,
 }
 
+impl TimeSelection {
+    pub fn length(&self) -> TransportTime {
+        self.to - self.from
+    }
+
+    pub fn contains(&self, at: TransportTime) -> bool {
+        self.from <= at && at < self.to
+    }
+
+    pub fn before(&self, at: TransportTime) -> bool {
+        self.to <= at
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Lane {
     // Notes should always be ordered by start time ascending. Not enforced yet.
@@ -83,16 +98,19 @@ pub struct Lane {
 
 impl Lane {
     pub fn new(events: Vec<LaneEvent>) -> Lane {
-        Lane {
-            events,
-            version: 0,
-        }
+        Lane { events, version: 0 }
     }
 
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!(time_selection);
         self.version += 1;
-        todo!()
+        let d = time_selection.length();
+        self.events.retain(|ev| !time_selection.contains(ev.at));
+        for mut ev in &self.events {
+            if time_selection.before(ev.at) {
+                todo!() //  ev.at -= d;
+            }
+        }
     }
 }
 
@@ -117,9 +135,9 @@ pub fn to_lane_events(
                     match on {
                         Some((t, MidiMessage::NoteOn { key, vel })) => {
                             lane_events.push(LaneEvent {
-                                at: Duration::from_micros(t),
+                                at: t,
                                 event: LaneEventType::Note(Note {
-                                    duration: Duration::from_micros(at - t),
+                                    duration: at - t,
                                     pitch: key.as_int() as Pitch,
                                     velocity: vel.as_int() as Level,
                                 }),
@@ -130,7 +148,7 @@ pub fn to_lane_events(
                     }
                 }
                 MidiMessage::Controller { controller, value } => lane_events.push(LaneEvent {
-                    at: Duration::from_micros(at),
+                    at,
                     event: LaneEventType::Controller(ControllerSetValue {
                         controller_id: controller.into(),
                         value: value.into(),
@@ -142,7 +160,7 @@ pub fn to_lane_events(
         };
     }
     // Notes are collected after they complete, This mixes the ordering with immediate events.
-    lane_events.sort_by_key(|ev| ev.at.as_micros());
+    lane_events.sort_by_key(|ev| ev.at);
     lane_events
 }
 
@@ -154,7 +172,7 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
         match &ev.event {
             LaneEventType::Note(n) => {
                 buffer.push((
-                    ev.at.as_micros() as u64,
+                    ev.at,
                     TrackEventKind::Midi {
                         channel,
                         message: MidiMessage::NoteOn {
@@ -164,7 +182,7 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
                     },
                 ));
                 buffer.push((
-                    (ev.at.as_micros() + n.duration.as_micros()) as u64,
+                    ev.at + n.duration,
                     TrackEventKind::Midi {
                         channel,
                         message: MidiMessage::NoteOff {
@@ -176,7 +194,7 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
             }
             LaneEventType::Controller(v) => {
                 buffer.push((
-                    ev.at.as_micros() as u64,
+                    ev.at,
                     TrackEventKind::Midi {
                         channel,
                         message: MidiMessage::Controller {

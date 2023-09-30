@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, Range, RangeInclusive};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use eframe::egui::{
     self, Color32, Frame, Key, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
@@ -49,7 +48,7 @@ impl From<&LaneEvent> for EventView {
     fn from(event: &LaneEvent) -> Self {
         match &event.event {
             LaneEventType::Note(n) => EventView::Note(NoteView {
-                rect: Self::note_rect(event.at.as_micros() as StaveTime, n),
+                rect: Self::note_rect(event.at as StaveTime, n),
                 selected: false,
             }),
             LaneEventType::Controller(_) => EventView::Controller(ControllerView {}),
@@ -65,7 +64,7 @@ impl EventView {
         }: &Note,
     ) -> Rect {
         let y = *pitch as Pix + 0.5;
-        let x_end = (at + duration.as_micros() as StaveTime) as Pix;
+        let x_end = (at + *duration as StaveTime) as Pix;
         Rect {
             min: Pos2 {
                 x: at as Pix,
@@ -274,8 +273,7 @@ impl Stave {
                                 // Stub:
                                 let selected = if let Some(t) = &time_hovered {
                                     if let Some(p) = pitch_hovered {
-                                        event.is_active(Duration::from_micros(*t as TransportTime))
-                                            && p == note.pitch
+                                        event.is_active(*t as TransportTime) && p == note.pitch
                                     } else {
                                         false
                                     }
@@ -296,7 +294,7 @@ impl Stave {
                             if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
                                 self.draw_cc(
                                     &painter,
-                                    event.at.as_micros() as StaveTime,
+                                    event.at as StaveTime,
                                     v.value,
                                     *y,
                                     half_tone_step,
