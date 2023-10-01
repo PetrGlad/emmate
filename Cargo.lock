@@ -1678,9 +1678,9 @@ dependencies = [
 
 [[package]]
 name = "memchr"
-version = "2.6.3"
+version = "2.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f232d6ef707e1956a43342693d2a31e72989554d58299d7a88738cc95b0d35c"
+checksum = "f665ee40bc4a3c5590afb1e9677db74a508659dfd71e126420da8274909a0167"
 
 [[package]]
 name = "memmap2"
@@ -2324,7 +2324,7 @@ checksum = "b9b1a3d5f46d53f4a3478e2be4a5a5ce5108ea58b100dcd139830eae7f79a3a1"
 [[package]]
 name = "rodio"
 version = "0.18.0"
-source = "git+https://github.com/PetrGlad/rodio.git?branch=configurable-buffer-size#4c62dd3ed8f66cca2867e87f3d3d5a72cd34691a"
+source = "git+https://github.com/PetrGlad/rodio.git?branch=configurable-buffer-size#c17712f74b1f41036e36580637ceea54650fe2ad"
 dependencies = [
  "claxon",
  "cpal",

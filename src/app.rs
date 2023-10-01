@@ -1,7 +1,7 @@
-use std::sync::{Arc, mpsc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 
-use eframe::{self, CreationContext, egui};
 use eframe::egui::Vec2;
+use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};

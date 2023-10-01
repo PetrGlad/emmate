@@ -9,13 +9,13 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 
-use crate::{Pix, track};
 use crate::engine::TransportTime;
 use crate::midi::serialize_smf;
 use crate::track::{
-    Lane, LaneEvent, LaneEventType, Level, MIDI_CC_SUSTAIN, Note, Pitch, switch_cc_on,
-    to_midi_events,
+    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
+    MIDI_CC_SUSTAIN,
 };
+use crate::{track, Pix};
 
 pub type StaveTime = i64;
 

@@ -27,9 +27,7 @@ impl EventSource for TrackSource {
 
     fn seek(&mut self, at: &TransportTime) {
         let track = self.track.read().expect("Cannot read track.");
-        let note_on_time = |i: usize| {
-            track.events.get(i).map(|ev| ev.at)
-        };
+        let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. Should work if the target is both before and after the current one.
         while let Some(t) = note_on_time(self.current_idx) {

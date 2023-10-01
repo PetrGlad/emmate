@@ -16,10 +16,10 @@ rand = "0.8.5"
 eframe = { version = "0.23.0" }
 egui_extras = { version = "0.23.0" }
 
-#tokio = { version = "1.0", features = ["sync"] }
-#itertools = "0.9"
-#rustc-hash = "1.1"
-#bytes = "1.4.0"
+# tokio = { version = "1.0", features = ["sync"] }
+# itertools = "0.9"
+# rustc-hash = "1.1"
+# bytes = "1.4.0"
 
 # https://github.com/RustAudio/vst-rs
 vst = "0.3.0"
@@ -28,7 +28,7 @@ vst = "0.3.0"
 midly = { version = "0.5.3", features = ["alloc"] }
 
 # https://github.com/RustAudio/wmidi
-wmidi = "4.0.6"
+wmidi = "4.0.8"
 
 # https://github.com/Fluhzar/WAV
 # TODO LGPL update licence desc
@@ -36,9 +36,8 @@ wav = "1.0.0"
 # Could also be https://github.com/ruuda/hound
 
 # https://github.com/RustAudio/rodio
-# rodio="0.16.0" # does not have try_from_device_config function
-# rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "70c80462e64d" } # master at 2022-11-06
-# rodio = { path = "rodio" }
+# rodio = "0.17.1"
+# rodio = { path = "/home/petr/work/etc/rodio" }
 rodio = { git = "https://github.com/PetrGlad/rodio.git", branch = "configurable-buffer-size" }
 
 # https://docs.rs/alsa/latest/alsa/

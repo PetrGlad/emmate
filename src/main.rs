@@ -16,6 +16,7 @@ mod engine;
 mod events;
 mod midi;
 mod midi_vst;
+mod project;
 mod stave;
 mod track;
 mod track_source;
@@ -30,8 +31,9 @@ pub fn main() {
     let args: Vec<String> = env::args().collect();
 
     // let default_input_file_name = "2023-07-21-1856_7457.mid".to_string();
-    let default_input_file_name = "yellow.mid".to_string();
+    // let default_input_file_name = "yellow.mid".to_string();
     // let default_input_file_name = "short.mid".to_string();
+    let default_input_file_name = "saved.mid".to_string();
 
     let midi_file_name = args.get(1).unwrap_or(&default_input_file_name);
     println!("MIDI file name {}", midi_file_name);

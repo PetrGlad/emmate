@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use midly::{MidiMessage, TrackEvent, TrackEventKind};
 use midly::num::u4;
+use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
 use crate::engine::TransportTime;
 

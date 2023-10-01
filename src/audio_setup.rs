@@ -1,14 +1,14 @@
-use rodio::OutputStream;
-use std::sync::{Arc, mpsc, Mutex};
-use std::sync::mpsc::Sender;
+use crate::engine::{Engine, EngineCommand};
+use crate::midi_vst::{OutputSource, Vst};
+use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
 use midir::{MidiInput, MidiInputConnection};
 use midly::live::LiveEvent;
+use rodio::OutputStream;
+use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc, Mutex};
 use vst::event::{Event, MidiEvent};
-use cpal::traits::{DeviceTrait, HostTrait};
-use crate::engine::{Engine, EngineCommand};
-use crate::midi_vst::{OutputSource, Vst};
 
 pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
     let buffer_size = 256;
@@ -17,18 +17,21 @@ pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<Eng
     println!("INFO Default output device: {:?}", out_device.name());
     let out_conf = out_device.default_output_config().unwrap();
     println!("INFO Default output config: {:?}", out_conf);
-    assert_eq!(out_conf.sample_format(), F32);
-    let sample_format = F32; // To use with vst.
-    let out_conf = StreamConfig {
+    assert_eq!(out_conf.sample_format(), F32); // Required by VST
+    let out_stream_conf = StreamConfig {
         channels: out_conf.channels(),
         sample_rate: out_conf.sample_rate(),
         buffer_size: BufferSize::Fixed(buffer_size),
     };
-    println!("INFO Output config: {:?}", out_conf);
-    let (stream, stream_handle) =
-        rodio::OutputStream::try_from_config(&out_device, &out_conf, &sample_format).unwrap();
+    println!("INFO Output config: {:?}", out_stream_conf);
+    let (stream, stream_handle) = rodio::OutputStream::try_from_config(
+        &out_device,
+        &out_stream_conf,
+        &out_conf.sample_format(),
+    )
+    .unwrap();
     let (command_sender, command_receiver) = mpsc::channel();
-    let vst = Vst::init(&out_conf.sample_rate, &buffer_size);
+    let vst = Vst::init(&out_stream_conf.sample_rate, &buffer_size);
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();

@@ -1,17 +1,16 @@
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration};
 use cpal::{FrameCount, SampleRate};
 use rodio::Source;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use vst::api::{Supported};
+use vst::api::Supported;
 use vst::host::{Host, HostBuffer, PluginInstance, PluginLoader};
 use vst::plugin::{CanDo, Plugin};
 
 pub struct VstHost;
 
-impl Host for VstHost {
-}
+impl Host for VstHost {}
 
 pub struct Vst {
     pub host: Arc<Mutex<VstHost>>,
@@ -48,17 +47,31 @@ impl Vst {
              Initial delay: {} samples\n\t\
              Inputs {}\n\t\
              Outputs {}",
-                info.name, info.vendor, info.presets, info.parameters, info.unique_id,
-                info.version, info.initial_delay, info.inputs, info.outputs
+                info.name,
+                info.vendor,
+                info.presets,
+                info.parameters,
+                info.unique_id,
+                info.version,
+                info.initial_delay,
+                info.inputs,
+                info.outputs
             );
             let params = plugin.get_parameter_object();
             params.change_preset(4); // A choice for pianoteq
-            // params.change_preset(1096); // A nice choice for amsynth
-            println!("Current preset #{}: {}", params.get_preset_num(), params.get_preset_name(params.get_preset_num()));
+                                     // params.change_preset(1096); // A nice choice for amsynth
+            println!(
+                "Current preset #{}: {}",
+                params.get_preset_num(),
+                params.get_preset_name(params.get_preset_num())
+            );
 
             plugin.init();
             println!("Initialized VST instance.");
-            println!("Can receive MIDI events {}", plugin.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes);
+            println!(
+                "Can receive MIDI events {}",
+                plugin.can_do(CanDo::ReceiveMidiEvent) == Supported::Yes
+            );
 
             plugin.suspend(); // Just to be explicit, the plugin is created in suspended state.
             plugin.set_sample_rate(sample_rate_f.to_owned());
@@ -66,7 +79,11 @@ impl Vst {
             plugin.resume();
             plugin.start_process();
         }
-        Vst { host, plugin: plugin_holder, sample_rate: sample_rate_f }
+        Vst {
+            host,
+            plugin: plugin_holder,
+            sample_rate: sample_rate_f,
+        }
     }
 }
 
@@ -127,7 +144,7 @@ impl Iterator for OutputSource {
         let mut output = mut_outputs.get_mut(self.channel_idx.to_owned());
         if output == None {
             /* Channels are interleaved (see https://github.com/RustAudio/rodio/blob/master/src/source/channel_volume.rs)
-               So for 2 channels we have to put 2 samples in sequence */
+            So for 2 channels we have to put 2 samples in sequence */
             self.channel_idx = 0;
             self.sample_idx += 1;
             output = mut_outputs.get_mut(self.channel_idx.to_owned());
