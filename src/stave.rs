@@ -3,7 +3,8 @@ use std::ops::{Range, RangeInclusive};
 use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
-    self, Color32, Frame, Key, Margin, Painter, Pos2, Rect, Response, Rounding, Sense, Stroke, Ui,
+    self, Color32, Frame, Key, Margin, Painter, PointerButton, Pos2, Rect, Response, Rounding,
+    Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -307,19 +308,20 @@ impl Stave {
     }
 
     fn update_time_selection(&mut self, response: &Response) {
+        let drag_button = PointerButton::Primary;
         let hover_pos = &response.hover_pos();
-        if response.clicked() {
+        if response.clicked_by(drag_button) {
             self.time_selection = None;
-        } else if response.drag_started() {
-            let Pos2 { x, .. } = hover_pos.unwrap();
+        } else if response.drag_started_by(drag_button) {
+            let x = hover_pos.unwrap().x;
             let time = self.time_from_x(x);
             self.time_selection = Some(TimeSelection {
                 from: time,
                 to: time,
             });
-        } else if response.drag_released() {
+        } else if response.drag_released_by(drag_button) {
             // Just documenting how it can be handled
-        } else if response.dragged() {
+        } else if response.dragged_by(drag_button) {
             if let Some(Pos2 { x, .. }) = hover_pos {
                 let time = self.time_from_x(*x);
                 let selection = self.time_selection.as_mut().unwrap();

@@ -1,14 +1,14 @@
+use std::env;
 use std::sync::{Arc, RwLock};
 
 use eframe::{egui, Theme};
+
+use track::to_lane_events;
 
 use crate::app::EmApp;
 use crate::midi::SmfSource;
 use crate::track::Lane;
 use crate::track_source::TrackSource;
-use track::to_lane_events;
-
-use std::env;
 
 mod app;
 mod audio_setup;

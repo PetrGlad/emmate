@@ -107,6 +107,15 @@ impl eframe::App for EmApp {
                                 if scroll_delta != Vec2::ZERO {
                                     stave.scroll_by(scroll_delta.x);
                                 }
+                                if response.middle_clicked() {
+                                    let at = stave.time_from_x(hover_pos.x);
+                                    stave.cursor_position = at; // Should be a Stave method?
+                                    self.engine_command_send
+                                        .send(Box::new(move |engine| {
+                                            engine.seek(at as TransportTime)
+                                        }))
+                                        .unwrap();
+                                }
                             }
                         });
                         strip.cell(|ui| {
