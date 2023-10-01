@@ -6,20 +6,20 @@ Off grid MIDI editor with following goals:
 * Do not care (much) about measures. Primarily aimed at piano real recordings without strict tempo/bars.
 * A feature absent in _any_ other midi editor I could get my hands on (both commercial and free ones): removing a note
   can shift the tail of the track left to fill the gap. In some editors this is actually doable but cumbersome at best.
-* Playing/editing very long (over several thousands events) files.
-  Those files are usually recordings of real performance (e.g. from MIDI keyboard).
-* Comfortable workflow with keyboard as primary input.
+* Playing/editing very long (up to about 20K of events) files.
+  Those files are usually recordings of real performances (e.g. from MIDI keyboard).
+* Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
-* Blackbox recording (aways-on MIDI recording).
+* Blackbox recording (always-on MIDI recording).
 
 I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but that does not seem to
 ever happen.
 
 ## Status
 
-Not even a prototype, still figuring things out. I am learning both Rust, MIDI and sound processing at once so the code
-should not be expected to be a good style example.
+Not even a prototype, still figuring things out. I am learning Rust, MIDI, sound processing, and UI library all at once
+so at the moment the code is not an example of good style.
 
 ## Build
 
@@ -35,7 +35,8 @@ I use Pianoteq, but that is a commercial product.
 ## TODO
 
 Prototype checklist
-- [ ] Time or note selection in UI.
+
+- [ ] Time and note selection in UI.
 - [ ] Configuration file (VST plugin path and MIDI input configuration).
 - [ ] Transport controls (play/pause, rewind, step, pause).
 - [x] Support sustain pedal (as a note?).
@@ -54,28 +55,29 @@ Prototype checklist
 Have to explore following options for the further development
 
 * Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of spinning in a thread.
-* Or, be based on [Dropseed](https://github.com/MeadowlarkDAW/dropseed) (which is used in MeadowlarkDAW)
-* Or, ideally, participate in [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark) - but I am not comfortable to
-  take on that yet.
-* Think if using midi events directly makes sense. See e.g. `track::to_lane_events`. 
+* Ideally, this should be a part of some open source DAW. I found one that is written in Rust,
+  [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark). It is open source but not a collaborative project (as
+  stated in its README).
+* Think if using midi events directly makes sense. See e.g. `track::to_lane_events`.
   This will require
     * To handle ignored/unused events along with notes and sustain.
-    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. range tree) that
-      would help to find absolute timings of the midi events.
+    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
+      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes.
 
 # Implementation notes
 
-Unless stated/declared otherwise
+Unless stated otherwise
 
 * Integer-typed times are in microseconds.
-* Ranges assumed to be half open (excluding end/highest value).
+* Ranges assumed to be half open, excluding end (upper bound) value.
 
 # Notes
 
 SMD - Standard MIDI File.
 
 Rodio and other libraries use interleaved stream format 1 sample of each channel, then 2 sample of each channel and so
-on (ch1s1, ch2s1, ...., ch1s2, ch2s2, ....).
+on (ch1s1, ch2s1, ...., ch1s2, ch2s2, ....). This seems to be a convention but is not documented anywhere for some
+reason.
 
 Diagnostic commands
 
