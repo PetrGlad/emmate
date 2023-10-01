@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
-use std::ops::{Range, RangeInclusive};
+use std::ops::Range;
 use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
-    self, Color32, Frame, Key, Margin, Painter, PointerButton, Pos2, Rect, Response, Rounding,
-    Sense, Stroke, Ui,
+    self, Color32, Frame, Key, Margin, Painter, PointerButton, Pos2, Rangef, Rect, Response,
+    Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -84,13 +84,10 @@ const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + 88);
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
 
-fn key_line_ys(
-    view_y_range: RangeInclusive<Pix>,
-    pitches: Range<Pitch>,
-) -> (BTreeMap<Pitch, Pix>, Pix) {
+fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
     let mut lines = BTreeMap::new();
-    let step = (view_y_range.end() - view_y_range.start()) / pitches.len() as Pix;
-    let mut y = view_y_range.end() - step / 2.0;
+    let step = view_y_range.span() / pitches.len() as Pix;
+    let mut y = view_y_range.max - step / 2.0;
     for p in pitches {
         lines.insert(p, y);
         y -= step;
@@ -208,7 +205,7 @@ impl Stave {
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
                 self.view_rect = bounds;
-                let (key_ys, half_tone_step) = key_line_ys(bounds.y_range(), PIANO_KEY_LINES);
+                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), PIANO_KEY_LINES);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
@@ -358,7 +355,7 @@ impl Stave {
             },
         };
         let stroke_color = note_color(&velocity, event_view.selected);
-        painter.rect(paint_rect, Rounding::none(), stroke_color, Stroke::NONE);
+        painter.rect(paint_rect, Rounding::ZERO, stroke_color, Stroke::NONE);
     }
 
     fn draw_cc(&self, painter: &Painter, at: StaveTime, value: Level, y: Pix, height: Pix) {
@@ -421,7 +418,7 @@ impl Stave {
             },
         };
         let color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
-        painter.rect(area, Rounding::none(), color, Stroke::NONE);
+        painter.rect(area, Rounding::ZERO, color, Stroke::NONE);
         painter.vline(
             area.min.x,
             clip.y_range(),
