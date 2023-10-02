@@ -19,12 +19,9 @@ pub struct Vst {
 }
 
 impl Vst {
-    pub fn init(sample_rate: &SampleRate, buffer_size: &FrameCount) -> Vst {
+    pub fn init(plugin_path: &String, sample_rate: &SampleRate, buffer_size: &FrameCount) -> Vst {
         let sample_rate_f = sample_rate.0 as f32;
-
-        // let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.lv2/Pianoteq_7.so");
-        let path = Path::new("/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 7.so");
-        // let path = Path::new("/usr/lib/vst/amsynth_vst.so");
+        let path = Path::new(plugin_path);
         println!("Loading {}", path.to_str().unwrap());
 
         let host = Arc::new(Mutex::new(VstHost));

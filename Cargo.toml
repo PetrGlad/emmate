@@ -54,3 +54,4 @@ stderrlog = "0.5.3"
 
 toml = "0.8.1"
 serde = "1.0.188"
+clap = "4.4.6"

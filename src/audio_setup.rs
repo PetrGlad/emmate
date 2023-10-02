@@ -10,7 +10,9 @@ use std::sync::mpsc::Sender;
 use std::sync::{mpsc, Arc, Mutex};
 use vst::event::{Event, MidiEvent};
 
-pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
+pub fn setup_audio_engine(
+    vst_plugin_path: &String,
+) -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
     let out_device = audio_host.default_output_device().unwrap();
@@ -31,7 +33,7 @@ pub fn setup_audio_engine() -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<Eng
     )
     .unwrap();
     let (command_sender, command_receiver) = mpsc::channel();
-    let vst = Vst::init(&out_stream_conf.sample_rate, &buffer_size);
+    let vst = Vst::init(vst_plugin_path, &out_stream_conf.sample_rate, &buffer_size);
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();
