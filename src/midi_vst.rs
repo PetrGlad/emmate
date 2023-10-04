@@ -19,7 +19,7 @@ pub struct Vst {
 }
 
 impl Vst {
-    pub fn init(plugin_path: &String, sample_rate: &SampleRate, buffer_size: &FrameCount) -> Vst {
+    pub fn init(plugin_path: &String, sample_rate: &SampleRate, buffer_size: &FrameCount, preset_id: i32 ) -> Vst {
         let sample_rate_f = sample_rate.0 as f32;
         let path = Path::new(plugin_path);
         println!("Loading {}", path.to_str().unwrap());
@@ -55,8 +55,7 @@ impl Vst {
                 info.outputs
             );
             let params = plugin.get_parameter_object();
-            params.change_preset(4); // A choice for pianoteq
-                                     // params.change_preset(1096); // A nice choice for amsynth
+            params.change_preset(preset_id);
             println!(
                 "Current preset #{}: {}",
                 params.get_preset_num(),

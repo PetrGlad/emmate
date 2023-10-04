@@ -12,6 +12,7 @@ use vst::event::{Event, MidiEvent};
 
 pub fn setup_audio_engine(
     vst_plugin_path: &String,
+    vst_preset_id: &i32,
 ) -> (OutputStream, Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
     let buffer_size = 256;
     let audio_host = cpal::default_host();
@@ -33,7 +34,12 @@ pub fn setup_audio_engine(
     )
     .unwrap();
     let (command_sender, command_receiver) = mpsc::channel();
-    let vst = Vst::init(vst_plugin_path, &out_stream_conf.sample_rate, &buffer_size);
+    let vst = Vst::init(
+        vst_plugin_path,
+        &out_stream_conf.sample_rate,
+        &buffer_size,
+        *vst_preset_id,
+    );
     stream_handle
         .play_raw(OutputSource::new(&vst, &buffer_size))
         .unwrap();

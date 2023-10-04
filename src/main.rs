@@ -49,7 +49,7 @@ pub fn main() {
     println!("MIDI file name {:?}", midi_file_path);
     // Stream and engine references keep them open.
     let (_stream, mut engine, engine_command_sender) =
-        audio_setup::setup_audio_engine(&config.vst_plugin_path);
+        audio_setup::setup_audio_engine(&config.vst_plugin_path, &config.vst_preset_id);
     if false {
         // Want the section to still be compilable.
         // Play MIDI from an SMD file.
