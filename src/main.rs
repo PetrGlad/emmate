@@ -1,6 +1,5 @@
 use std::sync::{Arc, RwLock};
 
-use clap::{Arg, ArgAction};
 use eframe::{egui, Theme};
 
 use track::to_lane_events;
@@ -8,6 +7,7 @@ use track::to_lane_events;
 use crate::app::EmApp;
 use crate::config::Config;
 use crate::midi::SmfSource;
+use crate::project::Project;
 use crate::track::Lane;
 use crate::track_source::TrackSource;
 
@@ -30,23 +30,29 @@ pub fn main() {
         // use log::*;
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
-    let cmd = clap::Command::new("emmate")
+    let arg_matches = clap::Command::new("MyApp")
+        .version("0.2")
+        .author("Petr <petrglad@gmail.com>")
+        .about("MIDI editor")
         .arg(
-            Arg::new("config-file")
-                .value_parser(clap::value_parser!(std::path::PathBuf))
-                .action(ArgAction::Set),
+            clap::arg!(--"config-file" <VALUE>)
+                .value_parser(clap::value_parser!(std::path::PathBuf)),
         )
         .arg(
-            Arg::new("input-file")
+            clap::arg!(--"input-file" <VALUE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
-                .action(ArgAction::Set)
                 .default_value("yellow.mid"),
-        );
-    let matches = cmd.get_matches();
-    let config = Config::load(matches.get_one::<std::path::PathBuf>("config-file"));
+        )
+        .get_matches();
+    let config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
 
-    let midi_file_path = matches.get_one::<std::path::PathBuf>("input-file").unwrap();
+    let midi_file_path = arg_matches
+        .get_one::<std::path::PathBuf>("input-file")
+        .unwrap();
     println!("MIDI file name {:?}", midi_file_path);
+    let project = Project::new(midi_file_path);
+    project.open();
+
     // Stream and engine references keep them open.
     let (_stream, mut engine, engine_command_sender) =
         audio_setup::setup_audio_engine(&config.vst_plugin_path, &config.vst_preset_id);
@@ -60,7 +66,7 @@ pub fn main() {
             .unwrap();
     }
     // let smf_data = std::fs::read("yellow.mid").unwrap();
-    let smf_data = std::fs::read(midi_file_path).unwrap();
+    let smf_data = std::fs::read(&project.source).unwrap();
     let events = midi::load_smf(&smf_data);
     let track = Arc::new(RwLock::new(Lane::new(to_lane_events(
         events.0,
@@ -91,7 +97,7 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track, project))),
     )
     .expect("Emmate UI")
 }

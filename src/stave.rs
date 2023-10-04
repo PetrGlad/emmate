@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
@@ -150,7 +151,7 @@ impl Stave {
         }
     }
 
-    pub fn save_to(&self, file_name: &str) {
+    pub fn save_to(&self, file_path: &PathBuf) {
         let usec_per_tick = 26u32;
         let midi_events = to_midi_events(
             &self.track.read().expect("Cannot read track.").events,
@@ -159,7 +160,8 @@ impl Stave {
         let mut binary = Vec::new();
         serialize_smf(midi_events, usec_per_tick, &mut binary)
             .expect("Cannot serialize midi track.");
-        std::fs::write(&file_name, binary).expect(&*format!("Cannot save to {}", &file_name));
+        std::fs::write(&file_path, binary)
+            .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
     /// Pixel/uSec, can be cached.

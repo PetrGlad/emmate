@@ -3,4 +3,5 @@
 **/*.rs.bk
 
 .idea/
+*.emmate
 

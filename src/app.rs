@@ -5,6 +5,7 @@ use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
+use crate::project::Project;
 use crate::stave::{Stave, StaveTime};
 use crate::track::Lane;
 
@@ -17,6 +18,7 @@ pub struct EmApp {
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
+    project: Project,
 }
 
 impl PartialEq for EmApp {
@@ -30,6 +32,7 @@ impl EmApp {
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
         track: Arc<RwLock<Lane>>,
+        project: Project,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
@@ -37,6 +40,7 @@ impl EmApp {
             engine_command_send,
             message_receiver,
             follow_playback: false,
+            project,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -148,7 +152,8 @@ impl eframe::App for EmApp {
                                         .unwrap();
                                 }
                                 if ui.button("Save").clicked() {
-                                    stave.save_to("saved.mid");
+                                    self.project.update_version(1);
+                                    stave.save_to(&self.project.current_snapshot_path());
                                 }
                             });
                         })
