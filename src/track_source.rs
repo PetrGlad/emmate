@@ -122,9 +122,12 @@ mod tests {
         let mut source = TrackSource::new(track);
         source.seek(&0);
         assert_eq!(source.running_at, 0);
+        assert_eq!(source.current_idx, 0);
         source.seek(&100u64);
         assert_eq!(source.running_at, 100);
+        assert_eq!(source.current_idx, 0);
         source.seek(&2000u64);
         assert_eq!(source.running_at, 2000);
+        assert_eq!(source.current_idx, 1)
     }
 }

@@ -18,8 +18,8 @@ ever happen.
 
 ## Status
 
-Not even a prototype, still figuring things out. I am learning Rust, MIDI, sound processing, and UI library all at once
-so at the moment the code is not an example of good style.
+Prototype, still figuring things out. I am learning Rust, MIDI, sound processing, and UI library all at once
+so the code is not an example of a good style.
 
 ## Build
 
@@ -36,9 +36,12 @@ I use Pianoteq, but that is a commercial product.
 
 Prototype checklist
 
-- [ ] Time and note selection in UI.
-- [ ] Configuration file (VST plugin path and MIDI input configuration).
-- [ ] Transport controls (play/pause, rewind, step, pause).
+- [ ] Note input (with mouse).
+- [ ] Note selection.
+- [x] Simple undo/redo.
+- [x] Time selection.
+- [x] Configuration file (VST plugin path and MIDI input configuration).
+- [x] Transport controls (play/pause, rewind, pause).
 - [x] Support sustain pedal (as a note?).
 - [x] Play time cursor.
 - [x] Scale stave time (horizontally) with mouse wheel.

@@ -157,19 +157,19 @@ impl eframe::App for EmApp {
                                 }
                                 if ui.button("🚩Save").clicked() {
                                     // TODO Should not save when there are no changes.
-                                    self.project.update_version(1);
+                                    self.project.change_version(1);
                                     stave.save_to(&self.project.current_snapshot_path());
                                 }
                                 if ui.button("⤵ Undo").clicked() {
-                                    self.project.update_version(-1);
+                                    self.project.change_version(-1);
                                     if !stave.load_from(&self.project.current_snapshot_path()) {
-                                        self.project.update_version(1);
+                                        self.project.change_version(1);
                                     }
                                 }
                                 if ui.button("⤴ Redo").clicked() {
-                                    self.project.update_version(1);
+                                    self.project.change_version(1);
                                     if !stave.load_from(&self.project.current_snapshot_path()) {
-                                        self.project.update_version(-1);
+                                        self.project.change_version(-1);
                                     }
                                 }
                             });
