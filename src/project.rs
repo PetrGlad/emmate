@@ -29,7 +29,7 @@ impl Project {
         }
     }
 
-    pub fn open(&self) {
+    pub fn open(&mut self) {
         if !self.directory.is_dir() {
             fs::create_dir_all(&self.directory).expect(
                 format!(
@@ -43,6 +43,12 @@ impl Project {
         if !fs::metadata(&starting_snapshot_path).is_ok() {
             fs::copy(&self.source_path, &starting_snapshot_path)
                 .expect("Cannot create starting snapshot.");
+        } else {
+            // Seek to the latest version.
+            while fs::metadata(&self.current_snapshot_path()).is_ok() {
+                self.change_version(1);
+            }
+            self.change_version(-1);
         }
     }
 
@@ -69,7 +75,7 @@ impl Project {
     }
 
     // version_diff < 0 for undo. version_diff == 1 - save new version.
-    pub fn update_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
+    pub fn change_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
         let new_version = self.version.checked_add(version_diff);
         new_version.filter(|v| *v >= 0).and_then(|v| {
             self.version = v;

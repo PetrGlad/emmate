@@ -48,7 +48,7 @@ pub fn main() {
         .get_one::<std::path::PathBuf>("input-file")
         .unwrap();
     println!("MIDI file name {:?}", midi_file_path);
-    let project = Project::new(midi_file_path);
+    let mut project = Project::new(midi_file_path);
     project.open();
 
     // Stream and engine references keep them open.
