@@ -80,8 +80,9 @@ impl NoteView {
 
 // Tone 60 is C3, tones start at C-2 (21)
 const PIANO_LOWEST_KEY: Pitch = 21;
-const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + 88);
+const PIANO_KEY_COUNT: Pitch = 88;
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
+const PIANO_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
     let mut lines = BTreeMap::new();
@@ -240,7 +241,7 @@ impl Stave {
                             };
                             // TODO Implement note selection, here is a hover demo instead:
                             if let Some(y) = key_ys.get(&note.pitch) {
-                                // Stub:
+                                // Note hover demo stub:
                                 let selected = if let Some(t) = &time_hovered {
                                     if let Some(p) = pitch_hovered {
                                         event.is_active(*t as TransportTime) && p == note.pitch
@@ -451,7 +452,7 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
     let c = if selected {
         COLOR_SELECTED
     } else {
-        Rgba::from_rgb(0.4, 0.5, 0.5)
+        Rgba::from_rgb(0.6, 0.7, 0.7)
     };
     egui::lerp(c..=Rgba::from_rgb(0.0, 0.0, 0.0), *velocity as f32 / 128.0).into()
 }
