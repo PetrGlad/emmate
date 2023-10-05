@@ -30,12 +30,14 @@ impl EventSource for TrackSource {
         let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. Should work if the target is both before and after the current one.
+        // Note that the track may be modified since we last read it.
         while let Some(t) = note_on_time(self.current_idx) {
             if *at >= t {
                 break;
             }
-            self.current_idx -= 1;
-            if self.current_idx <= 0 {
+            if let Some(idx) = self.current_idx.checked_sub(1) {
+                self.current_idx = idx;
+            } else {
                 break;
             }
         }
@@ -90,6 +92,8 @@ impl EventSource for TrackSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::track;
+    use crate::track::LaneEvent;
 
     #[test]
     fn empty_lane() {
@@ -99,5 +103,28 @@ mod tests {
         assert_eq!(source.running_at, 100_000);
         source.seek(&0);
         assert_eq!(source.running_at, 0);
+        assert_eq!(source.current_idx, 0)
+    }
+
+    #[test]
+    fn one_note() {
+        let mut lane = Lane::default();
+        lane.events.push(LaneEvent {
+            at: 1000,
+            event: LaneEventType::Note(track::Note {
+                pitch: 55,
+                velocity: 55,
+                duration: 12,
+            }),
+        });
+        let track = Arc::new(RwLock::new(lane));
+
+        let mut source = TrackSource::new(track);
+        source.seek(&0);
+        assert_eq!(source.running_at, 0);
+        source.seek(&100u64);
+        assert_eq!(source.running_at, 100);
+        source.seek(&2000u64);
+        assert_eq!(source.running_at, 2000);
     }
 }
