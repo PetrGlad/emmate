@@ -93,7 +93,11 @@ impl eframe::App for EmApp {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                 self.toggle_pause();
             }
-            ui.heading(format!("[Emmate] Your next masterpiece here"));
+            ui.heading(format!(
+                "🌳 {:} [{:}]",
+                self.project.directory.display(),
+                self.project.version()
+            ));
             StripBuilder::new(ui)
                 .size(Size::remainder())
                 .size(Size::exact(20.0))
@@ -141,19 +145,32 @@ impl eframe::App for EmApp {
                             });
                             ui.horizontal(|ui| {
                                 ui.checkbox(&mut self.follow_playback, "Follow playback");
-                                if ui.button("Rewind").clicked() {
+                                if ui.button("⏮ Rewind").clicked() {
                                     self.engine_command_send
                                         .send(Box::new(|engine| engine.seek(0)))
                                         .unwrap();
                                 }
-                                if ui.button("<!> Stop sounds").clicked() {
+                                if ui.button("🔇 Stop sounds").clicked() {
                                     self.engine_command_send
                                         .send(Box::new(Engine::reset))
                                         .unwrap();
                                 }
-                                if ui.button("Save").clicked() {
+                                if ui.button("🚩Save").clicked() {
+                                    // TODO Should not save when there are no changes.
                                     self.project.update_version(1);
                                     stave.save_to(&self.project.current_snapshot_path());
+                                }
+                                if ui.button("⤵ Undo").clicked() {
+                                    self.project.update_version(-1);
+                                    if !stave.load_from(&self.project.current_snapshot_path()) {
+                                        self.project.update_version(1);
+                                    }
+                                }
+                                if ui.button("⤴ Redo").clicked() {
+                                    self.project.update_version(1);
+                                    if !stave.load_from(&self.project.current_snapshot_path()) {
+                                        self.project.update_version(-1);
+                                    }
                                 }
                             });
                         })

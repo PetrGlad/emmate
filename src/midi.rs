@@ -54,7 +54,6 @@ pub fn serialize_smf(
     track.extend_from_slice(events.as_slice());
     let timing = timing_from_usec_per_tick(usec_per_tick);
     let header = Header::new(Format::SingleTrack, timing);
-    dbg!(header);
     let mut smf = Smf::new(header);
     smf.tracks.push(track);
     smf.write(out)

@@ -7,7 +7,7 @@ pub type VersionId = i64;
 
 pub struct Project {
     pub directory: PathBuf,
-    pub source: PathBuf,
+    pub source_path: PathBuf,
     version: VersionId,
 }
 
@@ -15,12 +15,16 @@ impl Project {
     const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
     const DIRECTORY_NAME_SUFFIX: &'static str = "emmate";
 
+    pub fn version(&self) -> VersionId {
+        self.version
+    }
+
     pub fn new(source_file: &PathBuf) -> Project {
         let mut directory = source_file.to_owned();
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
         Project {
             directory,
-            source: source_file.to_owned(),
+            source_path: source_file.to_owned(),
             version: 0,
         }
     }
@@ -34,6 +38,11 @@ impl Project {
                 )
                 .as_str(),
             );
+        }
+        let starting_snapshot_path = self.current_snapshot_path();
+        if !fs::metadata(&starting_snapshot_path).is_ok() {
+            fs::copy(&self.source_path, &starting_snapshot_path)
+                .expect("Cannot create starting snapshot.");
         }
     }
 

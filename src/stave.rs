@@ -11,10 +11,8 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
-use crate::midi::serialize_smf;
 use crate::track::{
-    switch_cc_on, to_midi_events, Lane, LaneEvent, LaneEventType, Level, Note, Pitch,
-    MIDI_CC_SUSTAIN,
+    switch_cc_on, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
 };
 use crate::{track, Pix};
 
@@ -152,16 +150,17 @@ impl Stave {
     }
 
     pub fn save_to(&self, file_path: &PathBuf) {
-        let usec_per_tick = 26u32;
-        let midi_events = to_midi_events(
-            &self.track.read().expect("Cannot read track.").events,
-            usec_per_tick,
-        );
-        let mut binary = Vec::new();
-        serialize_smf(midi_events, usec_per_tick, &mut binary)
-            .expect("Cannot serialize midi track.");
-        std::fs::write(&file_path, binary)
-            .expect(&*format!("Cannot save to {}", &file_path.display()));
+        self.track
+            .read()
+            .expect("Cannot read track.")
+            .save_to(file_path);
+    }
+
+    pub fn load_from(&self, file_path: &PathBuf) -> bool {
+        self.track
+            .write()
+            .expect("Cannot read track.")
+            .load_from(file_path)
     }
 
     /// Pixel/uSec, can be cached.

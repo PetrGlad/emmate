@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, mpsc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -166,7 +166,8 @@ impl Engine {
     pub fn reset(&mut self) {
         self.paused = true;
         // TODO Implement.
-        // self.vst.host.lock().unwrap().idle(); // This SIGSEVs. Use LV2 instead?
+        // self.vst.host.lock().unwrap().idle(); // This SIGSEVs. Use other API instead (LV2)?
+        // self.vst.plugin.lock().unwrap().suspend();
     }
 
     pub fn update_realtime(&mut self) {

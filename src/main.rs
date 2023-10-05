@@ -2,8 +2,6 @@ use std::sync::{Arc, RwLock};
 
 use eframe::{egui, Theme};
 
-use track::to_lane_events;
-
 use crate::app::EmApp;
 use crate::config::Config;
 use crate::midi::SmfSource;
@@ -65,13 +63,10 @@ pub fn main() {
             .send(Box::new(|engine| engine.add(Box::new(smf_midi_source))))
             .unwrap();
     }
-    // let smf_data = std::fs::read("yellow.mid").unwrap();
-    let smf_data = std::fs::read(&project.source).unwrap();
-    let events = midi::load_smf(&smf_data);
-    let track = Arc::new(RwLock::new(Lane::new(to_lane_events(
-        events.0,
-        events.1 as u64,
-    ))));
+
+    let mut track = Lane::default();
+    track.load_from(&project.current_snapshot_path());
+    let track = Arc::new(RwLock::new(track));
     {
         let track_midi_source = TrackSource::new(track.clone());
         engine_command_sender

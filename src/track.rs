@@ -1,10 +1,12 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use midly::num::u4;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
 use crate::engine::TransportTime;
+use crate::midi;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -101,6 +103,25 @@ impl Lane {
         Lane { events, version: 0 }
     }
 
+    pub fn load_from(&mut self, file_path: &PathBuf) -> bool {
+        if let Ok(data) = std::fs::read(&file_path) {
+            let events = midi::load_smf(&data);
+            self.events = to_lane_events(events.0, events.1 as u64);
+            return true;
+        }
+        false
+    }
+
+    pub fn save_to(&self, file_path: &PathBuf) {
+        let usec_per_tick = 26u32;
+        let midi_events = to_midi_events(&self.events, usec_per_tick);
+        let mut binary = Vec::new();
+        midi::serialize_smf(midi_events, usec_per_tick, &mut binary)
+            .expect("Cannot serialize midi track.");
+        std::fs::write(&file_path, binary)
+            .expect(&*format!("Cannot save to {}", &file_path.display()));
+    }
+
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_cut", time_selection);
         self.version += 1;
@@ -118,7 +139,6 @@ pub fn to_lane_events(
     events: Vec<TrackEvent<'static>>,
     tick_duration: TransportTime,
 ) -> Vec<LaneEvent> {
-    dbg!(&events[0..10]);
     // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
     let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
     let mut lane_events = vec![];
@@ -216,6 +236,5 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
         });
         running_at = at;
     }
-    dbg!(&midi_events[0..10]);
     midi_events
 }
