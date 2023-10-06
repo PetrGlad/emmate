@@ -34,10 +34,13 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-Prototype checklist
-
 - [ ] Note input (with mouse).
 - [ ] Note selection.
+- [ ] Allow editing sustain events.
+- [ ] Do not save new version when there are no changes.
+- [ ] Multi-track UI (for snippets and copy/paste buffer).
+- [ ] Time marks on stave.
+- [ ] Time bookmarks.
 - [x] Simple undo/redo.
 - [x] Time selection.
 - [x] Configuration file (VST plugin path and MIDI input configuration).
@@ -55,17 +58,22 @@ Prototype checklist
 - [x] Piano roll.
 - [x] Paint notes.
 
+Big scary problems
+
+* Should eventually migrate away from VST2 (unsupported and unreliable). VST3 is GPL. LV2 seem like a decent choice.
+  There is no other (except VST) plugin host implementations in Rust. Have to implement one from scratch.
+* May need to use midi events directly (instead of intermediate internal representation). See
+  e.g. `track::to_lane_events`. This will require
+    * To handle ignored/unused events along with notes and sustain.
+    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
+      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes.
+
 Have to explore following options for the further development
 
 * Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of spinning in a thread.
 * Ideally, this should be a part of some open source DAW. I found one that is written in Rust,
   [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark). It is open source but not a collaborative project (as
   stated in its README).
-* Think if using midi events directly makes sense. See e.g. `track::to_lane_events`.
-  This will require
-    * To handle ignored/unused events along with notes and sustain.
-    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
-      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes.
 
 # Implementation notes
 
