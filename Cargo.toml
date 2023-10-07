@@ -25,7 +25,6 @@ midly = { version = "0.5.3", features = ["alloc"] }
 wmidi = "4.0.8"
 
 # https://github.com/Fluhzar/WAV
-# TODO LGPL update licence desc
 wav = "1.0.0"
 # Could also be https://github.com/ruuda/hound
 
