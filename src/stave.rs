@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -12,7 +12,7 @@ use ordered_float::OrderedFloat;
 
 use crate::engine::TransportTime;
 use crate::track::{
-    switch_cc_on, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
+    switch_cc_on, EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
 };
 use crate::{track, Pix};
 
@@ -27,8 +27,6 @@ Control events in negative y coords, 1-width bands each. */
 #[derive(Debug)]
 pub struct NoteView {
     rect: Rect,
-    // TODO Implement selection, maybe this could be a separate bag of notes instead.
-    selected: bool,
 }
 
 #[derive(Debug)]
@@ -49,7 +47,6 @@ impl From<&LaneEvent> for EventView {
         match &event.event {
             LaneEventType::Note(n) => EventView::Note(NoteView {
                 rect: NoteView::note_rect(event.at as StaveTime, n),
-                selected: false,
             }),
             LaneEventType::Controller(_) => EventView::Controller(ControllerView {}),
         }
@@ -101,6 +98,29 @@ pub struct TimeSelection {
     pub to: StaveTime,
 }
 
+#[derive(Debug, Default)]
+pub struct NotesSelection {
+    selected: HashSet<EventId>,
+}
+
+impl NotesSelection {
+    fn add(&mut self, ev: &LaneEvent) {
+        self.selected.insert(ev.id);
+    }
+
+    fn toggle(&mut self, ev: &LaneEvent) {
+        if self.selected.contains(&ev.id) {
+            self.selected.remove(&ev.id);
+        } else {
+            self.selected.insert(ev.id);
+        }
+    }
+
+    fn contains(&self, ev: &LaneEvent) -> bool {
+        self.selected.contains(&ev.id)
+    }
+}
+
 fn to_transport_time(value: StaveTime) -> TransportTime {
     value.max(0) as TransportTime
 }
@@ -121,7 +141,9 @@ pub struct Stave {
     pub time_right: StaveTime,
     pub view_rect: Rect,
     pub cursor_position: StaveTime,
+
     pub time_selection: Option<TimeSelection>,
+    pub note_selection: NotesSelection,
 }
 
 impl PartialEq for Stave {
@@ -135,18 +157,18 @@ impl PartialEq for Stave {
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
-// TODO Hovered color should be a function (takes normal color and highlights it slightly)
-const COLOR_HOVERED: Rgba = COLOR_SELECTED; // Rgba::from_rgba_unmultiplied(0.3, 0.4, 0.7, 0.5);
+const COLOR_HOVERED: Rgba = COLOR_SELECTED;
 
 impl Stave {
     pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
         Stave {
             track: track.clone(),
             time_left: 0,
-            time_right: 300_000_000,
+            time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
             cursor_position: 0,
             time_selection: None,
+            note_selection: NotesSelection::default(),
         }
     }
 
@@ -215,15 +237,7 @@ impl Stave {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
                     time_hovered = Some(self.time_from_x(pointer_pos.x));
                 }
-
                 let painter = ui.painter_at(bounds);
-
-                // TODO Implement note selection
-                // let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
-                // if clicked && pointer_pos.is_some() && note_rect.contains(pointer_pos.unwrap())
-                // {
-                //     println!("Click {:?}", n);
-                // }
 
                 Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
                 if let Some(s) = &self.time_selection {
@@ -232,33 +246,29 @@ impl Stave {
                 let track = self.track.read().expect("Cannot read track.");
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
-                    let event_view = event.into();
                     match &event.event {
                         LaneEventType::Note(note) => {
-                            let EventView::Note(note_view) = event_view else {
-                                // TODO Move draw logic into event_view
-                                panic!("Mismatched view of an event {:?}", event_view);
-                            };
-                            // TODO Implement note selection, here is a hover demo instead:
                             if let Some(y) = key_ys.get(&note.pitch) {
-                                // Note hover demo stub:
-                                let selected = if let Some(t) = &time_hovered {
-                                    if let Some(p) = pitch_hovered {
-                                        event.is_active(*t as TransportTime) && p == note.pitch
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                };
-                                let nv = {
-                                    NoteView {
-                                        rect: note_view.rect.clone(),
-                                        selected,
-                                    }
-                                };
-
-                                self.draw_note(&painter, note, &nv, y, half_tone_step);
+                                let note_hovered = Self::event_hovered(
+                                    &pitch_hovered,
+                                    &time_hovered,
+                                    event,
+                                    &note.pitch,
+                                );
+                                let note_rect = NoteView::note_rect(event.at as StaveTime, &note);
+                                let clicked =
+                                    ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+                                if clicked && note_hovered {
+                                    self.note_selection.toggle(&event);
+                                }
+                                self.draw_note(
+                                    &painter,
+                                    note,
+                                    &note_rect,
+                                    y,
+                                    half_tone_step,
+                                    self.note_selection.contains(&event),
+                                );
                             }
                         }
                         LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN => {
@@ -295,14 +305,30 @@ impl Stave {
         response
     }
 
+    fn event_hovered(
+        pitch_hovered: &Option<Pitch>,
+        time_hovered: &Option<StaveTime>,
+        event: &LaneEvent,
+        pitch: &Pitch,
+    ) -> bool {
+        if let Some(t) = &time_hovered {
+            if let Some(p) = pitch_hovered {
+                event.is_active(*t as TransportTime) && p == pitch
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
     fn handle_commands(&mut self, response: &Response) {
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
             if let Some(time_selection) = &self.time_selection {
-                self.track
-                    .write()
-                    .expect("Cannot write to track.")
-                    .tape_cut(&time_selection.into());
+                track.tape_cut(&time_selection.into());
             }
+            track.delete_events(&self.note_selection.selected);
         }
     }
 
@@ -341,22 +367,23 @@ impl Stave {
         &self,
         painter: &Painter,
         Note { velocity, .. }: &Note,
-        event_view: &NoteView,
+        rect: &Rect,
         y: &Pix,
         height: Pix,
+        selected: bool,
     ) {
-        let h = event_view.rect.height() * height;
+        let h = rect.height() * height;
         let paint_rect = Rect {
             min: Pos2 {
-                x: self.x_from_time(event_view.rect.min.x as StaveTime),
+                x: self.x_from_time(rect.min.x as StaveTime),
                 y: y - h * 0.45,
             },
             max: Pos2 {
-                x: self.x_from_time(event_view.rect.max.x as StaveTime),
+                x: self.x_from_time(rect.max.x as StaveTime),
                 y: y + h * 0.45,
             },
         };
-        let stroke_color = note_color(&velocity, event_view.selected);
+        let stroke_color = note_color(&velocity, selected);
         painter.rect(paint_rect, Rounding::ZERO, stroke_color, Stroke::NONE);
     }
 

@@ -150,7 +150,7 @@ impl eframe::App for EmApp {
                                         .send(Box::new(|engine| engine.seek(0)))
                                         .unwrap();
                                 }
-                                if ui.button("🔇 Stop sounds").clicked() {
+                                if ui.button("🔇 Stop it").clicked() {
                                     self.engine_command_send
                                         .send(Box::new(Engine::reset))
                                         .unwrap();

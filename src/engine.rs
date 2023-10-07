@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,6 +10,7 @@ use vst::event::Event;
 use vst::plugin::Plugin;
 
 use crate::midi_vst::Vst;
+use crate::track::MIDI_CC_SUSTAIN;
 
 /// uSecs from the start.
 pub type TransportTime = u64;
@@ -114,6 +115,7 @@ impl Engine {
                             }
                         }
                     }
+                    locked.close_damper();
                     queue.clear();
                     continue;
                 };
@@ -137,6 +139,17 @@ impl Engine {
             }
         });
         engine
+    }
+
+    fn close_damper(&self) {
+        let ev = LiveEvent::Midi {
+            channel: 0.into(),
+            message: MidiMessage::Controller {
+                controller: MIDI_CC_SUSTAIN.into(),
+                value: 0.into(),
+            },
+        };
+        self.process(smf_to_vst(ev));
     }
 
     fn update_track_time(&mut self) {
@@ -165,8 +178,8 @@ impl Engine {
     /// Stop all sounds.
     pub fn reset(&mut self) {
         self.paused = true;
-        // TODO Implement.
-        // self.vst.host.lock().unwrap().idle(); // This SIGSEVs. Use other API instead (LV2)?
+        // TODO These SIGSEV. Use other API instead (LV2)?
+        // self.vst.host.lock().unwrap().idle();
         // self.vst.plugin.lock().unwrap().suspend();
     }
 

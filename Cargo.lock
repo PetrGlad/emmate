@@ -1090,6 +1090,7 @@ name = "emmate"
 version = "0.1.0"
 dependencies = [
  "alsa 0.8.0",
+ "chrono",
  "clap",
  "cpal",
  "eframe",

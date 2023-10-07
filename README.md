@@ -61,7 +61,8 @@ I use Pianoteq, but that is a commercial product.
 Big scary problems
 
 * Should eventually migrate away from VST2 (unsupported and unreliable). VST3 is GPL. LV2 seem like a decent choice.
-  There is no other (except VST) plugin host implementations in Rust. Have to implement one from scratch.
+  There is no other (except VST) plugin host implementations in Rust. Have to implement one from scratch or,
+  use JACK API and register emmate as a MIDI sequencer. Pipewire seem to SUPPORT JACK also (see `pw-jack`).
 * May need to use midi events directly (instead of intermediate internal representation). See
   e.g. `track::to_lane_events`. This will require
     * To handle ignored/unused events along with notes and sustain.

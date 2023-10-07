@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
 
 use midly::num::u4;
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
@@ -12,8 +14,10 @@ pub type Pitch = u8;
 pub type ControllerId = u8;
 pub type Level = u8;
 pub type ChannelId = u8;
+pub type EventId = u64;
 
 pub const MIDI_CC_MODWHEEL: ControllerId = 1;
+// Damper pedal
 pub const MIDI_CC_SUSTAIN: ControllerId = 64;
 
 pub fn switch_cc_on(x: Level) -> bool {
@@ -43,6 +47,7 @@ pub enum LaneEventType {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct LaneEvent {
+    pub id: EventId,
     /// Since the track beginning.
     pub at: TransportTime,
     pub event: LaneEventType,
@@ -96,17 +101,22 @@ pub struct Lane {
     // Notes should always be ordered by start time ascending. Not enforced yet.
     pub events: Vec<LaneEvent>,
     version: u64,
+    id_seq: AtomicU64,
 }
 
 impl Lane {
     pub fn new(events: Vec<LaneEvent>) -> Lane {
-        Lane { events, version: 0 }
+        Lane {
+            events,
+            version: 0,
+            id_seq: AtomicU64::new(0),
+        }
     }
 
     pub fn load_from(&mut self, file_path: &PathBuf) -> bool {
         if let Ok(data) = std::fs::read(&file_path) {
             let events = midi::load_smf(&data);
-            self.events = to_lane_events(events.0, events.1 as u64);
+            self.events = to_lane_events(&mut self.id_seq, events.0, events.1 as u64);
             return true;
         }
         false
@@ -133,18 +143,24 @@ impl Lane {
             }
         }
     }
+
+    pub fn delete_events(&mut self, event_ids: &HashSet<EventId>) {
+        self.version += 1;
+        self.events.retain(|ev| !event_ids.contains(&ev.id));
+    }
 }
 
 pub fn to_lane_events(
+    id_seq: &mut AtomicU64,
     events: Vec<TrackEvent<'static>>,
     tick_duration: TransportTime,
 ) -> Vec<LaneEvent> {
     // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
-    let mut ons: HashMap<Pitch, (u64, MidiMessage)> = HashMap::new();
+    let mut ons: HashMap<Pitch, (TransportTime, MidiMessage)> = HashMap::new();
     let mut lane_events = vec![];
-    let mut at: u64 = 0;
+    let mut at: TransportTime = 0;
     for ev in events {
-        at += ev.delta.as_int() as u64 * tick_duration;
+        at += ev.delta.as_int() as TransportTime * tick_duration;
         match ev.kind {
             TrackEventKind::Midi { message, .. } => match message {
                 MidiMessage::NoteOn { key, .. } => {
@@ -155,6 +171,7 @@ pub fn to_lane_events(
                     match on {
                         Some((t, MidiMessage::NoteOn { key, vel })) => {
                             lane_events.push(LaneEvent {
+                                id: id_seq.fetch_add(1, SeqCst),
                                 at: t,
                                 event: LaneEventType::Note(Note {
                                     duration: at - t,
@@ -168,6 +185,7 @@ pub fn to_lane_events(
                     }
                 }
                 MidiMessage::Controller { controller, value } => lane_events.push(LaneEvent {
+                    id: id_seq.fetch_add(1, SeqCst),
                     at,
                     event: LaneEventType::Controller(ControllerSetValue {
                         controller_id: controller.into(),
