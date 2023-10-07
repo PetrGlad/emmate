@@ -41,6 +41,7 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Multi-track UI (for snippets and copy/paste buffer).
 - [ ] Time marks on stave.
 - [ ] Time bookmarks.
+- [ ] Find a way to separate actions from view logic with egui. It looks too messy now.   
 - [x] Simple undo/redo.
 - [x] Time selection.
 - [x] Configuration file (VST plugin path and MIDI input configuration).
@@ -63,8 +64,8 @@ Big scary problems
 * Should eventually migrate away from VST2 (unsupported and unreliable). VST3 is GPL. LV2 seem like a decent choice.
   There is no other (except VST) plugin host implementations in Rust. Have to implement one from scratch or,
   use JACK API and register emmate as a MIDI sequencer. Pipewire seem to SUPPORT JACK also (see `pw-jack`).
-* May need to use midi events directly (instead of intermediate internal representation). See
-  e.g. `track::to_lane_events`. This will require
+* May need to use midi events directly (instead of intermediate internal representation). E.g. 
+  `track::to_lane_events` may not be necessary. This will require
     * To handle ignored/unused events along with notes and sustain.
     * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
       that would help to find absolute timings of the midi events, and connect beginnings and endings of notes.
