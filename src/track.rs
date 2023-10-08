@@ -94,6 +94,10 @@ impl TimeSelection {
     pub fn before(&self, at: TransportTime) -> bool {
         self.to <= at
     }
+
+    pub fn after_start(&self, at: TransportTime) -> bool {
+        self.from <= at
+    }
 }
 
 #[derive(Debug, Default)]
@@ -135,22 +139,27 @@ impl Lane {
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_cut", time_selection);
         self.version += 1;
-        let d = time_selection.length();
         self.events.retain(|ev| !time_selection.contains(ev.at));
-        for ev in &mut self.events {
-            if time_selection.before(ev.at) {
-                ev.at -= d;
-            }
-        }
+        self.shift_events(
+            &|ev| time_selection.before(ev.at),
+            -(time_selection.length() as i64),
+        );
     }
 
     pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_insert", time_selection);
         self.version += 1;
         let d = time_selection.length();
+        self.shift_events(&|ev| time_selection.after_start(ev.at), d as i64);
+    }
+
+    fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
         for ev in &mut self.events {
-            if time_selection.before(ev.at) {
-                ev.at += d;
+            if selector(ev) {
+                ev.at = ev
+                    .at
+                    .checked_add_signed(d)
+                    .expect("Should not shift event into negative times.");
             }
         }
     }

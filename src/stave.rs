@@ -221,6 +221,11 @@ impl Stave {
         );
     }
 
+    const DEAD_ZONE: TimeSelection = TimeSelection {
+        from: StaveTime::MIN,
+        to: 0,
+    };
+
     // (Widget would require fn ui(self, ui: &mut Ui) -> Response)
     pub fn view(&mut self, ui: &mut Ui) -> Response {
         let response = Frame::none()
@@ -240,9 +245,15 @@ impl Stave {
                 let painter = ui.painter_at(bounds);
 
                 Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
+                let selection_color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
                 if let Some(s) = &self.time_selection {
-                    self.draw_time_selection(&painter, &s);
+                    self.draw_time_selection(&painter, &s, &selection_color);
                 }
+                self.draw_time_selection(
+                    &painter,
+                    &Stave::DEAD_ZONE,
+                    &Color32::from_white_alpha(100),
+                );
                 let track = self.track.read().expect("Cannot read track.");
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
@@ -440,7 +451,12 @@ impl Stave {
         }
     }
 
-    pub fn draw_time_selection(&self, painter: &Painter, selection: &TimeSelection) {
+    pub fn draw_time_selection(
+        &self,
+        painter: &Painter,
+        selection: &TimeSelection,
+        color: &Color32,
+    ) {
         let clip = painter.clip_rect();
         let area = Rect {
             min: Pos2 {
@@ -452,8 +468,7 @@ impl Stave {
                 y: clip.max.y,
             },
         };
-        let color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
-        painter.rect(area, Rounding::ZERO, color, Stroke::NONE);
+        painter.rect(area, Rounding::ZERO, *color, Stroke::NONE);
         painter.vline(
             area.min.x,
             clip.y_range(),
