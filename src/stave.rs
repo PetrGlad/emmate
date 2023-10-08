@@ -221,7 +221,7 @@ impl Stave {
         );
     }
 
-    const DEAD_ZONE: TimeSelection = TimeSelection {
+    const NOTHING_ZONE: TimeSelection = TimeSelection {
         from: StaveTime::MIN,
         to: 0,
     };
@@ -251,8 +251,8 @@ impl Stave {
                 }
                 self.draw_time_selection(
                     &painter,
-                    &Stave::DEAD_ZONE,
-                    &Color32::from_white_alpha(100),
+                    &Stave::NOTHING_ZONE,
+                    &Color32::from_black_alpha(30),
                 );
                 let track = self.track.read().expect("Cannot read track.");
                 for i in 0..track.events.len() {
