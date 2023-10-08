@@ -34,6 +34,8 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] Have a separate edit-position and play-start cursors, so it is possible to jump back to listen to the modified
+  version.
 - [ ] Note input (with mouse).
 - [ ] Allow editing sustain events.
 - [ ] Do not save a new snapshot when there are no changes.

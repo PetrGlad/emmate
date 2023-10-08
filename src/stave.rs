@@ -252,7 +252,7 @@ impl Stave {
                 self.draw_time_selection(
                     &painter,
                     &Stave::NOTHING_ZONE,
-                    &Color32::from_black_alpha(30),
+                    &Color32::from_black_alpha(20),
                 );
                 let track = self.track.read().expect("Cannot read track.");
                 for i in 0..track.events.len() {
@@ -346,6 +346,20 @@ impl Stave {
             if let Some(time_selection) = &self.time_selection {
                 track.tape_insert(&time_selection.into());
             }
+        }
+        if response
+            .ctx
+            .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
+        {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            track.shift_tail(&(self.cursor_position as TransportTime), 20_000);
+        }
+        if response
+            .ctx
+            .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
+        {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            track.shift_tail(&(self.cursor_position as TransportTime), -20_000);
         }
     }
 

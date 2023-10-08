@@ -9,6 +9,7 @@ use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
 use crate::engine::TransportTime;
 use crate::midi;
+use crate::stave::Stave;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -149,8 +150,16 @@ impl Lane {
     pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_insert", time_selection);
         self.version += 1;
-        let d = time_selection.length();
-        self.shift_events(&|ev| time_selection.after_start(ev.at), d as i64);
+        self.shift_events(
+            &|ev| time_selection.after_start(ev.at),
+            time_selection.length() as i64,
+        );
+    }
+
+    pub fn shift_tail(&mut self, at: &TransportTime, dt: i64) {
+        dbg!("tail_shift", at, dt);
+        self.version += 1;
+        self.shift_events(&|ev| &ev.at > at, dt);
     }
 
     fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {

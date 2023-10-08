@@ -29,7 +29,8 @@ impl EventSource for TrackSource {
         let track = self.track.read().expect("Cannot read track.");
         let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
-        // the `at` moment. Should work if the target is both before and after the current one.
+        // the `at` moment. That is, looking for sup of {ev | ev.t <= at}. Should work if the
+        // target is both before and after the current one.
         // Note that the track may be modified since we last read it.
         while let Some(t) = note_on_time(self.current_idx) {
             if *at >= t {
@@ -110,6 +111,7 @@ mod tests {
     fn one_note() {
         let mut lane = Lane::default();
         lane.events.push(LaneEvent {
+            id: 13,
             at: 1000,
             event: LaneEventType::Note(track::Note {
                 pitch: 55,
