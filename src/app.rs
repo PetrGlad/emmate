@@ -174,6 +174,15 @@ impl eframe::App for EmApp {
                                 }
                             });
                         })
+                    } else {
+                        /* Source data is shared between UI and the engine. So either the
+                        locking is needed or engine should get it's updated version without
+                        contentions but maybe after a delay. If we keep using locking maybe
+                        an some kind of an agent is needed to make updates without risking
+                        RwLock contentions.
+                        Also all editing commands should go to the stave, (that logic should
+                        not be in the App) */
+                        println!("Stave is busy. Skipping frame.");
                     }
                 });
         });

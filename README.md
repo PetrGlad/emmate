@@ -13,8 +13,8 @@ Off grid MIDI editor with following goals:
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
 * Blackbox recording (always-on MIDI recording).
 
-I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but that does not seem to
-ever happen.
+I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but I do not see it
+happening.
 
 ## Status
 
@@ -29,19 +29,21 @@ In case you get "No package 'freetype2' found" on Linux
 ALSA wrapper dependency
 `apt install libasound2-dev`.
 
-As an example synth plugin you can use `amsynth`.
+As an VST synth plugin you can use `amsynth`, for example.
 I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
 - [ ] Note input (with mouse).
-- [ ] Note selection.
 - [ ] Allow editing sustain events.
-- [ ] Do not save new version when there are no changes.
+- [ ] Do not save a new snapshot when there are no changes.
+- [ ] Automatically create a snapshot on an edit command.
 - [ ] Multi-track UI (for snippets and copy/paste buffer).
 - [ ] Time marks on stave.
 - [ ] Time bookmarks.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
+- [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
+- [x] Note selection.
 - [x] Simple undo/redo.
 - [x] Time selection.
 - [x] Configuration file (VST plugin path and MIDI input configuration).
