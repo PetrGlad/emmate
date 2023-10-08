@@ -330,6 +330,12 @@ impl Stave {
             }
             track.delete_events(&self.note_selection.selected);
         }
+        if response.ctx.input(|i| i.key_pressed(Key::Insert)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            if let Some(time_selection) = &self.time_selection {
+                track.tape_insert(&time_selection.into());
+            }
+        }
     }
 
     fn update_time_selection(&mut self, response: &Response) {

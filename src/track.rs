@@ -144,6 +144,17 @@ impl Lane {
         }
     }
 
+    pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
+        dbg!("tape_insert", time_selection);
+        self.version += 1;
+        let d = time_selection.length();
+        for ev in &mut self.events {
+            if time_selection.before(ev.at) {
+                ev.at += d;
+            }
+        }
+    }
+
     pub fn delete_events(&mut self, event_ids: &HashSet<EventId>) {
         self.version += 1;
         self.events.retain(|ev| !event_ids.contains(&ev.id));
