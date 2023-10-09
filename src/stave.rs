@@ -9,12 +9,13 @@ use eframe::egui::{
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
+use wmidi::Velocity;
 
 use crate::engine::TransportTime;
-use crate::track::{
+use crate::lane::{
     switch_cc_on, EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
 };
-use crate::{track, Pix};
+use crate::{lane, Pix};
 
 pub type StaveTime = i64;
 
@@ -79,7 +80,9 @@ impl NoteView {
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
-const PIANO_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+// Lines including controller values placeholder
+const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
     let mut lines = BTreeMap::new();
@@ -125,9 +128,9 @@ fn to_transport_time(value: StaveTime) -> TransportTime {
     value.max(0) as TransportTime
 }
 
-impl From<&TimeSelection> for track::TimeSelection {
+impl From<&TimeSelection> for lane::TimeSelection {
     fn from(value: &TimeSelection) -> Self {
-        track::TimeSelection {
+        lane::TimeSelection {
             from: to_transport_time(value.from),
             to: to_transport_time(value.to),
         }
@@ -234,7 +237,7 @@ impl Stave {
             .show(ui, |ui| {
                 let bounds = ui.available_rect_before_wrap();
                 self.view_rect = bounds;
-                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), PIANO_KEY_LINES);
+                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
@@ -399,44 +402,75 @@ impl Stave {
 
         // Note edits
         if response.ctx.input(|i| i.key_pressed(Key::H)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Shorten note
-            Lane::edit_events(
-                &mut track.events,
-                &(|ev| {
-                    if self.note_selection.contains(ev) {
-                        if let LaneEventType::Note(note) = &mut ev.event {
-                            Some(note)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+            self.edit_selected_notes(
+                &(|note| {
+                    note.duration = note
+                        .duration
+                        .checked_sub(Stave::KEYBOARD_TIME_STEP as TransportTime)
+                        .unwrap_or(0);
                 }),
-                &(|note| note.duration += 123), // TODO Implement
             );
         }
         if response.ctx.input(|i| i.key_pressed(Key::L)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Extend note
+            self.edit_selected_notes(
+                &(|note| {
+                    note.duration = note
+                        .duration
+                        .checked_add(Stave::KEYBOARD_TIME_STEP as TransportTime)
+                        .unwrap_or(0);
+                }),
+            );
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::U)) {
+            self.edit_selected_notes(
+                &(|note| {
+                    if PIANO_KEY_LINES.contains(&(note.pitch + 1)) {
+                        note.pitch += 1;
+                    }
+                }),
+            );
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::J)) {
+            self.edit_selected_notes(
+                &(|note| {
+                    if PIANO_KEY_LINES.contains(&(note.pitch - 1)) {
+                        note.pitch -= 1;
+                    }
+                }),
+            );
         }
         if response.ctx.input(|i| i.key_pressed(Key::I)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Move note a half tone up
+            self.edit_selected_notes(
+                &(|note| {
+                    note.velocity = note.velocity.checked_add(1).unwrap_or(Level::MAX);
+                }),
+            );
         }
         if response.ctx.input(|i| i.key_pressed(Key::K)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Move note a half tone down
+            self.edit_selected_notes(
+                &(|note| {
+                    note.velocity = note.velocity.checked_sub(1).unwrap_or(Level::MIN);
+                }),
+            );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::I)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Increase velocity
-        }
-        if response.ctx.input(|i| i.key_pressed(Key::K)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            // TODO Decrease velocity
-        }
+    }
+
+    pub fn edit_selected_notes<Action: Fn(&mut Note)>(&mut self, action: &Action) {
+        let mut track = self.track.write().expect("Cannot write to track.");
+        track.edit_events(
+            &(|ev| {
+                if self.note_selection.contains(ev) {
+                    if let LaneEventType::Note(note) = &mut ev.event {
+                        Some(note)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }),
+            action,
+        );
     }
 
     fn update_time_selection(&mut self, response: &Response) {

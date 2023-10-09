@@ -4,8 +4,9 @@ Off grid MIDI editor with following goals:
 
 * Not a DAW (would like it to be but do not have enough time for that).
 * Do not care (much) about measures. Primarily aimed at piano real recordings without strict tempo/bars.
-* A feature absent in _any_ other midi editor I could get my hands on (both commercial and free ones): removing a note
-  can shift the tail of the track left to fill the gap. In some editors this is actually doable but cumbersome at best.
+* A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
+  of MIDI recording as one can remove a time fragment from PCM recording. For some reason DAW authors insist on handling
+  MIDI recordings differently from PCM sound recordings. In some editors this is actually doable but cumbersome at best.
 * Playing/editing very long (up to about 20K of events) files.
   Those files are usually recordings of real performances (e.g. from MIDI keyboard).
 * Comfortable workflow with keyboard.
@@ -43,6 +44,8 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Multi-track UI (for snippets and copy/paste buffer).
 - [ ] Time marks on stave.
 - [ ] Time bookmarks.
+- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. We can
+  restrict time to positives only in the engine.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [x] Note selection.

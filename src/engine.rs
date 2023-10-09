@@ -9,8 +9,8 @@ use midly::MidiMessage;
 use vst::event::Event;
 use vst::plugin::Plugin;
 
+use crate::lane::MIDI_CC_SUSTAIN;
 use crate::midi_vst::Vst;
-use crate::track::MIDI_CC_SUSTAIN;
 
 /// uSecs from the start.
 pub type TransportTime = u64;

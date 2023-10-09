@@ -5,9 +5,9 @@ use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
+use crate::lane::Lane;
 use crate::project::Project;
 use crate::stave::{Stave, StaveTime};
-use crate::track::Lane;
 
 enum Message {
     UpdateTransportTime(TransportTime),

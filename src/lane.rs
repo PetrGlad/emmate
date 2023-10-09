@@ -173,17 +173,18 @@ impl Lane {
         }
     }
 
+    // Is it worth it?
     pub fn edit_events<
         'a,
         T: 'a,
         Selector: Fn(&'a mut LaneEvent) -> Option<&'a mut T>,
         Action: Fn(&'a mut T),
     >(
-        events: &'a mut Vec<LaneEvent>,
+        &'a mut self,
         selector: &Selector,
         action: &Action,
     ) {
-        for ev in events {
+        for ev in &mut self.events {
             if let Some(x) = selector(ev) {
                 action(x);
             }

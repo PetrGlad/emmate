@@ -4,9 +4,9 @@ use eframe::{egui, Theme};
 
 use crate::app::EmApp;
 use crate::config::Config;
+use crate::lane::Lane;
 use crate::midi::SmfSource;
 use crate::project::Project;
-use crate::track::Lane;
 use crate::track_source::TrackSource;
 
 mod app;
@@ -14,11 +14,11 @@ mod audio_setup;
 mod config;
 mod engine;
 mod events;
+mod lane;
 mod midi;
 mod midi_vst;
 mod project;
 mod stave;
-mod track;
 mod track_source;
 
 pub type Pix = f32;

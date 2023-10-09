@@ -1,6 +1,6 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
+use crate::lane::{Lane, LaneEventType};
 use crate::midi::{controller_set, note_off, note_on};
-use crate::track::{Lane, LaneEventType};
 use std::collections::BinaryHeap;
 use std::sync::{Arc, RwLock};
 
@@ -93,8 +93,8 @@ impl EventSource for TrackSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::track;
-    use crate::track::LaneEvent;
+    use crate::lane;
+    use crate::lane::LaneEvent;
 
     #[test]
     fn empty_lane() {
@@ -113,7 +113,7 @@ mod tests {
         lane.events.push(LaneEvent {
             id: 13,
             at: 1000,
-            event: LaneEventType::Note(track::Note {
+            event: LaneEventType::Note(lane::Note {
                 pitch: 55,
                 velocity: 55,
                 duration: 12,
