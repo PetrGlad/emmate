@@ -19,7 +19,12 @@ pub struct Vst {
 }
 
 impl Vst {
-    pub fn init(plugin_path: &String, sample_rate: &SampleRate, buffer_size: &FrameCount, preset_id: i32 ) -> Vst {
+    pub fn init(
+        plugin_path: &String,
+        sample_rate: &SampleRate,
+        buffer_size: &FrameCount,
+        preset_id: i32,
+    ) -> Vst {
         let sample_rate_f = sample_rate.0 as f32;
         let path = Path::new(plugin_path);
         println!("Loading {}", path.to_str().unwrap());

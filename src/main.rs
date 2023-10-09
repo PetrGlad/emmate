@@ -37,7 +37,7 @@ pub fn main() {
                 .value_parser(clap::value_parser!(std::path::PathBuf)),
         )
         .arg(
-            clap::arg!(--"input-file" <VALUE>)
+            clap::arg!(--"midi-file" <VALUE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
                 .default_value("yellow.mid"),
         )
@@ -45,7 +45,7 @@ pub fn main() {
     let config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
 
     let midi_file_path = arg_matches
-        .get_one::<std::path::PathBuf>("input-file")
+        .get_one::<std::path::PathBuf>("midi-file")
         .unwrap();
     println!("MIDI file name {:?}", midi_file_path);
     let mut project = Project::new(midi_file_path);

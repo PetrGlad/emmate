@@ -9,7 +9,6 @@ use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
 use crate::engine::TransportTime;
 use crate::midi;
-use crate::stave::Stave;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -162,13 +161,31 @@ impl Lane {
         self.shift_events(&|ev| &ev.at > at, dt);
     }
 
-    fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
+    pub fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
         for ev in &mut self.events {
             if selector(ev) {
                 ev.at = ev
                     .at
                     .checked_add_signed(d)
+                    // Need to show some visual feedback and just cancel the operation instead.
                     .expect("Should not shift event into negative times.");
+            }
+        }
+    }
+
+    pub fn edit_events<
+        'a,
+        T: 'a,
+        Selector: Fn(&'a mut LaneEvent) -> Option<&'a mut T>,
+        Action: Fn(&'a mut T),
+    >(
+        events: &'a mut Vec<LaneEvent>,
+        selector: &Selector,
+        action: &Action,
+    ) {
+        for ev in events {
+            if let Some(x) = selector(ev) {
+                action(x);
             }
         }
     }

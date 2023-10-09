@@ -252,7 +252,7 @@ impl Stave {
                 self.draw_time_selection(
                     &painter,
                     &Stave::NOTHING_ZONE,
-                    &Color32::from_black_alpha(20),
+                    &Color32::from_black_alpha(15),
                 );
                 let track = self.track.read().expect("Cannot read track.");
                 for i in 0..track.events.len() {
@@ -333,7 +333,12 @@ impl Stave {
         }
     }
 
+    const KEYBOARD_TIME_STEP: StaveTime = 10_000;
+
     fn handle_commands(&mut self, response: &Response) {
+        // Need to see if duplication here can be reduced...
+
+        // Tape insert/remove
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
             let mut track = self.track.write().expect("Cannot write to track.");
             if let Some(time_selection) = &self.time_selection {
@@ -347,19 +352,90 @@ impl Stave {
                 track.tape_insert(&time_selection.into());
             }
         }
+
+        // Tail shift
         if response
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
         {
             let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_tail(&(self.cursor_position as TransportTime), 20_000);
+            track.shift_tail(
+                &(self.cursor_position as TransportTime),
+                Stave::KEYBOARD_TIME_STEP,
+            );
         }
         if response
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
         {
             let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_tail(&(self.cursor_position as TransportTime), -20_000);
+            track.shift_tail(
+                &(self.cursor_position as TransportTime),
+                -Stave::KEYBOARD_TIME_STEP,
+            );
+        }
+
+        // Note time moves
+        if response
+            .ctx
+            .input(|i| i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
+        {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            track.shift_events(
+                &(|ev| self.note_selection.contains(ev)),
+                Stave::KEYBOARD_TIME_STEP,
+            );
+        }
+        if response
+            .ctx
+            .input(|i| i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
+        {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            track.shift_events(
+                &(|ev| self.note_selection.contains(ev)),
+                -Stave::KEYBOARD_TIME_STEP,
+            );
+        }
+
+        // Note edits
+        if response.ctx.input(|i| i.key_pressed(Key::H)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Shorten note
+            Lane::edit_events(
+                &mut track.events,
+                &(|ev| {
+                    if self.note_selection.contains(ev) {
+                        if let LaneEventType::Note(note) = &mut ev.event {
+                            Some(note)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }),
+                &(|note| note.duration += 123), // TODO Implement
+            );
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::L)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Extend note
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::I)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Move note a half tone up
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::K)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Move note a half tone down
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::I)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Increase velocity
+        }
+        if response.ctx.input(|i| i.key_pressed(Key::K)) {
+            let mut track = self.track.write().expect("Cannot write to track.");
+            // TODO Decrease velocity
         }
     }
 
