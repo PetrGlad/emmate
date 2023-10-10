@@ -94,7 +94,7 @@ impl eframe::App for EmApp {
                 self.toggle_pause();
             }
             ui.heading(format!(
-                "🌳 {:} [{:}]",
+                "🌲 {:} [{:}]",
                 self.project.directory.display(),
                 self.project.version()
             ));

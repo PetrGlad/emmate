@@ -35,19 +35,25 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Have a separate edit-position and play-start cursors, so it is possible to jump back to listen to the modified
-  version.
+- [ ] Editing sustain events.
 - [ ] Note input (with mouse).
-- [ ] Allow editing sustain events.
-- [ ] Do not save a new snapshot when there are no changes.
 - [ ] Automatically create a snapshot on an edit command.
-- [ ] Multi-track UI (for snippets and copy/paste buffer).
-- [ ] Time marks on stave.
-- [ ] Time bookmarks.
+- [ ] Do not save a new snapshot when there are no changes.
+- [ ] Time marks on stave (minute:second).
 - [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. We can
+- [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
+  version.
+- [ ] Time bookmarks.
   restrict time to positives only in the engine.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
+- [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
+  tabs?
+- [ ] Zoom to fit whole composition.
+- [ ] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
+  them are currently visible.
+- [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
+- [ ] Copy/cut/paste.
 - [x] Note selection.
 - [x] Simple undo/redo.
 - [x] Time selection.
@@ -68,21 +74,26 @@ I use Pianoteq, but that is a commercial product.
 
 Big scary problems
 
-* Should eventually migrate away from VST2 (unsupported and unreliable). VST3 is GPL. LV2 seem like a decent choice.
-  Here seem to be a LV2 host implementation in Rust https://github.com/wmedrano/livi-rs. Can also implement one from
-  scratch, or use JACK API and register emmate as a MIDI sequencer. Pipewire seem to SUPPORT JACK also (see `pw-jack`).
-* May need to use midi events directly (instead of intermediate internal representation). E.g.
-  `track::to_lane_events` may not be necessary. This will require
+* Should eventually migrate away from VST2. The bindings are unsupported anymore, and there are SIGSEGVs that I have not
+  managed to resolve so far. Also, there are licensing issues with the VST2 API itself.
+  VST3 is GPL. LV2 seem like a decent choice. Here seem to be an LV2 host implementation in
+  Rust https://github.com/wmedrano/livi-rs. Can also implement one from scratch, or use JACK API and register emmate as
+  a MIDI sequencer. Pipewire seems to SUPPORT JACK API as well (see `pw-jack`).
+* May need to use midi events directly (instead of intermediate internal representation). E.g. `track::to_lane_events`
+  may not be necessary. In particular tail shifts will become simpler. This will require
     * To handle ignored/unused events along with notes and sustain.
     * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
-      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes.
+      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes. MIDI
+      allows overlapping notes index should be able to handle that.
+* Optimize rendering drawing only visible items, may also need some index. In the simplest casevisible notes can be
+  determined when zoom changes, and then re-use the visible set.
 
 Have to explore following options for the further development
 
-* Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of spinning in a thread.
-* Ideally, this should be a part of some open source DAW. I found one that is written in Rust,
-  [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark). It is open source but not a collaborative project (as
-  stated in its README).
+* Use [Tokio](https://github.com/tokio-rs/tokio) for scheduling instead of explicitly spinning in a thread.
+* Ideally, the editor should be a part of some open source DAW. I found one that is written in
+  Rust, [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark). It is open source but not a collaborative
+  project (as stated in its README).
 
 # Implementation notes
 
@@ -95,9 +106,9 @@ Unless stated otherwise
 
 SMD - Standard MIDI File.
 
-Rodio and other libraries use interleaved stream format 1 sample of each channel, then 2 sample of each channel and so
-on (ch1s1, ch2s1, ...., ch1s2, ch2s2, ....). This seems to be a convention but is not documented anywhere for some
-reason.
+Rodio and other libraries use interleaved stream format: 1st sample of each channel, then 2nd sample of each channel,
+and so on (ch1s1, ch2s1, ...., ch1s2, ch2s2, ....). This seems to be a convention but is not documented anywhere for
+some reason.
 
 Diagnostic commands
 
@@ -105,7 +116,7 @@ Diagnostic commands
 * `aseqdump --list`
 * `aseqdump --port='24:0'`
 
-MIDI CC controllers list
+MIDI CC controller ids list
 
 * https://nickfever.com/music/midi-cc-list
 * https://soundslikejoe.com/2014/03/midi-cc-reference-chart/
