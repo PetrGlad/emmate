@@ -49,15 +49,11 @@ pub struct NotesSelection {
 }
 
 impl NotesSelection {
-    fn add(&mut self, ev: &LaneEvent) {
-        self.selected.insert(ev.id);
-    }
-
-    fn toggle(&mut self, ev: &LaneEvent) {
-        if self.selected.contains(&ev.id) {
-            self.selected.remove(&ev.id);
+    fn toggle(&mut self, id: &EventId) {
+        if self.selected.contains(&id) {
+            self.selected.remove(&id);
         } else {
-            self.selected.insert(ev.id);
+            self.selected.insert(*id);
         }
     }
 
@@ -103,6 +99,13 @@ impl PartialEq for Stave {
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED;
+
+struct StaveUiResponse {
+    response: Response,
+    pitch_hovered: Option<Pitch>,
+    time_hovered: Option<StaveTime>,
+    note_hovered: Option<EventId>,
+}
 
 impl Stave {
     pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
@@ -172,8 +175,8 @@ impl Stave {
     };
 
     // (Widget would require fn ui(self, ui: &mut Ui) -> Response)
-    pub fn view(&mut self, ui: &mut Ui) -> Response {
-        let response = Frame::none()
+    pub fn view(&mut self, ui: &mut Ui) -> StaveUiResponse {
+        Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
@@ -201,21 +204,20 @@ impl Stave {
                 );
                 let track = self.track.read().expect("Cannot read track.");
                 let mut last_damper_value: (StaveTime, Level) = (0, 0);
+                let mut note_hovered = None;
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
                     match &event.event {
                         LaneEventType::Note(note) => {
                             if let Some(y) = key_ys.get(&note.pitch) {
-                                let note_hovered = Self::event_hovered(
+                                let is_hovered = Self::event_hovered(
                                     &pitch_hovered,
                                     &time_hovered,
                                     event,
                                     &note.pitch,
                                 );
-                                let clicked =
-                                    ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
-                                if clicked && note_hovered {
-                                    self.note_selection.toggle(&event);
+                                if is_hovered {
+                                    note_hovered = Some(&event.id);
                                 }
                                 self.draw_note(
                                     &painter,
@@ -257,14 +259,31 @@ impl Stave {
                     Rgba::from_rgba_unmultiplied(0.1, 0.7, 0.1, 0.7).into(),
                 );
 
-                ui.allocate_response(bounds.size(), Sense::click_and_drag())
+                StaveUiResponse {
+                    response: ui.allocate_response(bounds.size(), Sense::click_and_drag()),
+                    pitch_hovered,
+                    time_hovered,
+                    note_hovered: note_hovered.copied(),
+                }
             })
-            .inner;
+            .inner
+    }
 
-        self.update_time_selection(&response);
-        self.handle_commands(&response);
+    pub fn show(&mut self, ui: &mut Ui) -> Response {
+        let stave_response = self.view(ui);
 
-        response
+        if let Some(note_id) = stave_response.note_hovered {
+            let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+            if (clicked) {
+                self.note_selection.toggle(&note_id);
+            }
+        }
+
+        let inner = stave_response.response;
+        self.update_time_selection(&inner);
+        self.handle_commands(&inner);
+
+        inner
     }
 
     fn event_hovered(
@@ -287,7 +306,10 @@ impl Stave {
     const KEYBOARD_TIME_STEP: StaveTime = 10_000;
 
     fn handle_commands(&mut self, response: &Response) {
-        // Need to see if duplication here can be reduced...
+        // Need to see if duplication here can be reduced.
+        // Likely the dispatch needs some hash map that for each input state defines a unique command.
+        // Need to support focus somehow so the commans only active when stave is focused.
+        // Currently commands also affect other widgets (e.g. arrows change button focus).
 
         // Tape insert/remove
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
@@ -327,20 +349,20 @@ impl Stave {
         }
 
         // Note time moves
-        if response
-            .ctx
-            .input(|i| i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
-        {
+        if response.ctx.input(|i| {
+            (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
+                || (i.modifiers.shift && i.key_pressed(Key::L))
+        }) {
             let mut track = self.track.write().expect("Cannot write to track.");
             track.shift_events(
                 &(|ev| self.note_selection.contains(ev)),
                 Stave::KEYBOARD_TIME_STEP,
             );
         }
-        if response
-            .ctx
-            .input(|i| i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
-        {
+        if response.ctx.input(|i| {
+            (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
+                || (i.modifiers.shift && i.key_pressed(Key::H))
+        }) {
             let mut track = self.track.write().expect("Cannot write to track.");
             track.shift_events(
                 &(|ev| self.note_selection.contains(ev)),
@@ -349,7 +371,10 @@ impl Stave {
         }
 
         // Note edits
-        if response.ctx.input(|i| i.key_pressed(Key::H)) {
+        if response
+            .ctx
+            .input(|i| !i.modifiers.shift && i.key_pressed(Key::H))
+        {
             self.edit_selected_notes(
                 &(|note| {
                     note.duration = note
@@ -359,7 +384,10 @@ impl Stave {
                 }),
             );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::L)) {
+        if response
+            .ctx
+            .input(|i| !i.modifiers.shift && i.key_pressed(Key::L))
+        {
             self.edit_selected_notes(
                 &(|note| {
                     note.duration = note

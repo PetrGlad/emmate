@@ -105,7 +105,7 @@ impl eframe::App for EmApp {
                 .vertical(|mut strip| {
                     if let Ok(mut stave) = self.stave.try_write() {
                         strip.cell(|ui| {
-                            let response = stave.view(ui);
+                            let response = stave.show(ui);
                             if let Some(hover_pos) = response.hover_pos() {
                                 let zoom_factor = ui.input(|i| i.zoom_delta());
                                 if zoom_factor != 1.0 {
