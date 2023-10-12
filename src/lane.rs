@@ -16,9 +16,9 @@ pub type Level = u8;
 pub type ChannelId = u8;
 pub type EventId = u64;
 
-pub const MIDI_CC_MODWHEEL: ControllerId = 1;
+pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
 // Damper pedal
-pub const MIDI_CC_SUSTAIN: ControllerId = 64;
+pub const MIDI_CC_SUSTAIN_ID: ControllerId = 64;
 
 pub fn switch_cc_on(x: Level) -> bool {
     // Pianoteq seem to support continuous damper values, may support this later.

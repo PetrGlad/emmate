@@ -9,7 +9,7 @@ use midly::MidiMessage;
 use vst::event::Event;
 use vst::plugin::Plugin;
 
-use crate::lane::MIDI_CC_SUSTAIN;
+use crate::lane::MIDI_CC_SUSTAIN_ID;
 use crate::midi_vst::Vst;
 
 /// uSecs from the start.
@@ -145,7 +145,7 @@ impl Engine {
         let ev = LiveEvent::Midi {
             channel: 0.into(),
             message: MidiMessage::Controller {
-                controller: MIDI_CC_SUSTAIN.into(),
+                controller: MIDI_CC_SUSTAIN_ID.into(),
                 value: 0.into(),
             },
         };

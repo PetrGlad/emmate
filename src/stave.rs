@@ -9,72 +9,14 @@ use eframe::egui::{
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
-use wmidi::Velocity;
 
 use crate::engine::TransportTime;
 use crate::lane::{
-    switch_cc_on, EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN,
+    EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN_ID,
 };
 use crate::{lane, Pix};
 
 pub type StaveTime = i64;
-
-/* Could not get a better idea yet. Having rectangles with normalized dimensions in the view models.
-These can be used both to draw notes in view functions, and as means to determine
-clicks and selection/drag state of a note.
-Time step is 1 uSec, vertical half tone step is 1. Bottom-left 0,0 is origin.
-Control events in negative y coords, 1-width bands each. */
-
-#[derive(Debug)]
-pub struct NoteView {
-    rect: Rect,
-}
-
-#[derive(Debug)]
-pub struct ControllerView {
-    // Stub: have to see how to better represent these values.
-}
-
-// Does it make sense now to use a dyn Trait instead?
-// Is it really needed? Likely will not be using it for selection.
-#[derive(Debug)]
-pub enum EventView {
-    Note(NoteView),
-    Controller(ControllerView),
-}
-
-impl From<&LaneEvent> for EventView {
-    fn from(event: &LaneEvent) -> Self {
-        match &event.event {
-            LaneEventType::Note(n) => EventView::Note(NoteView {
-                rect: NoteView::note_rect(event.at as StaveTime, n),
-            }),
-            LaneEventType::Controller(_) => EventView::Controller(ControllerView {}),
-        }
-    }
-}
-
-impl NoteView {
-    pub fn note_rect(
-        at: StaveTime,
-        Note {
-            pitch, duration, ..
-        }: &Note,
-    ) -> Rect {
-        let y = *pitch as Pix + 0.5;
-        let x_end = (at + *duration as StaveTime) as Pix;
-        Rect {
-            min: Pos2 {
-                x: at as Pix,
-                y: y - 0.5,
-            },
-            max: Pos2 {
-                x: x_end,
-                y: y + 0.5,
-            },
-        }
-    }
-}
 
 // Tone 60 is C3, tones start at C-2 (21)
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -258,6 +200,7 @@ impl Stave {
                     &Color32::from_black_alpha(15),
                 );
                 let track = self.track.read().expect("Cannot read track.");
+                let mut last_damper_value: (StaveTime, Level) = (0, 0);
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
                     match &event.event {
@@ -269,7 +212,6 @@ impl Stave {
                                     event,
                                     &note.pitch,
                                 );
-                                let note_rect = NoteView::note_rect(event.at as StaveTime, &note);
                                 let clicked =
                                     ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
                                 if clicked && note_hovered {
@@ -277,23 +219,29 @@ impl Stave {
                                 }
                                 self.draw_note(
                                     &painter,
-                                    note,
-                                    &note_rect,
-                                    y,
+                                    note.velocity,
+                                    (
+                                        event.at as StaveTime,
+                                        (event.at + note.duration) as StaveTime,
+                                    ),
+                                    *y,
                                     half_tone_step,
                                     self.note_selection.contains(&event),
                                 );
                             }
                         }
-                        LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN => {
+                        LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                             if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+                                let at = event.at as StaveTime;
                                 self.draw_cc(
                                     &painter,
-                                    event.at as StaveTime,
+                                    last_damper_value,
+                                    at,
                                     v.value,
                                     *y,
                                     half_tone_step,
                                 );
+                                last_damper_value = (at, v.value);
                             }
                         }
                         _ => (), /*println!(
@@ -507,43 +455,36 @@ impl Stave {
     fn draw_note(
         &self,
         painter: &Painter,
-        Note { velocity, .. }: &Note,
-        rect: &Rect,
-        y: &Pix,
+        velocity: Level,
+        x_range: (StaveTime, StaveTime),
+        y: Pix,
         height: Pix,
         selected: bool,
     ) {
-        let h = rect.height() * height;
         let paint_rect = Rect {
             min: Pos2 {
-                x: self.x_from_time(rect.min.x as StaveTime),
-                y: y - h * 0.45,
+                x: self.x_from_time(x_range.0),
+                y: y - height * 0.45,
             },
             max: Pos2 {
-                x: self.x_from_time(rect.max.x as StaveTime),
-                y: y + h * 0.45,
+                x: self.x_from_time(x_range.1),
+                y: y + height * 0.45,
             },
         };
         let stroke_color = note_color(&velocity, selected);
-        painter.rect(paint_rect, Rounding::ZERO, stroke_color, Stroke::NONE);
+        painter.rect_filled(paint_rect, Rounding::ZERO, stroke_color);
     }
 
-    fn draw_cc(&self, painter: &Painter, at: StaveTime, value: Level, y: Pix, height: Pix) {
-        let h = height * 0.95;
-        let on = switch_cc_on(value);
-        painter.circle(
-            Pos2::new(
-                self.x_from_time(at),
-                if on { y - (h / 4.0) } else { y + (h / 4.0) },
-            ),
-            h / 4.0,
-            if on {
-                Rgba::from_rgb(0.3, 0.1, 0.1)
-            } else {
-                Rgba::from_rgb(0.1, 0.1, 0.3)
-            },
-            Stroke::NONE,
-        )
+    fn draw_cc(
+        &self,
+        painter: &Painter,
+        last_value: (StaveTime, Level),
+        at: StaveTime,
+        value: Level,
+        y: Pix,
+        height: Pix,
+    ) {
+        self.draw_note(painter, value, (last_value.0, at), y, height, false)
     }
 
     fn draw_grid(
@@ -592,7 +533,7 @@ impl Stave {
                 y: clip.max.y,
             },
         };
-        painter.rect(area, Rounding::ZERO, *color, Stroke::NONE);
+        painter.rect_filled(area, Rounding::ZERO, *color);
         painter.vline(
             area.min.x,
             clip.y_range(),
