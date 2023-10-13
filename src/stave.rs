@@ -9,6 +9,7 @@ use eframe::egui::{
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
+use toml::value::Time;
 
 use crate::engine::TransportTime;
 use crate::lane::{
@@ -41,6 +42,18 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
 pub struct TimeSelection {
     pub from: StaveTime,
     pub to: StaveTime,
+}
+
+impl TimeSelection {
+    pub fn is_empty(&self) -> bool {
+        self.to - self.from > 0
+    }
+}
+
+#[derive(Debug)]
+pub struct NoteDraw {
+    time: TimeSelection,
+    pitch: Pitch,
 }
 
 #[derive(Debug, Default)]
@@ -84,6 +97,7 @@ pub struct Stave {
     pub cursor_position: StaveTime,
 
     pub time_selection: Option<TimeSelection>,
+    pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
 }
 
@@ -100,7 +114,7 @@ impl PartialEq for Stave {
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED;
 
-struct StaveUiResponse {
+pub struct StaveUiResponse {
     response: Response,
     pitch_hovered: Option<Pitch>,
     time_hovered: Option<StaveTime>,
@@ -116,6 +130,7 @@ impl Stave {
             view_rect: Rect::NOTHING,
             cursor_position: 0,
             time_selection: None,
+            note_draw: None,
             note_selection: NotesSelection::default(),
         }
     }
@@ -259,6 +274,17 @@ impl Stave {
                     Rgba::from_rgba_unmultiplied(0.1, 0.7, 0.1, 0.7).into(),
                 );
 
+                if let Some(new_note) = &self.note_draw {
+                    self.draw_note(
+                        &painter,
+                        64,
+                        (new_note.time.from, new_note.time.to),
+                        *key_ys.get(&new_note.pitch).unwrap(),
+                        half_tone_step,
+                        true,
+                    );
+                }
+
                 StaveUiResponse {
                     response: ui.allocate_response(bounds.size(), Sense::click_and_drag()),
                     pitch_hovered,
@@ -274,13 +300,18 @@ impl Stave {
 
         if let Some(note_id) = stave_response.note_hovered {
             let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
-            if (clicked) {
+            if clicked {
                 self.note_selection.toggle(&note_id);
             }
         }
 
         let inner = stave_response.response;
-        self.update_time_selection(&inner);
+        self.update_note_draw(
+            &inner,
+            &stave_response.time_hovered,
+            &stave_response.pitch_hovered,
+        );
+        self.update_time_selection(&inner, &stave_response.time_hovered);
         self.handle_commands(&inner);
 
         inner
@@ -449,25 +480,76 @@ impl Stave {
         );
     }
 
-    fn update_time_selection(&mut self, response: &Response) {
+    fn update_time_selection(&mut self, response: &Response, time: &Option<StaveTime>) {
         let drag_button = PointerButton::Primary;
-        let hover_pos = &response.hover_pos();
         if response.clicked_by(drag_button) {
             self.time_selection = None;
         } else if response.drag_started_by(drag_button) {
-            let x = hover_pos.unwrap().x;
-            let time = self.time_from_x(x);
-            self.time_selection = Some(TimeSelection {
-                from: time,
-                to: time,
-            });
+            if let Some(time) = time {
+                self.time_selection = Some(TimeSelection {
+                    from: *time,
+                    to: *time,
+                });
+            }
         } else if response.drag_released_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
-            if let Some(Pos2 { x, .. }) = hover_pos {
-                let time = self.time_from_x(*x);
-                let selection = self.time_selection.as_mut().unwrap();
-                selection.to = time;
+            if let Some(time) = time {
+                if let Some(selection) = &mut self.time_selection {
+                    selection.to = *time;
+                }
+            }
+        }
+    }
+
+    // TODO Extract the drag procedure? See also time_selection.
+    fn update_note_draw(
+        &mut self,
+        response: &Response,
+        time: &Option<StaveTime>,
+        pitch: &Option<Pitch>,
+    ) {
+        let drag_button = PointerButton::Middle;
+        if response.clicked_by(drag_button) {
+            self.note_draw = None;
+        } else if response.drag_started_by(drag_button) {
+            if let Some(time) = time {
+                if let Some(pitch) = pitch {
+                    self.note_draw = Some(NoteDraw {
+                        time: TimeSelection {
+                            from: *time,
+                            to: *time,
+                        },
+                        pitch: *pitch,
+                    });
+                }
+            }
+        } else if response.drag_released_by(drag_button) {
+            dbg!("drag_released", &self.note_draw);
+            // TODO (implement) Add the note or CC to the lane.
+            if let Some(draw) = &mut self.note_draw {
+                if let Ok(track) = &mut self.track.try_write() {
+                    if draw.pitch == PIANO_DAMPER_LINE {
+                        // track.set_damper(); // TODO Need both: setting "on" and "off" range.
+                        todo!();
+                    } else if draw.time.is_empty() {
+                        track.add_note(
+                            (
+                                draw.time.from as TransportTime,
+                                draw.time.to as TransportTime,
+                            ),
+                            draw.pitch,
+                            64,
+                        );
+                    }
+                }
+            }
+            self.note_draw = None;
+        } else if response.dragged_by(drag_button) {
+            if let Some(time) = time {
+                if let Some(draw) = &mut self.note_draw {
+                    draw.time.to = *time;
+                }
             }
         }
     }

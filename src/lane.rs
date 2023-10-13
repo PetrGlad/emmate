@@ -136,6 +136,25 @@ impl Lane {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
+    pub fn add_note(
+        &mut self,
+        time_range: (TransportTime, TransportTime),
+        pitch: Pitch,
+        level: Level,
+    ) {
+        let ev = LaneEvent {
+            id: self.id_seq.fetch_add(1, SeqCst),
+            at: time_range.0,
+            event: LaneEventType::Note(Note {
+                pitch,
+                velocity: level,
+                duration: time_range.1 - time_range.0,
+            }),
+        };
+        let idx = self.events.partition_point(|x| x < &ev);
+        self.events.insert(idx, ev);
+    }
+
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_cut", time_selection);
         self.version += 1;
@@ -302,4 +321,32 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
         running_at = at;
     }
     midi_events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_load() {
+        let mut lane = Lane::default();
+        assert!(lane.events.is_empty());
+
+        let path = PathBuf::from("./target/test_lane_load.mid");
+        lane.save_to(&path);
+        lane.load_from(&path);
+        assert!(lane.events.is_empty());
+
+        let short = PathBuf::from("./test/files/short.mid");
+        lane.load_from(&short);
+        assert_eq!(lane.events.len(), 10);
+        lane.save_to(&path);
+
+        // The recorded SMD may have some additional system/heartbeat events,
+        // so comparing the sequence only after a save.
+        let mut lane_loaded = Lane::default();
+        lane_loaded.load_from(&path);
+        assert_eq!(lane_loaded.events.len(), 10);
+        assert_eq!(lane.events, lane_loaded.events);
+    }
 }
