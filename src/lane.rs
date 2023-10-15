@@ -153,6 +153,18 @@ impl Lane {
         };
         let idx = self.events.partition_point(|x| x < &ev);
         self.events.insert(idx, ev);
+        assert!(is_ordered(&self.events));
+    }
+
+    pub fn set_damper_range(&mut self, time_range: (TransportTime, TransportTime), on: bool) {
+        dbg!("set_damper_range", time_range, on);
+        let mut i = 0;
+        loop {
+            if let Some(ev) = self.events.get(i) {
+                todo!();
+                i += 0;
+            }
+        }
     }
 
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
@@ -163,6 +175,7 @@ impl Lane {
             &|ev| time_selection.before(ev.at),
             -(time_selection.length() as i64),
         );
+        assert!(is_ordered(&self.events));
     }
 
     pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
@@ -178,6 +191,7 @@ impl Lane {
         dbg!("tail_shift", at, dt);
         self.version += 1;
         self.shift_events(&|ev| &ev.at > at, dt);
+        assert!(is_ordered(&self.events));
     }
 
     pub fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
@@ -190,6 +204,9 @@ impl Lane {
                     .expect("Should not shift event into negative times.");
             }
         }
+        // Should do this only for out-of-order events. Brute-forcing for now.
+        self.events.sort();
+        assert!(is_ordered(&self.events));
     }
 
     // Is it worth it?
@@ -323,6 +340,15 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
     midi_events
 }
 
+pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
+    for (a, b) in seq.iter().zip(seq.iter().skip(1)) {
+        if a > b {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +374,16 @@ mod tests {
         lane_loaded.load_from(&path);
         assert_eq!(lane_loaded.events.len(), 10);
         assert_eq!(lane.events, lane_loaded.events);
+    }
+
+    #[test]
+    fn check_is_ordered() {
+        assert!(is_ordered::<u64>(&vec![]));
+        assert!(is_ordered(&vec![0]));
+        assert!(!is_ordered(&vec![3, 2]));
+        assert!(is_ordered(&vec![2, 3]));
+        assert!(is_ordered(&vec![2, 2]));
+        assert!(!is_ordered(&vec![2, 3, 1]));
+        assert!(is_ordered(&vec![2, 3, 3]));
     }
 }

@@ -502,13 +502,13 @@ impl Stave {
         }
     }
 
-    // TODO Extract the drag procedure? See also time_selection.
     fn update_note_draw(
         &mut self,
         response: &Response,
         time: &Option<StaveTime>,
         pitch: &Option<Pitch>,
     ) {
+        // TODO Extract the drag procedure? See also update_time_selection.
         let drag_button = PointerButton::Middle;
         if response.clicked_by(drag_button) {
             self.note_draw = None;
@@ -529,18 +529,16 @@ impl Stave {
             // TODO (implement) Add the note or CC to the lane.
             if let Some(draw) = &mut self.note_draw {
                 if let Ok(track) = &mut self.track.try_write() {
+                    let time_range = (
+                        draw.time.from as TransportTime,
+                        draw.time.to as TransportTime,
+                    );
                     if draw.pitch == PIANO_DAMPER_LINE {
-                        // track.set_damper(); // TODO Need both: setting "on" and "off" range.
+                        // TODO Need both: setting "on" and "off" range.
+                        track.set_damper_range(time_range, true);
                         todo!();
                     } else if draw.time.is_empty() {
-                        track.add_note(
-                            (
-                                draw.time.from as TransportTime,
-                                draw.time.to as TransportTime,
-                            ),
-                            draw.pitch,
-                            64,
-                        );
+                        track.add_note(time_range, draw.pitch, 64);
                     }
                 }
             }
