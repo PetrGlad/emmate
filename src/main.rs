@@ -11,6 +11,7 @@ use crate::track_source::TrackSource;
 
 mod app;
 mod audio_setup;
+mod common;
 mod config;
 mod engine;
 mod events;
@@ -20,6 +21,7 @@ mod midi_vst;
 mod project;
 mod stave;
 mod track_source;
+mod util;
 
 pub type Pix = f32;
 

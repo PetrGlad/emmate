@@ -4,13 +4,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
-    self, Color32, Frame, Key, Margin, Painter, PointerButton, Pos2, Rangef, Rect, Response,
-    Rounding, Sense, Stroke, Ui,
+    self, Color32, Frame, Key, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
+    Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
-use toml::value::Time;
 
+use crate::common::VersionId;
 use crate::engine::TransportTime;
 use crate::lane::{
     EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN_ID,
@@ -46,7 +46,7 @@ pub struct TimeSelection {
 
 impl TimeSelection {
     pub fn is_empty(&self) -> bool {
-        self.to - self.from > 0
+        self.to - self.from <= 0
     }
 }
 
@@ -99,15 +99,22 @@ pub struct Stave {
     pub time_selection: Option<TimeSelection>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
+
+    pub lane_version: VersionId,
 }
 
 impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
         // This eq implementation helps so egui knows when not to re-render.
+        let mut lane_equals = false;
+        if let Ok(track) = &mut self.track.try_read() {
+            lane_equals = self.lane_version == track.version;
+        }
         self.time_left == other.time_left
             && self.time_right == other.time_right
             && self.cursor_position == other.cursor_position
             && self.view_rect == other.view_rect
+            && lane_equals
     }
 }
 
@@ -119,12 +126,14 @@ pub struct StaveUiResponse {
     pitch_hovered: Option<Pitch>,
     time_hovered: Option<StaveTime>,
     note_hovered: Option<EventId>,
+    modifiers: Modifiers,
 }
 
 impl Stave {
     pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
         Stave {
             track: track.clone(),
+            lane_version: 0,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
@@ -252,9 +261,9 @@ impl Stave {
                                 let at = event.at as StaveTime;
                                 self.draw_cc(
                                     &painter,
-                                    last_damper_value,
+                                    last_damper_value.0,
                                     at,
-                                    v.value,
+                                    last_damper_value.1,
                                     *y,
                                     half_tone_step,
                                 );
@@ -267,6 +276,7 @@ impl Stave {
                                  )*/
                     }
                 }
+                self.lane_version = track.version;
 
                 self.draw_cursor(
                     &painter,
@@ -290,6 +300,7 @@ impl Stave {
                     pitch_hovered,
                     time_hovered,
                     note_hovered: note_hovered.copied(),
+                    modifiers: ui.input(|i| i.modifiers),
                 }
             })
             .inner
@@ -308,6 +319,7 @@ impl Stave {
         let inner = stave_response.response;
         self.update_note_draw(
             &inner,
+            &stave_response.modifiers,
             &stave_response.time_hovered,
             &stave_response.pitch_hovered,
         );
@@ -505,6 +517,7 @@ impl Stave {
     fn update_note_draw(
         &mut self,
         response: &Response,
+        modifiers: &Modifiers,
         time: &Option<StaveTime>,
         pitch: &Option<Pitch>,
     ) {
@@ -526,19 +539,22 @@ impl Stave {
             }
         } else if response.drag_released_by(drag_button) {
             dbg!("drag_released", &self.note_draw);
-            // TODO (implement) Add the note or CC to the lane.
             if let Some(draw) = &mut self.note_draw {
-                if let Ok(track) = &mut self.track.try_write() {
-                    let time_range = (
-                        draw.time.from as TransportTime,
-                        draw.time.to as TransportTime,
-                    );
-                    if draw.pitch == PIANO_DAMPER_LINE {
-                        // TODO Need both: setting "on" and "off" range.
-                        track.set_damper_range(time_range, true);
-                        todo!();
-                    } else if draw.time.is_empty() {
-                        track.add_note(time_range, draw.pitch, 64);
+                if !draw.time.is_empty() {
+                    if let Ok(track) = &mut self.track.try_write() {
+                        let time_range = (
+                            draw.time.from as TransportTime,
+                            draw.time.to as TransportTime,
+                        );
+                        if draw.pitch == PIANO_DAMPER_LINE {
+                            if modifiers.alt {
+                                track.set_damper_to(time_range, false);
+                            } else {
+                                track.set_damper_to(time_range, true);
+                            }
+                        } else {
+                            track.add_note(time_range, draw.pitch, 64);
+                        }
                     }
                 }
             }
@@ -586,13 +602,13 @@ impl Stave {
     fn draw_cc(
         &self,
         painter: &Painter,
-        last_value: (StaveTime, Level),
+        last_time: StaveTime,
         at: StaveTime,
         value: Level,
         y: Pix,
         height: Pix,
     ) {
-        self.draw_note(painter, value, (last_value.0, at), y, height, false)
+        self.draw_note(painter, value, (last_time, at), y, height, false)
     }
 
     fn draw_grid(
@@ -676,9 +692,4 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
         Rgba::from_rgb(0.6, 0.7, 0.7)
     };
     egui::lerp(c..=Rgba::from_rgb(0.0, 0.0, 0.0), *velocity as f32 / 128.0).into()
-}
-
-// Could not find a simple library for this.
-fn ranges_intersect<T: Ord>(from_a: T, to_a: T, from_b: T, to_b: T) -> bool {
-    from_a < to_b && from_b < to_a
 }

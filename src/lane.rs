@@ -4,11 +4,13 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 
-use midly::num::u4;
+use midly::num::{u4, u7};
 use midly::{MidiMessage, TrackEvent, TrackEventKind};
 
+use crate::common::VersionId;
 use crate::engine::TransportTime;
-use crate::midi;
+use crate::util::{is_ordered, range_contains};
+use crate::{midi, util};
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -102,9 +104,10 @@ impl TimeSelection {
 
 #[derive(Debug, Default)]
 pub struct Lane {
-    // Notes should always be ordered by start time ascending. Not enforced yet.
+    /* Events should always be kept ordered by start time ascending.
+    This is a requirement of TrackSource. */
     pub events: Vec<LaneEvent>,
-    version: u64,
+    pub version: VersionId,
     id_seq: AtomicU64,
 }
 
@@ -151,47 +154,99 @@ impl Lane {
                 duration: time_range.1 - time_range.0,
             }),
         };
-        let idx = self.events.partition_point(|x| x < &ev);
-        self.events.insert(idx, ev);
-        assert!(is_ordered(&self.events));
+        self.insert_event(ev);
     }
 
-    pub fn set_damper_range(&mut self, time_range: (TransportTime, TransportTime), on: bool) {
+    fn commit(&mut self) {
+        assert!(is_ordered(&self.events));
+        self.version += 1;
+    }
+
+    pub fn insert_event(&mut self, ev: LaneEvent) {
+        let idx = self.events.partition_point(|x| x < &ev);
+        self.events.insert(idx, ev);
+        self.commit();
+    }
+
+    pub fn set_damper_to(&mut self, time_range: util::Range<TransportTime>, on: bool) {
         dbg!("set_damper_range", time_range, on);
         let mut i = 0;
         loop {
             if let Some(ev) = self.events.get(i) {
-                todo!();
-                i += 0;
+                if range_contains(time_range, ev.at) {
+                    if let LaneEventType::Controller(ev) = &ev.event {
+                        if ev.controller_id == MIDI_CC_SUSTAIN_ID {
+                            self.events.remove(i);
+                            continue;
+                        }
+                    }
+                }
+                i += 1;
+            } else {
+                break;
             }
+        }
+        // TODO Do not change value(s) at the ens of the range if they already match.
+        // This implementation flips to the inverse at the end which is usually undesirable.
+        if on {
+            let on_ev = self.sustain_on_event(&time_range.0);
+            self.insert_event(on_ev);
+            let off_ev = self.sustain_off_event(&time_range.1);
+            self.insert_event(off_ev);
+        } else {
+            let off_ev = self.sustain_off_event(&time_range.0);
+            self.insert_event(off_ev);
+            let on_ev = self.sustain_on_event(&time_range.1);
+            self.insert_event(on_ev);
+        }
+        self.commit();
+    }
+
+    fn sustain_off_event(&mut self, at: &TransportTime) -> LaneEvent {
+        LaneEvent {
+            id: next_id(&mut self.id_seq),
+            at: *at,
+            event: LaneEventType::Controller(ControllerSetValue {
+                controller_id: MIDI_CC_SUSTAIN_ID,
+                value: 0,
+            }),
+        }
+    }
+
+    fn sustain_on_event(&mut self, at: &TransportTime) -> LaneEvent {
+        LaneEvent {
+            id: next_id(&mut self.id_seq),
+            at: *at,
+            event: LaneEventType::Controller(ControllerSetValue {
+                controller_id: MIDI_CC_SUSTAIN_ID,
+                value: u7::max_value().as_int() as Level,
+            }),
         }
     }
 
     pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_cut", time_selection);
-        self.version += 1;
         self.events.retain(|ev| !time_selection.contains(ev.at));
         self.shift_events(
             &|ev| time_selection.before(ev.at),
             -(time_selection.length() as i64),
         );
-        assert!(is_ordered(&self.events));
+        self.commit();
     }
 
     pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
         dbg!("tape_insert", time_selection);
-        self.version += 1;
         self.shift_events(
             &|ev| time_selection.after_start(ev.at),
             time_selection.length() as i64,
         );
+        self.commit();
     }
 
     pub fn shift_tail(&mut self, at: &TransportTime, dt: i64) {
         dbg!("tail_shift", at, dt);
-        self.version += 1;
         self.shift_events(&|ev| &ev.at > at, dt);
-        assert!(is_ordered(&self.events));
+        self.commit();
     }
 
     pub fn shift_events<Pred: Fn(&LaneEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
@@ -206,7 +261,7 @@ impl Lane {
         }
         // Should do this only for out-of-order events. Brute-forcing for now.
         self.events.sort();
-        assert!(is_ordered(&self.events));
+        self.commit();
     }
 
     // Is it worth it?
@@ -228,9 +283,13 @@ impl Lane {
     }
 
     pub fn delete_events(&mut self, event_ids: &HashSet<EventId>) {
-        self.version += 1;
         self.events.retain(|ev| !event_ids.contains(&ev.id));
+        self.commit();
     }
+}
+
+fn next_id(id_seq: &mut AtomicU64) -> EventId {
+    id_seq.fetch_add(1, SeqCst)
 }
 
 pub fn to_lane_events(
@@ -254,7 +313,7 @@ pub fn to_lane_events(
                     match on {
                         Some((t, MidiMessage::NoteOn { key, vel })) => {
                             lane_events.push(LaneEvent {
-                                id: id_seq.fetch_add(1, SeqCst),
+                                id: next_id(id_seq),
                                 at: t,
                                 event: LaneEventType::Note(Note {
                                     duration: at - t,
@@ -340,15 +399,6 @@ pub fn to_midi_events(events: &Vec<LaneEvent>, usec_per_tick: u32) -> Vec<TrackE
     midi_events
 }
 
-pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
-    for (a, b) in seq.iter().zip(seq.iter().skip(1)) {
-        if a > b {
-            return false;
-        }
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,16 +424,5 @@ mod tests {
         lane_loaded.load_from(&path);
         assert_eq!(lane_loaded.events.len(), 10);
         assert_eq!(lane.events, lane_loaded.events);
-    }
-
-    #[test]
-    fn check_is_ordered() {
-        assert!(is_ordered::<u64>(&vec![]));
-        assert!(is_ordered(&vec![0]));
-        assert!(!is_ordered(&vec![3, 2]));
-        assert!(is_ordered(&vec![2, 3]));
-        assert!(is_ordered(&vec![2, 2]));
-        assert!(!is_ordered(&vec![2, 3, 1]));
-        assert!(is_ordered(&vec![2, 3, 3]));
     }
 }

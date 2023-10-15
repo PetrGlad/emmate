@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use toml::from_str;
 
-pub type VersionId = i64;
+use crate::common::VersionId;
 
 pub struct Project {
     pub directory: PathBuf,

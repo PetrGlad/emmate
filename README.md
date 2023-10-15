@@ -37,14 +37,14 @@ I use Pianoteq, but that is a commercial product.
 
 - [ ] Editing sustain events.
 - [ ] Note input (with mouse).
-- [ ] Automatically create a snapshot on an edit command.
+- [ ] Automatically create an undo snapshot on every edit command.
 - [ ] Do not save a new snapshot when there are no changes.
-- [ ] Time marks on stave (minute:second).
-- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. We can
+- [ ] Time marks on stave (minute:second from the beginning).
+- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. Times can
+  be restricted to positives only in the engine.
 - [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
   version.
 - [ ] Time bookmarks.
-  restrict time to positives only in the engine.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
