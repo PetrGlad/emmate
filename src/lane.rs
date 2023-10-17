@@ -22,7 +22,7 @@ pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
 // Damper pedal
 pub const MIDI_CC_SUSTAIN_ID: ControllerId = 64;
 
-pub fn switch_cc_on(x: Level) -> bool {
+pub fn is_cc_switch_on(x: Level) -> bool {
     // Pianoteq seem to support continuous damper values, may support this later.
     // Not using crappy SLP3-D anyway.
     x >= 64
@@ -170,6 +170,9 @@ impl Lane {
 
     pub fn set_damper_to(&mut self, time_range: util::Range<TransportTime>, on: bool) {
         dbg!("set_damper_range", time_range, on);
+        let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
+        let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
+
         let mut i = 0;
         loop {
             if let Some(ev) = self.events.get(i) {
@@ -186,40 +189,53 @@ impl Lane {
                 break;
             }
         }
-        // TODO Do not change value(s) at the ens of the range if they already match.
-        // This implementation flips to the inverse at the end which is usually undesirable.
+
         if on {
-            let on_ev = self.sustain_on_event(&time_range.0);
-            self.insert_event(on_ev);
-            let off_ev = self.sustain_off_event(&time_range.1);
-            self.insert_event(off_ev);
+            if !on_before {
+                let on_ev = self.sustain_event(&time_range.0, true);
+                self.insert_event(on_ev);
+            }
+            if !on_after {
+                let off_ev = self.sustain_event(&time_range.1, false);
+                self.insert_event(off_ev);
+            }
         } else {
-            let off_ev = self.sustain_off_event(&time_range.0);
-            self.insert_event(off_ev);
-            let on_ev = self.sustain_on_event(&time_range.1);
-            self.insert_event(on_ev);
+            if on_before {
+                let off_ev = self.sustain_event(&time_range.0, false);
+                self.insert_event(off_ev);
+            }
+            if on_after {
+                let on_ev = self.sustain_event(&time_range.1, true);
+                self.insert_event(on_ev);
+            }
         }
         self.commit();
     }
 
-    fn sustain_off_event(&mut self, at: &TransportTime) -> LaneEvent {
-        LaneEvent {
-            id: next_id(&mut self.id_seq),
-            at: *at,
-            event: LaneEventType::Controller(ControllerSetValue {
-                controller_id: MIDI_CC_SUSTAIN_ID,
-                value: 0,
-            }),
+    fn cc_value_at(&self, at: &TransportTime, cc_id: &ControllerId) -> Level {
+        let mut idx = self.events.partition_point(|x| x.at < *at) - 1;
+        while let Some(ev) = self.events.get(idx) {
+            if let LaneEventType::Controller(cc) = &ev.event {
+                if cc.controller_id == *cc_id {
+                    return cc.value;
+                }
+            }
+            idx -= 1;
         }
+        return 0; // default
     }
 
-    fn sustain_on_event(&mut self, at: &TransportTime) -> LaneEvent {
+    fn sustain_event(&mut self, at: &TransportTime, on: bool) -> LaneEvent {
         LaneEvent {
             id: next_id(&mut self.id_seq),
             at: *at,
             event: LaneEventType::Controller(ControllerSetValue {
                 controller_id: MIDI_CC_SUSTAIN_ID,
-                value: u7::max_value().as_int() as Level,
+                value: if on {
+                    u7::max_value().as_int() as Level
+                } else {
+                    0
+                },
             }),
         }
     }
