@@ -35,13 +35,10 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Editing sustain events.
-- [ ] Note input (with mouse).
 - [ ] Automatically create an undo snapshot on every edit command.
 - [ ] Do not save a new snapshot when there are no changes.
 - [ ] Time marks on stave (minute:second from the beginning).
-- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. Times can
-  be restricted to positives only in the engine.
+- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
   version.
 - [ ] Time bookmarks.
@@ -54,6 +51,8 @@ I use Pianoteq, but that is a commercial product.
   them are currently visible.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
 - [ ] Copy/cut/paste.
+- [x] Editing sustain events.
+- [x] Note input (with mouse).
 - [x] Note selection.
 - [x] Simple undo/redo.
 - [x] Time selection.
