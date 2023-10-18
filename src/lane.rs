@@ -168,17 +168,13 @@ impl Lane {
         self.commit();
     }
 
-    pub fn set_damper_to(&mut self, time_range: util::Range<TransportTime>, on: bool) {
-        dbg!("set_damper_range", time_range, on);
-        let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
-        let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
-
+    fn clear_cc_events(&mut self, time_range: util::Range<TransportTime>, cc_id: ControllerId) {
         let mut i = 0;
         loop {
             if let Some(ev) = self.events.get(i) {
                 if range_contains(time_range, ev.at) {
                     if let LaneEventType::Controller(ev) = &ev.event {
-                        if ev.controller_id == MIDI_CC_SUSTAIN_ID {
+                        if ev.controller_id == cc_id {
                             self.events.remove(i);
                             continue;
                         }
@@ -189,6 +185,14 @@ impl Lane {
                 break;
             }
         }
+    }
+
+    pub fn set_damper_to(&mut self, time_range: util::Range<TransportTime>, on: bool) {
+        dbg!("set_damper_range", time_range, on);
+        let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
+        let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
+
+        self.clear_cc_events(time_range, MIDI_CC_SUSTAIN_ID);
 
         if on {
             if !on_before {
@@ -213,14 +217,16 @@ impl Lane {
     }
 
     fn cc_value_at(&self, at: &TransportTime, cc_id: &ControllerId) -> Level {
-        let mut idx = self.events.partition_point(|x| x.at < *at) - 1;
-        while let Some(ev) = self.events.get(idx) {
-            if let LaneEventType::Controller(cc) = &ev.event {
-                if cc.controller_id == *cc_id {
-                    return cc.value;
+        let mut idx = self.events.partition_point(|x| x.at < *at);
+        while idx > 0 {
+            idx -= 1;
+            if let Some(ev) = self.events.get(idx) {
+                if let LaneEventType::Controller(cc) = &ev.event {
+                    if cc.controller_id == *cc_id {
+                        return cc.value;
+                    }
                 }
             }
-            idx -= 1;
         }
         return 0; // default
     }
@@ -440,5 +446,86 @@ mod tests {
         lane_loaded.load_from(&path);
         assert_eq!(lane_loaded.events.len(), 10);
         assert_eq!(lane.events, lane_loaded.events);
+    }
+
+    fn make_test_lane() -> Lane {
+        let mut lane = Lane::default();
+        lane.events.push(LaneEvent {
+            id: 10,
+            at: 10,
+            event: LaneEventType::Controller(ControllerSetValue {
+                controller_id: 13,
+                value: 55,
+            }),
+        });
+        lane.events.push(LaneEvent {
+            id: 20,
+            at: 14,
+            event: LaneEventType::Note(Note {
+                pitch: 10,
+                velocity: 20,
+                duration: 30,
+            }),
+        });
+        lane.events.push(LaneEvent {
+            id: 30,
+            at: 15,
+            event: LaneEventType::Controller(ControllerSetValue {
+                controller_id: 44,
+                value: 60,
+            }),
+        });
+        lane.events.push(LaneEvent {
+            id: 40,
+            at: 20,
+            event: LaneEventType::Controller(ControllerSetValue {
+                controller_id: 13,
+                value: 66,
+            }),
+        });
+        lane
+    }
+
+    #[test]
+    fn cc_value_at() {
+        let mut lane = make_test_lane();
+
+        assert_eq!(55, lane.cc_value_at(&20, &13));
+        assert_eq!(66, lane.cc_value_at(&21, &13));
+        assert_eq!(60, lane.cc_value_at(&21, &44));
+        assert_eq!(0, lane.cc_value_at(&21, &99));
+        assert_eq!(0, lane.cc_value_at(&0, &99));
+    }
+
+    #[test]
+    fn set_damper_to() {
+        let mut lane = make_test_lane();
+        lane.set_damper_to((14, 17), true);
+
+        let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
+        assert_eq!(
+            expected_ids,
+            lane.events.iter().map(|ev| ev.id).collect::<Vec<EventId>>()
+        );
+
+        let expected_states: Vec<Option<bool>> = vec![
+            Some(false),
+            Some(true),
+            None,
+            Some(false),
+            Some(false),
+            Some(true),
+        ];
+        assert_eq!(
+            expected_states,
+            lane.events
+                .iter()
+                .map(|ev| if let LaneEventType::Controller(ctl) = &ev.event {
+                    Some(is_cc_switch_on(ctl.value))
+                } else {
+                    None
+                })
+                .collect::<Vec<Option<bool>>>()
+        );
     }
 }
