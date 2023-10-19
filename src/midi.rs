@@ -8,7 +8,7 @@ use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
 
 use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::lane::{ChannelId, ControllerId, Level, Pitch};
+use crate::track::{ChannelId, ControllerId, Level, Pitch};
 
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,

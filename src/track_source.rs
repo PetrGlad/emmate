@@ -1,17 +1,17 @@
 use crate::engine::{EngineEvent, EventSource, TransportTime};
-use crate::lane::{Lane, LaneEventType};
 use crate::midi::{controller_set, note_off, note_on};
+use crate::track::{Track, TrackEventType};
 use std::collections::BinaryHeap;
 use std::sync::{Arc, RwLock};
 
 pub struct TrackSource {
-    track: Arc<RwLock<Lane>>,
+    track: Arc<RwLock<Track>>,
     current_idx: usize,
     running_at: TransportTime,
 }
 
 impl TrackSource {
-    pub fn new(track: Arc<RwLock<Lane>>) -> TrackSource {
+    pub fn new(track: Arc<RwLock<Track>>) -> TrackSource {
         TrackSource {
             track,
             current_idx: 0,
@@ -68,7 +68,7 @@ impl EventSource for TrackSource {
             }
             self.running_at = running_at;
             match &event.event {
-                LaneEventType::Note(note) => {
+                TrackEventType::Note(note) => {
                     queue.push(EngineEvent {
                         at: running_at,
                         event: note_on(1, note.pitch, note.velocity),
@@ -78,7 +78,7 @@ impl EventSource for TrackSource {
                         event: note_off(1, note.pitch, note.velocity),
                     });
                 }
-                LaneEventType::Controller(set_val) => {
+                TrackEventType::Controller(set_val) => {
                     queue.push(EngineEvent {
                         at: running_at as u64,
                         event: controller_set(1, set_val.controller_id, set_val.value),
@@ -93,13 +93,13 @@ impl EventSource for TrackSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lane;
-    use crate::lane::LaneEvent;
+    use crate::track;
+    use crate::track::TrackEvent;
 
     #[test]
-    fn empty_lane() {
-        let lane = Arc::new(RwLock::new(Lane::default()));
-        let mut source = TrackSource::new(lane);
+    fn empty_track() {
+        let track = Arc::new(RwLock::new(Track::default()));
+        let mut source = TrackSource::new(track);
         source.seek(&100_000u64);
         assert_eq!(source.running_at, 100_000);
         source.seek(&0);
@@ -109,17 +109,17 @@ mod tests {
 
     #[test]
     fn one_note() {
-        let mut lane = Lane::default();
-        lane.events.push(LaneEvent {
+        let mut track = Track::default();
+        track.events.push(TrackEvent {
             id: 13,
             at: 1000,
-            event: LaneEventType::Note(lane::Note {
+            event: TrackEventType::Note(track::Note {
                 pitch: 55,
                 velocity: 55,
                 duration: 12,
             }),
         });
-        let track = Arc::new(RwLock::new(lane));
+        let track = Arc::new(RwLock::new(track));
 
         let mut source = TrackSource::new(track);
         source.seek(&0);

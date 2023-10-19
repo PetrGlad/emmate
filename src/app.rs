@@ -5,9 +5,9 @@ use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
-use crate::lane::Lane;
 use crate::project::Project;
 use crate::stave::{Stave, StaveTime};
+use crate::track::Track;
 
 enum Message {
     UpdateTransportTime(TransportTime),
@@ -31,7 +31,7 @@ impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
-        track: Arc<RwLock<Lane>>,
+        track: Arc<RwLock<Track>>,
         project: Project,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();

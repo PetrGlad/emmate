@@ -78,7 +78,7 @@ Big scary problems
   VST3 is GPL. LV2 seem like a decent choice. Here seem to be an LV2 host implementation in
   Rust https://github.com/wmedrano/livi-rs. Can also implement one from scratch, or use JACK API and register emmate as
   a MIDI sequencer. Pipewire seems to SUPPORT JACK API as well (see `pw-jack`).
-* May need to use midi events directly (instead of intermediate internal representation). E.g. `track::to_lane_events`
+* May need to use midi events directly (instead of intermediate internal representation). E.g. `track::from_midi_events`
   may not be necessary. In particular tail shifts will become simpler. This will require
     * To handle ignored/unused events along with notes and sustain.
     * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)

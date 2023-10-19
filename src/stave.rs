@@ -12,10 +12,10 @@ use ordered_float::OrderedFloat;
 
 use crate::common::VersionId;
 use crate::engine::TransportTime;
-use crate::lane::{
-    EventId, Lane, LaneEvent, LaneEventType, Level, Note, Pitch, MIDI_CC_SUSTAIN_ID,
+use crate::track::{
+    EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
-use crate::{lane, Pix};
+use crate::{track, Pix};
 
 pub type StaveTime = i64;
 
@@ -70,7 +70,7 @@ impl NotesSelection {
         }
     }
 
-    fn contains(&self, ev: &LaneEvent) -> bool {
+    fn contains(&self, ev: &TrackEvent) -> bool {
         self.selected.contains(&ev.id)
     }
 }
@@ -79,9 +79,9 @@ fn to_transport_time(value: StaveTime) -> TransportTime {
     value.max(0) as TransportTime
 }
 
-impl From<&TimeSelection> for lane::TimeSelection {
+impl From<&TimeSelection> for track::TimeSelection {
     fn from(value: &TimeSelection) -> Self {
-        lane::TimeSelection {
+        track::TimeSelection {
             from: to_transport_time(value.from),
             to: to_transport_time(value.to),
         }
@@ -90,7 +90,7 @@ impl From<&TimeSelection> for lane::TimeSelection {
 
 #[derive(Debug)]
 pub struct Stave {
-    pub track: Arc<RwLock<Lane>>,
+    pub track: Arc<RwLock<Track>>,
     pub time_left: StaveTime,
     pub time_right: StaveTime,
     pub view_rect: Rect,
@@ -100,21 +100,21 @@ pub struct Stave {
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
 
-    pub lane_version: VersionId,
+    pub track_version: VersionId,
 }
 
 impl PartialEq for Stave {
     fn eq(&self, other: &Self) -> bool {
         // This eq implementation helps so egui knows when not to re-render.
-        let mut lane_equals = false;
+        let mut track_equals = false;
         if let Ok(track) = &mut self.track.try_read() {
-            lane_equals = self.lane_version == track.version;
+            track_equals = self.track_version == track.version;
         }
         self.time_left == other.time_left
             && self.time_right == other.time_right
             && self.cursor_position == other.cursor_position
             && self.view_rect == other.view_rect
-            && lane_equals
+            && track_equals
     }
 }
 
@@ -130,10 +130,10 @@ pub struct StaveUiResponse {
 }
 
 impl Stave {
-    pub fn new(track: Arc<RwLock<Lane>>) -> Stave {
+    pub fn new(track: Arc<RwLock<Track>>) -> Stave {
         Stave {
             track: track.clone(),
-            lane_version: 0,
+            track_version: 0,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
@@ -232,7 +232,7 @@ impl Stave {
                 for i in 0..track.events.len() {
                     let event = &track.events[i];
                     match &event.event {
-                        LaneEventType::Note(note) => {
+                        TrackEventType::Note(note) => {
                             if let Some(y) = key_ys.get(&note.pitch) {
                                 let is_hovered = Self::event_hovered(
                                     &pitch_hovered,
@@ -256,7 +256,7 @@ impl Stave {
                                 );
                             }
                         }
-                        LaneEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
+                        TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                             if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
                                 let at = event.at as StaveTime;
                                 self.draw_cc(
@@ -276,7 +276,7 @@ impl Stave {
                                  )*/
                     }
                 }
-                self.lane_version = track.version;
+                self.track_version = track.version;
 
                 self.draw_cursor(
                     &painter,
@@ -332,7 +332,7 @@ impl Stave {
     fn event_hovered(
         pitch_hovered: &Option<Pitch>,
         time_hovered: &Option<StaveTime>,
-        event: &LaneEvent,
+        event: &TrackEvent,
         pitch: &Pitch,
     ) -> bool {
         if let Some(t) = &time_hovered {
@@ -479,7 +479,7 @@ impl Stave {
         track.edit_events(
             &(|ev| {
                 if self.note_selection.contains(ev) {
-                    if let LaneEventType::Note(note) = &mut ev.event {
+                    if let TrackEventType::Note(note) = &mut ev.event {
                         Some(note)
                     } else {
                         None
@@ -521,7 +521,7 @@ impl Stave {
         time: &Option<StaveTime>,
         pitch: &Option<Pitch>,
     ) {
-        // TODO Extract the drag procedure? See also update_time_selection.
+        // TODO Extract the drag pattern? See also update_time_selection.
         let drag_button = PointerButton::Middle;
         if response.clicked_by(drag_button) {
             self.note_draw = None;
@@ -617,7 +617,6 @@ impl Stave {
         keys: &BTreeMap<Pitch, Pix>,
         pitch_hovered: &Option<Pitch>,
     ) {
-        let is_black_key = |tone: &Pitch| vec![1, 3, 6, 8, 10].contains(&(tone % 12));
         for (pitch, y) in keys {
             let mut color = if is_black_key(&pitch) {
                 Rgba::from_rgb(0.05, 0.05, 0.05)
@@ -675,6 +674,10 @@ impl Stave {
             },
         )
     }
+}
+
+fn is_black_key(tone: &Pitch) -> bool {
+    vec![1, 3, 6, 8, 10].contains(&(tone % 12))
 }
 
 fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {

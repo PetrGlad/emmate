@@ -4,9 +4,9 @@ use eframe::{egui, Theme};
 
 use crate::app::EmApp;
 use crate::config::Config;
-use crate::lane::Lane;
 use crate::midi::SmfSource;
 use crate::project::Project;
+use crate::track::Track;
 use crate::track_source::TrackSource;
 
 mod app;
@@ -15,11 +15,11 @@ mod common;
 mod config;
 mod engine;
 mod events;
-mod lane;
 mod midi;
 mod midi_vst;
 mod project;
 mod stave;
+mod track;
 mod track_source;
 mod util;
 
@@ -66,7 +66,7 @@ pub fn main() {
             .unwrap();
     }
 
-    let mut track = Lane::default();
+    let mut track = Track::default();
     track.load_from(&project.current_snapshot_path());
     let track = Arc::new(RwLock::new(track));
     {
