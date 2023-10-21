@@ -38,8 +38,6 @@ impl Ord for EngineEvent {
     }
 }
 
-pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
-
 impl PartialOrd for EngineEvent {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -58,6 +56,8 @@ pub trait EventSource {
 }
 
 type EventSourceHandle = dyn EventSource + Send;
+
+pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
 
 pub struct Engine {
     vst: Vst,
@@ -191,7 +191,7 @@ impl Engine {
         self.sources.push(source);
     }
 
-    /// Process the event immediately
+    /// Process the event immediately.
     pub fn process(&self, event: Event) {
         let events_list = [event];
         let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());

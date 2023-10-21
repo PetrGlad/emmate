@@ -37,7 +37,7 @@ I use Pianoteq, but that is a commercial product.
 
 - [ ] Automatically create an undo snapshot on every edit command.
 - [ ] Do not save a new snapshot when there are no changes.
-- [ ] Time marks on stave (minute:second from the beginning).
+- [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
   version.

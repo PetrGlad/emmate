@@ -49,6 +49,8 @@ toml = "0.8.1"
 serde = "1.0.188"
 clap = "4.4.6"
 chrono = "0.4.31"
+glob = "0.3.1"
+regex = "1.10.2"
 
 # These may be useful
 # tokio = { version = "1.0", features = ["sync"] }

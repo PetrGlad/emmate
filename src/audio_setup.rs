@@ -1,14 +1,16 @@
-use crate::engine::{Engine, EngineCommand};
-use crate::midi_vst::{OutputSource, Vst};
+use std::sync::mpsc::Sender;
+use std::sync::{mpsc, Arc, Mutex};
+
 use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
 use midir::{MidiInput, MidiInputConnection};
 use midly::live::LiveEvent;
 use rodio::OutputStream;
-use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex};
 use vst::event::{Event, MidiEvent};
+
+use crate::engine::{Engine, EngineCommand};
+use crate::midi_vst::{OutputSource, Vst};
 
 pub fn setup_audio_engine(
     vst_plugin_path: &String,
@@ -69,28 +71,29 @@ pub fn midi_keyboard_input(
         return None;
     }
     let port = ports.get(port_idx.unwrap()).unwrap();
-    let seq_engine = engine.clone();
+    let engine = engine.clone();
+    // TODO Probably we should have an input source for this case. It may need
+    //      special handling while the engine is paused.
     Some(
         input
             .connect(
                 &port,
                 "midi-input",
                 move |t, ev, _data| {
-                    println!("MIDI event: {} {:?} {}", t, ev, ev.len());
                     {
                         let le = LiveEvent::parse(ev)
                             .expect("Unparseable input controller event.")
                             .to_static();
-                        println!("MIDI event parsed: {} {:?}", t, le);
+                        println!("Input MIDI event: {} {:?}", t, le);
                     }
                     if ev[0] == 254 {
-                        return;
+                        return; // Ignore keep-alives.
                     }
                     let mut ev_buf = [0u8; 3];
                     for (i, x) in ev.iter().enumerate() {
                         ev_buf[i] = *x;
                     }
-                    let note = Event::Midi(MidiEvent {
+                    let event = Event::Midi(MidiEvent {
                         data: ev_buf,
                         delta_frames: 0,
                         live: true,
@@ -99,7 +102,8 @@ pub fn midi_keyboard_input(
                         detune: 0,
                         note_off_velocity: 0,
                     });
-                    seq_engine.lock().unwrap().process(note);
+                    // TODO (?) Sustain events seem to be ignored by the VST plugin.
+                    engine.lock().unwrap().process(event);
                 },
                 (),
             )

@@ -5,9 +5,9 @@ use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
-use crate::project::Project;
 use crate::stave::{Stave, StaveTime};
 use crate::track::Track;
+use crate::track_history::TrackHistory;
 
 enum Message {
     UpdateTransportTime(TransportTime),
@@ -18,21 +18,21 @@ pub struct EmApp {
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
-    project: Project,
+    history: TrackHistory,
 }
 
-impl PartialEq for EmApp {
-    fn eq(&self, other: &Self) -> bool {
-        self.stave.read().unwrap().eq(&other.stave.read().unwrap())
-    }
-}
+// impl PartialEq for EmApp {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.stave.read().unwrap().eq(&other.stave.read().unwrap())
+//     }
+// }
 
 impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
         track: Arc<RwLock<Track>>,
-        project: Project,
+        history: TrackHistory,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
@@ -40,7 +40,7 @@ impl EmApp {
             engine_command_send,
             message_receiver,
             follow_playback: false,
-            project,
+            history,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -61,7 +61,6 @@ impl EmApp {
                 engine.set_status_receiver(Some(engine_status_receiver));
             }))
             .unwrap();
-
         app
     }
 
@@ -94,9 +93,14 @@ impl eframe::App for EmApp {
                 self.toggle_pause();
             }
             ui.heading(format!(
-                "🌲 {:} [{:}]",
-                self.project.directory.display(),
-                self.project.version()
+                "🌲 {:} [{:} / {:}]",
+                self.history.directory.display(),
+                self.history.version(),
+                self.stave
+                    .try_read()
+                    .ok()
+                    .map(|stave| stave.track_version.to_string())
+                    .unwrap_or("?".into())
             ));
             StripBuilder::new(ui)
                 .size(Size::remainder())
@@ -157,19 +161,19 @@ impl eframe::App for EmApp {
                                 }
                                 if ui.button("🚩Save").clicked() {
                                     // TODO Should not save when there are no changes.
-                                    self.project.change_version(1);
-                                    stave.save_to(&self.project.current_snapshot_path());
+                                    self.history.change_version(1);
+                                    stave.save_to(&self.history.current_snapshot_path());
                                 }
                                 if ui.button("⤵ Undo").clicked() {
-                                    self.project.change_version(-1);
-                                    if !stave.load_from(&self.project.current_snapshot_path()) {
-                                        self.project.change_version(1);
+                                    self.history.change_version(-1);
+                                    if !stave.load_from(&self.history.current_snapshot_path()) {
+                                        self.history.change_version(1);
                                     }
                                 }
                                 if ui.button("⤴ Redo").clicked() {
-                                    self.project.change_version(1);
-                                    if !stave.load_from(&self.project.current_snapshot_path()) {
-                                        self.project.change_version(-1);
+                                    self.history.change_version(1);
+                                    if !stave.load_from(&self.history.current_snapshot_path()) {
+                                        self.history.change_version(-1);
                                     }
                                 }
                             });

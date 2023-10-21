@@ -20,6 +20,7 @@ mod midi_vst;
 mod project;
 mod stave;
 mod track;
+mod track_history;
 mod track_source;
 mod util;
 
@@ -50,8 +51,7 @@ pub fn main() {
         .get_one::<std::path::PathBuf>("midi-file")
         .unwrap();
     println!("MIDI file name {:?}", midi_file_path);
-    let mut project = Project::new(midi_file_path);
-    project.open();
+    let history = Project::open_file(midi_file_path).history;
 
     // Stream and engine references keep them open.
     let (_stream, mut engine, engine_command_sender) =
@@ -67,7 +67,7 @@ pub fn main() {
     }
 
     let mut track = Track::default();
-    track.load_from(&project.current_snapshot_path());
+    track.load_from(&history.current_snapshot_path());
     let track = Arc::new(RwLock::new(track));
     {
         let track_midi_source = TrackSource::new(track.clone());
@@ -94,7 +94,7 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track, project))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track, history))),
     )
     .expect("Emmate UI")
 }

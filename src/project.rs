@@ -1,85 +1,38 @@
+use crate::track_history::TrackHistory;
 use std::fs;
 use std::path::PathBuf;
 
-use toml::from_str;
-
-use crate::common::VersionId;
-
 pub struct Project {
-    pub directory: PathBuf,
-    pub source_path: PathBuf,
-    version: VersionId,
+    pub history: TrackHistory,
 }
 
 impl Project {
-    const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
     const DIRECTORY_NAME_SUFFIX: &'static str = "emmate";
 
-    pub fn version(&self) -> VersionId {
-        self.version
-    }
-
-    pub fn new(source_file: &PathBuf) -> Project {
+    pub fn open_file(source_file: &PathBuf) -> Project {
+        dbg!("source file", source_file.to_string_lossy());
         let mut directory = source_file.to_owned();
-        directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
-        Project {
-            directory,
-            source_path: source_file.to_owned(),
-            version: 0,
+        if directory.file_name().is_none() {
+            panic!(
+                "Source path has no file name: {:}",
+                directory.to_string_lossy()
+            );
         }
-    }
-
-    pub fn open(&mut self) {
-        if !self.directory.is_dir() {
-            fs::create_dir_all(&self.directory).expect(
+        directory.set_extension("");
+        directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
+        let mut history = if directory.is_dir() {
+            TrackHistory::with_directory(&directory)
+        } else {
+            fs::create_dir_all(&directory).expect(
                 format!(
                     "Cannot create project directory {:?}",
-                    self.directory.display()
+                    directory.to_string_lossy()
                 )
                 .as_str(),
             );
-        }
-        let starting_snapshot_path = self.current_snapshot_path();
-        if !fs::metadata(&starting_snapshot_path).is_ok() {
-            fs::copy(&self.source_path, &starting_snapshot_path)
-                .expect("Cannot create starting snapshot.");
-        } else {
-            // Seek to the latest version.
-            while fs::metadata(&self.current_snapshot_path()).is_ok() {
-                self.change_version(1);
-            }
-            self.change_version(-1);
-        }
-    }
-
-    pub fn parse_snapshot_name(file: &PathBuf) -> Option<VersionId> {
-        let mut file = file.to_owned();
-        if let Some(ext) = file.extension() {
-            if ext != Project::SNAPSHOT_NAME_EXT {
-                return None;
-            }
-            file.set_extension("");
-            return from_str::<VersionId>(file.file_name().unwrap().to_str().unwrap()).ok();
-        }
-        None
-    }
-
-    fn make_snapshot_path(&self, version: VersionId) -> PathBuf {
-        let mut path = self.directory.clone();
-        path.push(format!("{:}.{:}", version, Project::SNAPSHOT_NAME_EXT));
-        path
-    }
-
-    pub fn current_snapshot_path(&self) -> PathBuf {
-        self.make_snapshot_path(self.version)
-    }
-
-    // version_diff < 0 for undo. version_diff == 1 - save new version.
-    pub fn change_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
-        let new_version = self.version.checked_add(version_diff);
-        new_version.filter(|v| *v >= 0).and_then(|v| {
-            self.version = v;
-            Some(v)
-        })
+            TrackHistory::with_directory(&directory).init(&source_file)
+        };
+        history.open();
+        Project { history }
     }
 }
