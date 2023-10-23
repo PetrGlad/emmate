@@ -35,12 +35,14 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] Select none/slear selection command
 - [ ] Automatically create an undo snapshot on every edit command.
 - [ ] Do not save a new snapshot when there are no changes.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
   version.
+- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
 - [ ] Time bookmarks.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
@@ -51,6 +53,7 @@ I use Pianoteq, but that is a commercial product.
   them are currently visible.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
 - [ ] Copy/cut/paste.
+- [ ] Adjust tempo for selection.
 - [x] Editing sustain events.
 - [x] Note input (with mouse).
 - [x] Note selection.
