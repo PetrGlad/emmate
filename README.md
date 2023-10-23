@@ -35,7 +35,6 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Select none/slear selection command
 - [ ] Automatically create an undo snapshot on every edit command.
 - [ ] Do not save a new snapshot when there are no changes.
 - [ ] Time marks on stave ("minute:second" from the beginning).
@@ -54,6 +53,7 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
 - [ ] Copy/cut/paste.
 - [ ] Adjust tempo for selection.
+- [x] Select none/clear selection command
 - [x] Editing sustain events.
 - [x] Note input (with mouse).
 - [x] Note selection.

@@ -73,6 +73,10 @@ impl NotesSelection {
     fn contains(&self, ev: &TrackEvent) -> bool {
         self.selected.contains(&ev.id)
     }
+
+    fn clear(&mut self) {
+        self.selected.clear();
+    }
 }
 
 fn to_transport_time(value: StaveTime) -> TransportTime {
@@ -353,6 +357,10 @@ impl Stave {
         // Likely the dispatch needs some hash map that for each input state defines a unique command.
         // Need to support focus somehow so the commans only active when stave is focused.
         // Currently commands also affect other widgets (e.g. arrows change button focus).
+
+        if response.ctx.input(|i| i.key_pressed(Key::Q)) {
+            self.note_selection.clear();
+        }
 
         // Tape insert/remove
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {

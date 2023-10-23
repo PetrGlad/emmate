@@ -14,11 +14,11 @@ enum Message {
 }
 
 pub struct EmApp {
+    history: TrackHistory,
     stave: Stave,
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
-    history: TrackHistory,
 }
 
 // impl PartialEq for EmApp {
