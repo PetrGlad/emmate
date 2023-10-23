@@ -1,12 +1,9 @@
-use std::sync::{Arc, RwLock};
-
 use eframe::{egui, Theme};
 
 use crate::app::EmApp;
 use crate::config::Config;
 use crate::midi::SmfSource;
 use crate::project::Project;
-use crate::track::Track;
 use crate::track_source::TrackSource;
 
 mod app;
@@ -66,11 +63,8 @@ pub fn main() {
             .unwrap();
     }
 
-    let mut track = Track::default();
-    track.load_from(&history.current_snapshot_path());
-    let track = Arc::new(RwLock::new(track));
     {
-        let track_midi_source = TrackSource::new(track.clone());
+        let track_midi_source = TrackSource::new(history.track.clone());
         engine_command_sender
             .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
             .unwrap();
@@ -90,11 +84,10 @@ pub fn main() {
         min_window_size: Some(egui::emath::Vec2 { x: 300.0, y: 200.0 }),
         ..Default::default()
     };
-    let ui_track = track.clone();
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, ui_track, history))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, history))),
     )
     .expect("Emmate UI")
 }

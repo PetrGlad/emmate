@@ -1,13 +1,18 @@
-use crate::common::VersionId;
-use crate::track::Track;
-use glob::glob;
-use regex::Regex;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
-// Undo/redo history
+use glob::glob;
+use regex::Regex;
+
+use crate::common::VersionId;
+use crate::track::Track;
+
+// Undo/redo history and snapshots.
+#[derive(Debug)]
 pub struct TrackHistory {
-    track: Track,
+    /// Normally should not be used from outside. Made it pub as double-borrow workaround.
+    pub track: Arc<RwLock<Track>>,
     pub version: VersionId,
     pub directory: PathBuf,
 }
@@ -21,9 +26,29 @@ struct Version {
 impl TrackHistory {
     const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
 
-    /// Get current version.
-    pub fn get(&self) -> &Track {
-        todo!()
+    pub fn attach(&mut self, track: Arc<RwLock<Track>>) {
+        self.track = track;
+    }
+
+    pub fn with_track<Action: Fn(&Track)>(&mut self, action: &Action) {
+        {
+            let mut track = self.track.read().expect("Read track.");
+            action(&mut track);
+        }
+        self.update();
+    }
+
+    pub fn update_track<Action: FnMut(&mut Track)>(&mut self, action: &mut Action) {
+        {
+            let mut track = self.track.write().expect("Write to track.");
+            action(&mut track);
+        }
+        self.update();
+    }
+
+    /// Normally should not be used from outside. Made it pub as double-borrow workaround.
+    pub fn update(&mut self) {
+        println!("[TODO] Save a snapshot if the track has changed.");
     }
 
     /// Save current version into history.
@@ -97,6 +122,8 @@ impl TrackHistory {
         match self.list_revisions().last() {
             Some(v) => {
                 self.change_version(v.id).unwrap();
+                let file_path = self.current_snapshot_path();
+                self.update_track(&mut |track| track.load_from(&file_path));
             }
             None => panic!("No revision history in the project."),
         }
@@ -128,7 +155,7 @@ impl TrackHistory {
     }
 
     pub fn parse_snapshot_name(file: &PathBuf) -> Option<VersionId> {
-        let mut file = file.to_owned();
+        let file = file.to_owned();
         let re = Regex::new((r"([0-9]+)\.".to_string() + Self::SNAPSHOT_NAME_EXT + "$").as_str())
             .unwrap();
         file.file_name()

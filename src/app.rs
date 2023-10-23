@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::mpsc;
 
 use eframe::egui::Vec2;
 use eframe::{self, egui, CreationContext};
@@ -6,7 +6,6 @@ use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
 use crate::stave::{Stave, StaveTime};
-use crate::track::Track;
 use crate::track_history::TrackHistory;
 
 enum Message {
@@ -14,7 +13,6 @@ enum Message {
 }
 
 pub struct EmApp {
-    history: TrackHistory,
     stave: Stave,
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
@@ -31,16 +29,14 @@ impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
-        track: Arc<RwLock<Track>>,
         history: TrackHistory,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
-            stave: Stave::new(track),
+            stave: Stave::new(history),
             engine_command_send,
             message_receiver,
             follow_playback: false,
-            history,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -92,8 +88,8 @@ impl eframe::App for EmApp {
             }
             ui.heading(format!(
                 "🌲 {:} [{:} / {:}]",
-                self.history.directory.display(),
-                self.history.version(),
+                self.stave.history.directory.display(),
+                self.stave.history.version(),
                 self.stave.track_version.to_string()
             ));
             StripBuilder::new(ui)
@@ -152,20 +148,19 @@ impl eframe::App for EmApp {
                             }
                             if ui.button("🚩Save").clicked() {
                                 // TODO Should not save when there are no changes.
-                                self.history.change_version(1);
-                                self.stave.save_to(&self.history.current_snapshot_path());
+                                self.stave.history.change_version(1);
+                                self.stave
+                                    .save_to(&self.stave.history.current_snapshot_path());
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.history.change_version(-1);
-                                if !self.stave.load_from(&self.history.current_snapshot_path()) {
-                                    self.history.change_version(1);
-                                }
+                                self.stave.history.change_version(-1);
+                                self.stave
+                                    .load_from(&self.stave.history.current_snapshot_path());
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.history.change_version(1);
-                                if !self.stave.load_from(&self.history.current_snapshot_path()) {
-                                    self.history.change_version(-1);
-                                }
+                                self.stave.history.change_version(1);
+                                self.stave
+                                    .load_from(&self.stave.history.current_snapshot_path());
                             }
                         });
                     })

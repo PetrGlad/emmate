@@ -77,10 +77,10 @@ I use Pianoteq, but that is a commercial product.
 Big scary problems
 
 * Should eventually migrate away from VST2. The bindings are unsupported anymore, and there are SIGSEGVs that I have not
-  managed to resolve so far. Also, there are licensing issues with the VST2 API itself.
-  VST3 is GPL. LV2 seem like a decent choice. Here seem to be an LV2 host implementation in
-  Rust https://github.com/wmedrano/livi-rs. Can also implement one from scratch, or use JACK API and register emmate as
-  a MIDI sequencer. Pipewire seems to SUPPORT JACK API as well (see `pw-jack`).
+  managed to resolve so far. Also, there are licensing issues with the VST2 API itself. VST3 is GPL - I would like to
+  keep the project more accessible to various uses. LV2 seem like a decent choice. Here seem to be an LV2 host
+  implementation in Rust https://github.com/wmedrano/livi-rs. Can also implement one from scratch, or use JACK API and
+  register `emmate` as a MIDI sequencer. Pipewire seems to SUPPORT JACK API as well (see `pw-jack`).
 * May need to use midi events directly (instead of intermediate internal representation). E.g. `track::from_midi_events`
   may not be necessary. In particular tail shifts will become simpler. This will require
     * To handle ignored/unused events along with notes and sustain.
@@ -89,6 +89,7 @@ Big scary problems
       allows overlapping notes index should be able to handle that.
 * Optimize rendering drawing only visible items, may also need some index. In the simplest casevisible notes can be
   determined when zoom changes, and then re-use the visible set.
+* Optimize engine to reduce CPU usage - may need to swith to some async framework (`tokio`).
 
 Have to explore following options for the further development
 

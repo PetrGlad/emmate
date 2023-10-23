@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 
 use eframe::egui::{
     self, Color32, Frame, Key, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
@@ -15,6 +14,7 @@ use crate::engine::TransportTime;
 use crate::track::{
     EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
+use crate::track_history::TrackHistory;
 use crate::{track, Pix};
 
 pub type StaveTime = i64;
@@ -94,7 +94,9 @@ impl From<&TimeSelection> for track::TimeSelection {
 
 #[derive(Debug)]
 pub struct Stave {
-    pub track: Arc<RwLock<Track>>,
+    pub history: TrackHistory,
+    pub track_version: VersionId,
+
     pub time_left: StaveTime,
     pub time_right: StaveTime,
     pub view_rect: Rect,
@@ -103,8 +105,6 @@ pub struct Stave {
     pub time_selection: Option<TimeSelection>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
-
-    pub track_version: VersionId,
 }
 
 // impl PartialEq for Stave {
@@ -134,9 +134,9 @@ pub struct StaveUiResponse {
 }
 
 impl Stave {
-    pub fn new(track: Arc<RwLock<Track>>) -> Stave {
+    pub fn new(history: TrackHistory) -> Stave {
         Stave {
-            track: track.clone(),
+            history,
             track_version: 0,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
@@ -148,18 +148,13 @@ impl Stave {
         }
     }
 
-    pub fn save_to(&self, file_path: &PathBuf) {
-        self.track
-            .read()
-            .expect("Cannot read track.")
-            .save_to(file_path);
+    pub fn save_to(&mut self, file_path: &PathBuf) {
+        self.history.with_track(&|track| track.save_to(file_path));
     }
 
-    pub fn load_from(&self, file_path: &PathBuf) -> bool {
-        self.track
-            .write()
-            .expect("Cannot read track.")
-            .load_from(file_path)
+    pub fn load_from(&mut self, file_path: &PathBuf) {
+        self.history
+            .update_track(&mut |track| track.load_from(file_path));
     }
 
     /// Pixel/uSec, can be cached.
@@ -230,57 +225,20 @@ impl Stave {
                     &Stave::NOTHING_ZONE,
                     &Color32::from_black_alpha(15),
                 );
-                let track = self.track.read().expect("Cannot read track.");
-                let mut last_damper_value: (StaveTime, Level) = (0, 0);
                 let mut note_hovered = None;
-                for i in 0..track.events.len() {
-                    let event = &track.events[i];
-                    match &event.event {
-                        TrackEventType::Note(note) => {
-                            if let Some(y) = key_ys.get(&note.pitch) {
-                                let is_hovered = Self::event_hovered(
-                                    &pitch_hovered,
-                                    &time_hovered,
-                                    event,
-                                    &note.pitch,
-                                );
-                                if is_hovered {
-                                    note_hovered = Some(&event.id);
-                                }
-                                self.draw_note(
-                                    &painter,
-                                    note.velocity,
-                                    (
-                                        event.at as StaveTime,
-                                        (event.at + note.duration) as StaveTime,
-                                    ),
-                                    *y,
-                                    half_tone_step,
-                                    self.note_selection.contains(&event),
-                                );
-                            }
-                        }
-                        TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
-                            if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                                let at = event.at as StaveTime;
-                                self.draw_cc(
-                                    &painter,
-                                    last_damper_value.0,
-                                    at,
-                                    last_damper_value.1,
-                                    *y,
-                                    half_tone_step,
-                                );
-                                last_damper_value = (at, v.value);
-                            }
-                        }
-                        _ => (), /*println!(
-                                     "Not displaying event {:?}, the event type is not supported yet.",
-                                     event
-                                 )*/
-                    }
+                {
+                    let track = self.history.track.read().expect("Read track.");
+                    self.draw_track(
+                        &key_ys,
+                        &half_tone_step,
+                        &mut pitch_hovered,
+                        &mut time_hovered,
+                        &mut note_hovered,
+                        &painter,
+                        &track,
+                    );
+                    self.track_version = track.version;
                 }
-                self.track_version = track.version;
 
                 self.draw_cursor(
                     &painter,
@@ -303,11 +261,67 @@ impl Stave {
                     response: ui.allocate_response(bounds.size(), Sense::click_and_drag()),
                     pitch_hovered,
                     time_hovered,
-                    note_hovered: note_hovered.copied(),
+                    note_hovered,
                     modifiers: ui.input(|i| i.modifiers),
                 }
             })
             .inner
+    }
+
+    fn draw_track(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        pitch_hovered: &Option<Pitch>,
+        time_hovered: &Option<StaveTime>,
+        note_hovered: &mut Option<EventId>,
+        painter: &Painter,
+        track: &Track,
+    ) {
+        let mut last_damper_value: (StaveTime, Level) = (0, 0);
+        for i in 0..track.events.len() {
+            let event = &track.events[i];
+            match &event.event {
+                TrackEventType::Note(note) => {
+                    if let Some(y) = key_ys.get(&note.pitch) {
+                        let is_hovered =
+                            Self::event_hovered(&pitch_hovered, &time_hovered, event, &note.pitch);
+                        if is_hovered {
+                            note_hovered.replace(event.id);
+                        }
+                        self.draw_note(
+                            &painter,
+                            note.velocity,
+                            (
+                                event.at as StaveTime,
+                                (event.at + note.duration) as StaveTime,
+                            ),
+                            *y,
+                            *half_tone_step,
+                            self.note_selection.contains(&event),
+                        );
+                    }
+                }
+                TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
+                    if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+                        let at = event.at as StaveTime;
+                        self.draw_cc(
+                            &painter,
+                            last_damper_value.0,
+                            at,
+                            last_damper_value.1,
+                            *y,
+                            *half_tone_step,
+                        );
+                        last_damper_value = (at, v.value);
+                    }
+                }
+                _ => (), /*println!(
+                             "Not displaying event {:?}, the event type is not supported yet.",
+                             event
+                         )*/
+            }
+        }
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> Response {
@@ -364,17 +378,19 @@ impl Stave {
 
         // Tape insert/remove
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            if let Some(time_selection) = &self.time_selection {
-                track.tape_cut(&time_selection.into());
-            }
-            track.delete_events(&self.note_selection.selected);
+            self.history.update_track(&mut |track| {
+                if let Some(time_selection) = &self.time_selection {
+                    track.tape_cut(&time_selection.into());
+                }
+                track.delete_events(&self.note_selection.selected);
+            });
         }
         if response.ctx.input(|i| i.key_pressed(Key::Insert)) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            if let Some(time_selection) = &self.time_selection {
-                track.tape_insert(&time_selection.into());
-            }
+            self.history.update_track(&mut |track| {
+                if let Some(time_selection) = &self.time_selection {
+                    track.tape_insert(&time_selection.into());
+                }
+            });
         }
 
         // Tail shift
@@ -382,21 +398,23 @@ impl Stave {
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
         {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_tail(
-                &(self.cursor_position as TransportTime),
-                Stave::KEYBOARD_TIME_STEP,
-            );
+            self.history.update_track(&mut |track| {
+                track.shift_tail(
+                    &(self.cursor_position as TransportTime),
+                    Stave::KEYBOARD_TIME_STEP,
+                );
+            });
         }
         if response
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
         {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_tail(
-                &(self.cursor_position as TransportTime),
-                -Stave::KEYBOARD_TIME_STEP,
-            );
+            self.history.update_track(&mut |track| {
+                track.shift_tail(
+                    &(self.cursor_position as TransportTime),
+                    -Stave::KEYBOARD_TIME_STEP,
+                );
+            });
         }
 
         // Note time moves
@@ -404,21 +422,23 @@ impl Stave {
             (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
                 || (i.modifiers.shift && i.key_pressed(Key::L))
         }) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_events(
-                &(|ev| self.note_selection.contains(ev)),
-                Stave::KEYBOARD_TIME_STEP,
-            );
+            self.history.update_track(&mut |track| {
+                track.shift_events(
+                    &(|ev| self.note_selection.contains(ev)),
+                    Stave::KEYBOARD_TIME_STEP,
+                );
+            });
         }
         if response.ctx.input(|i| {
             (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
                 || (i.modifiers.shift && i.key_pressed(Key::H))
         }) {
-            let mut track = self.track.write().expect("Cannot write to track.");
-            track.shift_events(
-                &(|ev| self.note_selection.contains(ev)),
-                -Stave::KEYBOARD_TIME_STEP,
-            );
+            self.history.update_track(&mut |track| {
+                track.shift_events(
+                    &(|ev| self.note_selection.contains(ev)),
+                    -Stave::KEYBOARD_TIME_STEP,
+                );
+            });
         }
 
         // Note edits
@@ -483,21 +503,22 @@ impl Stave {
     }
 
     pub fn edit_selected_notes<Action: Fn(&mut Note)>(&mut self, action: &Action) {
-        let mut track = self.track.write().expect("Cannot write to track.");
-        track.edit_events(
-            &(|ev| {
-                if self.note_selection.contains(ev) {
-                    if let TrackEventType::Note(note) = &mut ev.event {
-                        Some(note)
+        self.history.update_track(&mut |track| {
+            track.edit_events(
+                &(|ev| {
+                    if self.note_selection.contains(ev) {
+                        if let TrackEventType::Note(note) = &mut ev.event {
+                            Some(note)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
-                } else {
-                    None
-                }
-            }),
-            action,
-        );
+                }),
+                action,
+            );
+        });
     }
 
     fn update_time_selection(&mut self, response: &Response, time: &Option<StaveTime>) {
@@ -549,7 +570,7 @@ impl Stave {
             dbg!("drag_released", &self.note_draw);
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
-                    if let Ok(track) = &mut self.track.try_write() {
+                    self.history.update_track(&mut |track| {
                         let time_range = (
                             draw.time.from as TransportTime,
                             draw.time.to as TransportTime,
@@ -563,7 +584,7 @@ impl Stave {
                         } else {
                             track.add_note(time_range, draw.pitch, 64);
                         }
-                    }
+                    });
                 }
             }
             self.note_draw = None;

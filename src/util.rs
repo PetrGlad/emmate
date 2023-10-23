@@ -23,6 +23,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn check_range_contains() {
+        assert!(!range_contains((0, -1), 0));
+        assert!(!range_contains((0, 0), 0));
+        assert!(range_contains((0, 1), 0));
+        assert!(!range_contains((0, 1), 1));
+        assert!(!range_contains((0, 1), 2));
+    }
+
+    #[test]
     fn check_is_ordered() {
         assert!(is_ordered::<u64>(&vec![]));
         assert!(is_ordered(&vec![0]));

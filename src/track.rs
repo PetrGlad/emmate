@@ -1,3 +1,4 @@
+use clap::command;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -120,13 +121,11 @@ impl Track {
         }
     }
 
-    pub fn load_from(&mut self, file_path: &PathBuf) -> bool {
-        if let Ok(data) = std::fs::read(&file_path) {
-            let events = midi::load_smf(&data);
-            self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as u64);
-            return true;
-        }
-        false
+    pub fn load_from(&mut self, file_path: &PathBuf) {
+        let data = std::fs::read(&file_path).unwrap();
+        let events = midi::load_smf(&data);
+        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as u64);
+        self.commit();
     }
 
     pub fn save_to(&self, file_path: &PathBuf) {
