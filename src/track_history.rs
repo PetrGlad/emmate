@@ -45,12 +45,12 @@ impl TrackHistory {
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub fn update(&mut self) {
-        // TODO Should clear revisions that come after (the ones left after undo).
-        //      Current behaviour may be confusing.
         let track = self.track.clone();
         let track = track.read().expect("Read track.");
         if track.version != self.track_version {
-            self.push()
+            self.push();
+            // It is possible co keep these, but that would complicate implementation, and UI.
+            self.discard_tail();
         }
     }
 
@@ -89,13 +89,25 @@ impl TrackHistory {
     /// Restore track  from the last saved version.
     pub fn undo(&mut self) {
         if self.shift_version(-1).is_some() {
-            self.go_to(self.version);
+            if !self.go_to(self.version) {
+                self.shift_version(1);
+            }
         }
     }
 
     pub fn redo(&mut self) {
         if self.shift_version(1).is_some() {
-            self.go_to(self.version);
+            if !self.go_to(self.version) {
+                self.shift_version(-1);
+            }
+        }
+    }
+
+    fn discard_tail(&mut self) {
+        for v in self.list_revisions() {
+            if self.version < v.id {
+                fs::remove_file(v.snapshot_path).expect("Delete snapshot.");
+            }
         }
     }
 
@@ -225,6 +237,10 @@ mod tests {
         assert_eq!(
             Some(5),
             TrackHistory::parse_snapshot_name(&PathBuf::from("5.emmrev.mid"))
+        );
+        assert_eq!(
+            Some(145),
+            TrackHistory::parse_snapshot_name(&PathBuf::from("145.emmrev.mid"))
         );
     }
 }
