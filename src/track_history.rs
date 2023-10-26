@@ -13,6 +13,7 @@ use crate::track::Track;
 pub struct TrackHistory {
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub track: Arc<RwLock<Track>>,
+    track_version: VersionId,
     pub version: VersionId,
     pub directory: PathBuf,
 }
@@ -26,19 +27,15 @@ struct Version {
 impl TrackHistory {
     const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
 
-    pub fn attach(&mut self, track: Arc<RwLock<Track>>) {
-        self.track = track;
-    }
-
-    pub fn with_track<Action: Fn(&Track)>(&mut self, action: &Action) {
+    pub fn with_track<Action: FnOnce(&Track)>(&mut self, action: Action) {
         {
-            let mut track = self.track.read().expect("Read track.");
-            action(&mut track);
+            let track = self.track.read().expect("Read track.");
+            action(&track);
         }
         self.update();
     }
 
-    pub fn update_track<Action: FnMut(&mut Track)>(&mut self, action: &mut Action) {
+    pub fn update_track<Action: FnOnce(&mut Track)>(&mut self, action: Action) {
         {
             let mut track = self.track.write().expect("Write to track.");
             action(&mut track);
@@ -48,17 +45,56 @@ impl TrackHistory {
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub fn update(&mut self) {
-        println!("[TODO] Save a snapshot if the track has changed.");
+        let track = self.track.clone();
+        let track = track.read().expect("Read track.");
+        if track.version != self.track_version {
+            self.push()
+        }
+    }
+
+    // version_diff < 0 for undo. version_diff == 1 - save new version.
+    pub fn shift_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
+        self.version
+            .checked_add(version_diff)
+            .filter(|v| *v >= 0)
+            .and_then(|v| {
+                self.version = v;
+                Some(v)
+            })
+    }
+
+    pub fn go_to(&mut self, version: VersionId) -> bool {
+        let track = self.track.clone();
+        if let Some(v) = self.list_revisions().find(|v| v.id == version) {
+            let mut track = track.write().expect("Read track.");
+            track.load_from(&v.snapshot_path);
+            self.track_version = track.version;
+            true
+        } else {
+            false
+        }
     }
 
     /// Save current version into history.
     pub fn push(&mut self) {
-        todo!();
+        self.shift_version(1).unwrap();
+        let track = self.track.clone();
+        let track = track.read().expect("Read track.");
+        track.save_to(&self.current_snapshot_path());
+        self.track_version = track.version;
     }
 
     /// Restore track  from the last saved version.
-    pub fn pop(&mut self) {
-        todo!();
+    pub fn undo(&mut self) {
+        if self.shift_version(-1).is_some() {
+            self.go_to(self.version);
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if self.shift_version(1).is_some() {
+            self.go_to(self.version);
+        }
     }
 
     pub fn version(&self) -> VersionId {
@@ -68,20 +104,20 @@ impl TrackHistory {
     fn check_directory_writable(directory: &PathBuf) {
         let metadata = fs::metadata(&directory).expect(
             format!(
-                "Cannot init history: {:} is not found.",
+                "Cannot init history: {} is not found.",
                 &directory.to_string_lossy()
             )
             .as_str(),
         );
         if !metadata.is_dir() {
             panic!(
-                "Cannot init history: {:} is not a directory.",
+                "Cannot init history: {} is not a directory.",
                 &directory.to_string_lossy()
             );
         }
         if metadata.permissions().readonly() {
             panic!(
-                "Cannot init history: {:} is not writable.",
+                "Cannot init history: {} is not writable.",
                 &directory.to_string_lossy()
             );
         }
@@ -94,6 +130,7 @@ impl TrackHistory {
             directory: directory.to_owned(),
             version: 0,
             track: Default::default(),
+            track_version: -1,
         }
     }
 
@@ -105,7 +142,7 @@ impl TrackHistory {
         let starting_snapshot_path = self.current_snapshot_path();
         if fs::metadata(&starting_snapshot_path).is_ok() {
             panic!(
-                "Not creating initial version: project history is not empty, '{:}' exists.",
+                "Not creating initial version: project history is not empty, '{}' exists.",
                 &starting_snapshot_path.to_string_lossy()
             );
         }
@@ -121,9 +158,9 @@ impl TrackHistory {
         // Seek to the latest version.
         match self.list_revisions().last() {
             Some(v) => {
-                self.change_version(v.id).unwrap();
+                self.version = v.id;
                 let file_path = self.current_snapshot_path();
-                self.update_track(&mut |track| track.load_from(&file_path));
+                self.update_track(|track| track.load_from(&file_path));
             }
             None => panic!("No revision history in the project."),
         }
@@ -141,7 +178,7 @@ impl TrackHistory {
                 if let Some(id) = Self::parse_snapshot_name(&p) {
                     Some(Version {
                         id,
-                        snapshot_path: Default::default(),
+                        snapshot_path: p.to_owned(),
                     })
                 } else {
                     None
@@ -167,21 +204,12 @@ impl TrackHistory {
 
     fn make_snapshot_path(&self, version: VersionId) -> PathBuf {
         let mut path = self.directory.clone();
-        path.push(format!("{:}.{:}", version, Self::SNAPSHOT_NAME_EXT));
+        path.push(format!("{}.{}", version, Self::SNAPSHOT_NAME_EXT));
         path
     }
 
     pub fn current_snapshot_path(&self) -> PathBuf {
         self.make_snapshot_path(self.version)
-    }
-
-    // version_diff < 0 for undo. version_diff == 1 - save new version.
-    pub fn change_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
-        let new_version = self.version.checked_add(version_diff);
-        new_version.filter(|v| *v >= 0).and_then(|v| {
-            self.version = v;
-            Some(v)
-        })
     }
 }
 

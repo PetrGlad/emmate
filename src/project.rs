@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 pub struct Project {
     pub history: TrackHistory,
+    pub home_path: PathBuf,
 }
 
 impl Project {
@@ -14,7 +15,7 @@ impl Project {
         let mut directory = source_file.to_owned();
         if directory.file_name().is_none() {
             panic!(
-                "Source path has no file name: {:}",
+                "Source path has no file name: {}",
                 directory.to_string_lossy()
             );
         }
@@ -33,6 +34,9 @@ impl Project {
             TrackHistory::with_directory(&directory).init(&source_file)
         };
         history.open();
-        Project { history }
+        Project {
+            home_path: directory,
+            history,
+        }
     }
 }

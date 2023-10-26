@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::PathBuf;
 use std::sync::mpsc;
 
 use eframe::egui::Vec2;
@@ -5,14 +7,15 @@ use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
+use crate::project::Project;
 use crate::stave::{Stave, StaveTime};
-use crate::track_history::TrackHistory;
 
 enum Message {
     UpdateTransportTime(TransportTime),
 }
 
 pub struct EmApp {
+    home_path: PathBuf,
     stave: Stave,
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
@@ -29,11 +32,12 @@ impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
-        history: TrackHistory,
+        project: Project,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
         let app = EmApp {
-            stave: Stave::new(history),
+            home_path: project.home_path,
+            stave: Stave::new(project.history),
             engine_command_send,
             message_receiver,
             follow_playback: false,
@@ -65,6 +69,22 @@ impl EmApp {
             .send(Box::new(|engine| engine.toggle_pause()))
             .unwrap();
     }
+
+    fn export(&mut self) {
+        let mut path = self.home_path.clone();
+        path.push("export");
+        if !path.is_dir() {
+            println!("Creating {}", path.to_string_lossy());
+            fs::create_dir_all(&path).expect("Create export directory.");
+        }
+        path.push(
+            chrono::Local::now()
+                .format("%Y-%m-%d_%H-%M-%S.mid")
+                .to_string(),
+        );
+        println!("Saving to {}", path.to_string_lossy());
+        self.stave.save_to(&PathBuf::from(path));
+    }
 }
 
 impl eframe::App for EmApp {
@@ -87,7 +107,7 @@ impl eframe::App for EmApp {
                 self.toggle_pause();
             }
             ui.heading(format!(
-                "🌲 {:} [{:} / {:}]",
+                "🌲 {} [{} / {}]",
                 self.stave.history.directory.display(),
                 self.stave.history.version(),
                 self.stave.track_version.to_string()
@@ -146,21 +166,14 @@ impl eframe::App for EmApp {
                                     .send(Box::new(Engine::reset))
                                     .unwrap();
                             }
-                            if ui.button("🚩Save").clicked() {
-                                // TODO Should not save when there are no changes.
-                                self.stave.history.change_version(1);
-                                self.stave
-                                    .save_to(&self.stave.history.current_snapshot_path());
+                            if ui.button("🚩Export").clicked() {
+                                self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave.history.change_version(-1);
-                                self.stave
-                                    .load_from(&self.stave.history.current_snapshot_path());
+                                self.stave.history.undo();
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave.history.change_version(1);
-                                self.stave
-                                    .load_from(&self.stave.history.current_snapshot_path());
+                                self.stave.history.redo();
                             }
                         });
                     })

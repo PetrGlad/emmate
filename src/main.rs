@@ -48,7 +48,7 @@ pub fn main() {
         .get_one::<std::path::PathBuf>("midi-file")
         .unwrap();
     println!("MIDI file name {:?}", midi_file_path);
-    let history = Project::open_file(midi_file_path).history;
+    let project = Project::open_file(midi_file_path);
 
     // Stream and engine references keep them open.
     let (_stream, mut engine, engine_command_sender) =
@@ -64,7 +64,7 @@ pub fn main() {
     }
 
     {
-        let track_midi_source = TrackSource::new(history.track.clone());
+        let track_midi_source = TrackSource::new(project.history.track.clone());
         engine_command_sender
             .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
             .unwrap();
@@ -87,7 +87,7 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, history))),
+        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, project))),
     )
     .expect("Emmate UI")
 }
