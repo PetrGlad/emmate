@@ -22,12 +22,6 @@ pub struct EmApp {
     follow_playback: bool,
 }
 
-// impl PartialEq for EmApp {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.stave.read().unwrap().eq(&other.stave.read().unwrap())
-//     }
-// }
-
 impl EmApp {
     pub fn new(
         ctx: &CreationContext,

@@ -45,6 +45,8 @@ impl TrackHistory {
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub fn update(&mut self) {
+        // TODO Should clear revisions that come after (the ones left after undo).
+        //      Current behaviour may be confusing.
         let track = self.track.clone();
         let track = track.read().expect("Read track.");
         if track.version != self.track_version {

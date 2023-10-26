@@ -107,21 +107,6 @@ pub struct Stave {
     pub note_selection: NotesSelection,
 }
 
-// impl PartialEq for Stave {
-//     fn eq(&self, other: &Self) -> bool {
-//         // This eq implementation helps so egui knows when not to re-render.
-//         let mut track_equals = false;
-//         if let Ok(track) = &mut self.track.try_read() {
-//             track_equals = self.track_version == track.version;
-//         }
-//         self.time_left == other.time_left
-//             && self.time_right == other.time_right
-//             && self.cursor_position == other.cursor_position
-//             && self.view_rect == other.view_rect
-//             && track_equals
-//     }
-// }
-
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED;
 
