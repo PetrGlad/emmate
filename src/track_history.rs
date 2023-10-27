@@ -1,12 +1,21 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use glob::glob;
 use regex::Regex;
 
 use crate::common::VersionId;
 use crate::track::Track;
+
+pub type ActionId = Option<&'static str>;
+
+#[derive(Debug, Clone, Copy)]
+struct ActionThrottle {
+    timestamp: Instant,
+    action_id: ActionId,
+}
 
 // Undo/redo history and snapshots.
 #[derive(Debug)]
@@ -16,6 +25,8 @@ pub struct TrackHistory {
     track_version: VersionId,
     pub version: VersionId,
     pub directory: PathBuf,
+
+    throttle: Option<ActionThrottle>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -28,17 +39,33 @@ impl TrackHistory {
     const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
 
     pub fn with_track<Action: FnOnce(&Track)>(&mut self, action: Action) {
-        {
-            let track = self.track.read().expect("Read track.");
-            action(&track);
-        }
-        self.update();
+        let track = self.track.read().expect("Read track.");
+        action(&track);
     }
 
-    pub fn update_track<Action: FnOnce(&mut Track)>(&mut self, action: Action) {
+    pub fn update_track<Action: FnOnce(&mut Track)>(
+        &mut self,
+        action_id: ActionId,
+        action: Action,
+    ) {
         {
             let mut track = self.track.write().expect("Write to track.");
             action(&mut track);
+        }
+
+        if let Some(throttle) = self.throttle {
+            // FIXME (impl) Should save a snapshot if there are still pending operations after a quiet period.
+            // FIXME (bug) Repeatable keystrokes still create snapshots despite throttling (extra inc somewhere?).
+            let now = Instant::now();
+            if throttle.action_id == action_id
+                && now - throttle.timestamp < Duration::from_millis(300)
+            {
+                return;
+            }
+            self.throttle = Some(ActionThrottle {
+                timestamp: now,
+                action_id,
+            });
         }
         self.update();
     }
@@ -145,6 +172,8 @@ impl TrackHistory {
             version: 0,
             track: Default::default(),
             track_version: -1,
+
+            throttle: None,
         }
     }
 
@@ -174,7 +203,7 @@ impl TrackHistory {
             Some(v) => {
                 self.version = v.id;
                 let file_path = self.current_snapshot_path();
-                self.update_track(|track| track.load_from(&file_path));
+                self.update_track(None, |track| track.load_from(&file_path));
             }
             None => panic!("No revision history in the project."),
         }

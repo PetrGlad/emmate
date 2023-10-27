@@ -14,7 +14,7 @@ use crate::engine::TransportTime;
 use crate::track::{
     EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
-use crate::track_history::TrackHistory;
+use crate::track_history::{ActionId, TrackHistory};
 use crate::{track, Pix};
 
 pub type StaveTime = i64;
@@ -139,7 +139,7 @@ impl Stave {
 
     pub fn load_from(&mut self, file_path: &PathBuf) {
         self.history
-            .update_track(|track| track.load_from(file_path));
+            .update_track(None, |track| track.load_from(file_path));
     }
 
     /// Pixel/uSec, can be cached.
@@ -363,7 +363,7 @@ impl Stave {
 
         // Tape insert/remove
         if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
-            self.history.update_track(|track| {
+            self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
                     track.tape_cut(&time_selection.into());
                 }
@@ -371,7 +371,7 @@ impl Stave {
             });
         }
         if response.ctx.input(|i| i.key_pressed(Key::Insert)) {
-            self.history.update_track(|track| {
+            self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
                     track.tape_insert(&time_selection.into());
                 }
@@ -383,18 +383,19 @@ impl Stave {
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
         {
-            self.history.update_track(|track| {
-                track.shift_tail(
-                    &(self.cursor_position as TransportTime),
-                    Stave::KEYBOARD_TIME_STEP,
-                );
-            });
+            self.history
+                .update_track(Some("tail_shift_right"), |track| {
+                    track.shift_tail(
+                        &(self.cursor_position as TransportTime),
+                        Stave::KEYBOARD_TIME_STEP,
+                    );
+                });
         }
         if response
             .ctx
             .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
         {
-            self.history.update_track(|track| {
+            self.history.update_track(Some("tail_shift_left"), |track| {
                 track.shift_tail(
                     &(self.cursor_position as TransportTime),
                     -Stave::KEYBOARD_TIME_STEP,
@@ -407,18 +408,19 @@ impl Stave {
             (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
                 || (i.modifiers.shift && i.key_pressed(Key::L))
         }) {
-            self.history.update_track(|track| {
-                track.shift_events(
-                    &(|ev| self.note_selection.contains(ev)),
-                    Stave::KEYBOARD_TIME_STEP,
-                );
-            });
+            self.history
+                .update_track(Some("note_shift_right"), |track| {
+                    track.shift_events(
+                        &(|ev| self.note_selection.contains(ev)),
+                        Stave::KEYBOARD_TIME_STEP,
+                    );
+                });
         }
         if response.ctx.input(|i| {
             (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
                 || (i.modifiers.shift && i.key_pressed(Key::H))
         }) {
-            self.history.update_track(|track| {
+            self.history.update_track(Some("note_shift_left"), |track| {
                 track.shift_events(
                     &(|ev| self.note_selection.contains(ev)),
                     -Stave::KEYBOARD_TIME_STEP,
@@ -432,6 +434,7 @@ impl Stave {
             .input(|i| !i.modifiers.shift && i.key_pressed(Key::H))
         {
             self.edit_selected_notes(
+                Some("note_duration_increase"),
                 &(|note| {
                     note.duration = note
                         .duration
@@ -445,6 +448,7 @@ impl Stave {
             .input(|i| !i.modifiers.shift && i.key_pressed(Key::L))
         {
             self.edit_selected_notes(
+                Some("note_duration_decrease"),
                 &(|note| {
                     note.duration = note
                         .duration
@@ -455,6 +459,7 @@ impl Stave {
         }
         if response.ctx.input(|i| i.key_pressed(Key::U)) {
             self.edit_selected_notes(
+                Some("note_pitch_up"),
                 &(|note| {
                     if PIANO_KEY_LINES.contains(&(note.pitch + 1)) {
                         note.pitch += 1;
@@ -464,6 +469,7 @@ impl Stave {
         }
         if response.ctx.input(|i| i.key_pressed(Key::J)) {
             self.edit_selected_notes(
+                Some("note_pitch_down"),
                 &(|note| {
                     if PIANO_KEY_LINES.contains(&(note.pitch - 1)) {
                         note.pitch -= 1;
@@ -473,6 +479,7 @@ impl Stave {
         }
         if response.ctx.input(|i| i.key_pressed(Key::I)) {
             self.edit_selected_notes(
+                Some("note_velocity_increase"),
                 &(|note| {
                     note.velocity = note.velocity.checked_add(1).unwrap_or(Level::MAX);
                 }),
@@ -480,6 +487,7 @@ impl Stave {
         }
         if response.ctx.input(|i| i.key_pressed(Key::K)) {
             self.edit_selected_notes(
+                Some("note_velocity_decrease"),
                 &(|note| {
                     note.velocity = note.velocity.checked_sub(1).unwrap_or(Level::MIN);
                 }),
@@ -487,8 +495,12 @@ impl Stave {
         }
     }
 
-    pub fn edit_selected_notes<Action: Fn(&mut Note)>(&mut self, action: &Action) {
-        self.history.update_track(|track| {
+    pub fn edit_selected_notes<Action: Fn(&mut Note)>(
+        &mut self,
+        action_id: ActionId,
+        action: &Action,
+    ) {
+        self.history.update_track(action_id, |track| {
             track.edit_events(
                 &(|ev| {
                     if self.note_selection.contains(ev) {
@@ -555,7 +567,7 @@ impl Stave {
             dbg!("drag_released", &self.note_draw);
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
-                    self.history.update_track(|track| {
+                    self.history.update_track(None, |track| {
                         let time_range = (
                             draw.time.from as TransportTime,
                             draw.time.to as TransportTime,
