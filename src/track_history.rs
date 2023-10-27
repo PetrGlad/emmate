@@ -53,20 +53,19 @@ impl TrackHistory {
             action(&mut track);
         }
 
+        let now = Instant::now();
         if let Some(throttle) = self.throttle {
             // FIXME (impl) Should save a snapshot if there are still pending operations after a quiet period.
-            // FIXME (bug) Repeatable keystrokes still create snapshots despite throttling (extra inc somewhere?).
-            let now = Instant::now();
             if throttle.action_id == action_id
                 && now - throttle.timestamp < Duration::from_millis(300)
             {
                 return;
             }
-            self.throttle = Some(ActionThrottle {
-                timestamp: now,
-                action_id,
-            });
         }
+        self.throttle = Some(ActionThrottle {
+            timestamp: now,
+            action_id,
+        });
         self.update();
     }
 
