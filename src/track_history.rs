@@ -17,6 +17,12 @@ struct ActionThrottle {
     action_id: ActionId,
 }
 
+impl ActionThrottle {
+    pub fn is_waiting(&self, now: Instant) -> bool {
+        now - self.timestamp < Duration::from_millis(300)
+    }
+}
+
 // Undo/redo history and snapshots.
 #[derive(Debug)]
 pub struct TrackHistory {
@@ -55,10 +61,7 @@ impl TrackHistory {
 
         let now = Instant::now();
         if let Some(throttle) = self.throttle {
-            // FIXME (impl) Should save a snapshot if there are still pending operations after a quiet period.
-            if throttle.action_id == action_id
-                && now - throttle.timestamp < Duration::from_millis(300)
-            {
+            if throttle.action_id == action_id && throttle.is_waiting(now) {
                 return;
             }
         }
@@ -67,6 +70,18 @@ impl TrackHistory {
             action_id,
         });
         self.update();
+    }
+
+    pub fn do_pending(&mut self) {
+        // This is ugly, just making it work for now. History may need some scheduled events.
+        // To do this asynchronously one would need to put id behind an Arc<RwLock<>> or
+        // use Tokio here (and in the engine).
+        if let Some(throttle) = self.throttle {
+            if !throttle.is_waiting(Instant::now()) {
+                self.update();
+                self.throttle = None;
+            }
+        }
     }
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.

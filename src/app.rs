@@ -83,6 +83,7 @@ impl EmApp {
 
 impl eframe::App for EmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.stave.history.do_pending();
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
                 Message::UpdateTransportTime(t) => {

@@ -123,7 +123,6 @@ impl Engine {
                 Self::update_track_time(&mut locked);
                 let transport_time = locked.running_at;
                 for s in locked.sources.iter_mut() {
-                    // Alternatively could pass a small pre-allocated array to hold the output events.
                     s.next(&transport_time, &mut queue);
                 }
                 let mut batch = vec![];
