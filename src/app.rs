@@ -134,18 +134,18 @@ impl eframe::App for EmApp {
                     });
                     strip.cell(|ui| {
                         ui.horizontal(|ui| {
-                            let left = ui.painter().clip_rect().min.x;
+                            let mouse_x = ui.painter().clip_rect().min.x;
                             if ui.button("Zoom in").clicked() {
-                                self.stave.zoom(1.05, left);
+                                self.stave.zoom(1.05, mouse_x);
                             }
                             if ui.button("Zoom out").clicked() {
-                                self.stave.zoom(1.0 / 1.05, left);
+                                self.stave.zoom(1.0 / 1.05, mouse_x);
                             }
                             let scroll_step = ui.painter().clip_rect().size().x * 0.15;
-                            if ui.button("< Scroll <").clicked() {
+                            if ui.button("< Scroll").clicked() {
                                 self.stave.scroll_by(-scroll_step);
                             }
-                            if ui.button("> Scroll >").clicked() {
+                            if ui.button("Scroll >").clicked() {
                                 self.stave.scroll_by(scroll_step);
                             }
                         });

@@ -298,4 +298,13 @@ mod tests {
             TrackHistory::parse_snapshot_name(&PathBuf::from("145.emmrev.mid"))
         );
     }
+
+    #[test]
+    fn check_snapshot_path() {
+        let history = TrackHistory::with_directory(&PathBuf::from("."));
+        assert_eq!(
+            TrackHistory::parse_snapshot_name(&history.make_snapshot_path(123)),
+            Some(123)
+        );
+    }
 }

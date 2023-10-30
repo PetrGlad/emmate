@@ -35,16 +35,16 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] Have a separate edit-position and play-start cursors (time bookmarks), so it is easier to jump back and listen to
+  the modified version.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
-- [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
-  version.
 - [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
-- [ ] Time bookmarks.
 - [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
+- [ ] Show (scroll to) changing objects before undo/redo.
 - [ ] Zoom to fit whole composition.
 - [ ] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
   them are currently visible.

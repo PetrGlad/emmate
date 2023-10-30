@@ -19,12 +19,12 @@ use crate::{track, Pix};
 
 pub type StaveTime = i64;
 
-// Tone 60 is C3, tones start at C-2 (21)
+// Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
 const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
-// Lines including controller values placeholder
+// Lines including controller values placeholder.
 const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
