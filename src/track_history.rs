@@ -19,7 +19,7 @@ struct ActionThrottle {
 
 impl ActionThrottle {
     pub fn is_waiting(&self, now: Instant) -> bool {
-        now - self.timestamp < Duration::from_millis(300)
+        now - self.timestamp < Duration::from_millis(400)
     }
 }
 
@@ -107,8 +107,8 @@ impl TrackHistory {
     }
 
     pub fn go_to(&mut self, version: VersionId) -> bool {
-        let track = self.track.clone();
-        if let Some(v) = self.list_revisions().find(|v| v.id == version) {
+        if let Some(v) = self.get_version(version) {
+            let track = self.track.clone();
             let mut track = track.write().expect("Read track.");
             track.load_from(&v.snapshot_path);
             self.track_version = track.version;
@@ -127,7 +127,7 @@ impl TrackHistory {
         self.track_version = track.version;
     }
 
-    /// Restore track  from the last saved version.
+    /// Restore track from the last saved version.
     pub fn undo(&mut self) {
         if self.shift_version(-1).is_some() {
             if !self.go_to(self.version) {
@@ -242,6 +242,18 @@ impl TrackHistory {
                 }
             })
             .flatten()
+    }
+
+    fn get_version(&self, version_id: VersionId) -> Option<Version> {
+        let path = self.make_snapshot_path(version_id);
+        if path.is_file() {
+            Some(Version {
+                id: version_id,
+                snapshot_path: path,
+            })
+        } else {
+            None
+        }
     }
 
     pub fn is_empty(&self) -> bool {

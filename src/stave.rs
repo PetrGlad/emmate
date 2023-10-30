@@ -354,7 +354,7 @@ impl Stave {
     fn handle_commands(&mut self, response: &Response) {
         // Need to see if duplication here can be reduced.
         // Likely the dispatch needs some hash map that for each input state defines a unique command.
-        // Need to support focus somehow so the commans only active when stave is focused.
+        // Need to support focus somehow so the commands only active when stave is focused.
         // Currently commands also affect other widgets (e.g. arrows change button focus).
 
         if response.ctx.input(|i| i.key_pressed(Key::Q)) {
@@ -492,6 +492,20 @@ impl Stave {
                     note.velocity = note.velocity.checked_sub(1).unwrap_or(Level::MIN);
                 }),
             );
+        }
+
+        // Undo/redo
+        if response
+            .ctx
+            .input(|i| i.modifiers.ctrl && !i.modifiers.shift && i.key_pressed(Key::Z))
+        {
+            self.history.undo();
+        }
+        if response.ctx.input(|i| {
+            (i.modifiers.ctrl && i.key_pressed(Key::Y))
+                || (i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::Z))
+        }) {
+            self.history.redo();
         }
     }
 

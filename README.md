@@ -35,8 +35,6 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Optimize undo history: avoid O(N^2) algos; batch fast similar commands (e.g. tail or note shifts) saving at most
-  2-3 snapshots a second for a streak; do not save a new snapshot when there are no changes.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [ ] Have a separate edit-position and play-start cursors, so it is easier to jump back and listen to the modified
@@ -54,6 +52,8 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Copy/cut/paste.
 - [ ] Adjust tempo for selection.
 - [ ] Optimize undo history 2: save only minimal diff instead of the whole track.
+- [x] Optimize undo history: avoid O(N) algos; batch fast similar commands (e.g. tail or note shifts) saving at most
+  2-3 snapshots a second per streak; do not save a new snapshot when there are no changes.
 - [x] Automatically create an undo snapshot on every edit command.
 - [x] Select none/clear selection command
 - [x] Editing sustain events.
