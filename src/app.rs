@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use eframe::egui::Vec2;
+use eframe::egui::{Modifiers, Vec2};
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
@@ -79,6 +79,12 @@ impl EmApp {
         println!("Saving to {}", path.to_string_lossy());
         self.stave.save_to(&PathBuf::from(path));
     }
+
+    fn engine_seek(&self, to: StaveTime) {
+        self.engine_command_send
+            .send(Box::new(move |engine| engine.seek(to as TransportTime)))
+            .unwrap();
+    }
 }
 
 impl eframe::App for EmApp {
@@ -90,7 +96,7 @@ impl eframe::App for EmApp {
                     self.stave.cursor_position = t as StaveTime;
                     if self.follow_playback {
                         let at = self.stave.cursor_position;
-                        self.stave.scroll_to(at as StaveTime);
+                        self.stave.scroll_to(at as StaveTime, 0.1);
                     }
                 }
             }
@@ -114,7 +120,7 @@ impl eframe::App for EmApp {
                 .vertical(|mut strip| {
                     strip.cell(|ui| {
                         let response = self.stave.show(ui);
-                        if let Some(hover_pos) = response.hover_pos() {
+                        if let Some(hover_pos) = response.ui_response.hover_pos() {
                             let zoom_factor = ui.input(|i| i.zoom_delta());
                             if zoom_factor != 1.0 {
                                 self.stave.zoom(zoom_factor, hover_pos.x);
@@ -123,13 +129,9 @@ impl eframe::App for EmApp {
                             if scroll_delta != Vec2::ZERO {
                                 self.stave.scroll_by(scroll_delta.x);
                             }
-                            if response.middle_clicked() {
-                                let at = self.stave.time_from_x(hover_pos.x);
-                                self.stave.cursor_position = at; // Should be a Stave method?
-                                self.engine_command_send
-                                    .send(Box::new(move |engine| engine.seek(at as TransportTime)))
-                                    .unwrap();
-                            }
+                        }
+                        if let Some(pos) = response.new_cursor_position {
+                            self.engine_seek(pos);
                         }
                     });
                     strip.cell(|ui| {
@@ -152,14 +154,20 @@ impl eframe::App for EmApp {
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.follow_playback, "Follow playback");
                             if ui.button("⏮ Rewind").clicked() {
-                                self.engine_command_send
-                                    .send(Box::new(|engine| engine.seek(0)))
-                                    .unwrap();
+                                self.engine_seek(0);
                             }
                             if ui.button("🔇 Stop it").clicked() {
                                 self.engine_command_send
                                     .send(Box::new(Engine::reset))
                                     .unwrap();
+                            }
+                            if ui.input_mut(|i| {
+                                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                                    Modifiers::CTRL,
+                                    egui::Key::S,
+                                ))
+                            }) {
+                                self.export();
                             }
                             if ui.button("🚩Export").clicked() {
                                 self.export();

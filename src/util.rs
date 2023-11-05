@@ -1,6 +1,7 @@
 pub type Range<T> = (T, T);
 
 // Could not find a simple library for this.
+#[allow(dead_code)]
 pub fn ranges_intersect<T: Ord>(a: Range<T>, b: Range<T>) -> bool {
     a.0 < b.1 && b.0 < a.1
 }

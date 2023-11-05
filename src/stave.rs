@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
 use eframe::egui::{
-    self, Color32, Frame, Key, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
-    Response, Rounding, Sense, Stroke, Ui,
+    self, Color32, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect, Rounding,
+    Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -100,8 +100,9 @@ pub struct Stave {
     pub time_left: StaveTime,
     pub time_right: StaveTime,
     pub view_rect: Rect,
-    pub cursor_position: StaveTime,
 
+    pub cursor_position: StaveTime,
+    pub bookmarks: BTreeSet<StaveTime>,
     pub time_selection: Option<TimeSelection>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
@@ -110,12 +111,17 @@ pub struct Stave {
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 const COLOR_HOVERED: Rgba = COLOR_SELECTED;
 
-pub struct StaveUiResponse {
-    response: Response,
+struct InnerResponse {
+    response: egui::Response,
     pitch_hovered: Option<Pitch>,
     time_hovered: Option<StaveTime>,
     note_hovered: Option<EventId>,
     modifiers: Modifiers,
+}
+
+pub struct StaveResponse {
+    pub ui_response: egui::Response,
+    pub new_cursor_position: Option<StaveTime>,
 }
 
 impl Stave {
@@ -127,6 +133,7 @@ impl Stave {
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
             cursor_position: 0,
+            bookmarks: Default::default(),
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
@@ -156,7 +163,7 @@ impl Stave {
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
-        // Zoom so that position under mouse pointer stays in place.
+        // Zoom so that position under mouse pointer stays put.
         let at = self.time_from_x(mouse_x);
         self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as StaveTime;
         self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as StaveTime;
@@ -171,9 +178,10 @@ impl Stave {
         self.scroll((dx / self.time_scale()) as StaveTime);
     }
 
-    pub fn scroll_to(&mut self, at: StaveTime) {
+    pub fn scroll_to(&mut self, at: StaveTime, view_fraction: f32) {
         self.scroll(
-            at - ((self.time_right - self.time_left) as f32 * 0.1) as StaveTime - self.time_left,
+            at - ((self.time_right - self.time_left) as f32 * view_fraction) as StaveTime
+                - self.time_left,
         );
     }
 
@@ -182,8 +190,7 @@ impl Stave {
         to: 0,
     };
 
-    // (Widget would require fn ui(self, ui: &mut Ui) -> Response)
-    pub fn view(&mut self, ui: &mut Ui) -> StaveUiResponse {
+    fn view(&mut self, ui: &mut Ui) -> InnerResponse {
         Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
@@ -228,8 +235,16 @@ impl Stave {
                 self.draw_cursor(
                     &painter,
                     self.x_from_time(self.cursor_position),
-                    Rgba::from_rgba_unmultiplied(0.1, 0.7, 0.1, 0.7).into(),
+                    Rgba::from_rgba_unmultiplied(0.1, 0.9, 0.1, 0.8).into(),
                 );
+
+                for &bm in &self.bookmarks {
+                    self.draw_cursor(
+                        &painter,
+                        self.x_from_time(bm),
+                        Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                    );
+                }
 
                 if let Some(new_note) = &self.note_draw {
                     self.draw_note(
@@ -242,7 +257,7 @@ impl Stave {
                     );
                 }
 
-                StaveUiResponse {
+                InnerResponse {
                     response: ui.allocate_response(bounds.size(), Sense::click_and_drag()),
                     pitch_hovered,
                     time_hovered,
@@ -309,7 +324,7 @@ impl Stave {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui) -> Response {
+    pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
@@ -319,17 +334,24 @@ impl Stave {
             }
         }
 
-        let inner = stave_response.response;
+        let inner = &stave_response.response;
         self.update_note_draw(
-            &inner,
+            inner,
             &stave_response.modifiers,
             &stave_response.time_hovered,
             &stave_response.pitch_hovered,
         );
         self.update_time_selection(&inner, &stave_response.time_hovered);
-        self.handle_commands(&inner);
+        let new_cursor_position = self.handle_commands(&inner);
+        if let Some(pos) = new_cursor_position {
+            self.cursor_position = pos;
+            self.ensure_visible(pos);
+        }
 
-        inner
+        StaveResponse {
+            ui_response: stave_response.response,
+            new_cursor_position,
+        }
     }
 
     fn event_hovered(
@@ -351,18 +373,25 @@ impl Stave {
 
     const KEYBOARD_TIME_STEP: StaveTime = 10_000;
 
-    fn handle_commands(&mut self, response: &Response) {
+    fn handle_commands(&mut self, response: &egui::Response) -> Option<StaveTime> {
         // Need to see if duplication here can be reduced.
         // Likely the dispatch needs some hash map that for each input state defines a unique command.
         // Need to support focus somehow so the commands only active when stave is focused.
         // Currently commands also affect other widgets (e.g. arrows change button focus).
 
-        if response.ctx.input(|i| i.key_pressed(Key::Q)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::Q))
+        }) {
             self.note_selection.clear();
         }
 
         // Tape insert/remove
-        if response.ctx.input(|i| i.key_pressed(Key::Delete)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::NONE,
+                egui::Key::Delete,
+            ))
+        }) {
             self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
                     track.tape_cut(&time_selection.into());
@@ -370,7 +399,12 @@ impl Stave {
                 track.delete_events(&self.note_selection.selected);
             });
         }
-        if response.ctx.input(|i| i.key_pressed(Key::Insert)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::NONE,
+                egui::Key::Insert,
+            ))
+        }) {
             self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
                     track.tape_insert(&time_selection.into());
@@ -379,10 +413,12 @@ impl Stave {
         }
 
         // Tail shift
-        if response
-            .ctx
-            .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
-        {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL | Modifiers::SHIFT,
+                egui::Key::ArrowRight,
+            ))
+        }) {
             self.history
                 .update_track(Some("tail_shift_right"), |track| {
                     track.shift_tail(
@@ -391,10 +427,12 @@ impl Stave {
                     );
                 });
         }
-        if response
-            .ctx
-            .input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
-        {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL | Modifiers::SHIFT,
+                egui::Key::ArrowLeft,
+            ))
+        }) {
             self.history.update_track(Some("tail_shift_left"), |track| {
                 track.shift_tail(
                     &(self.cursor_position as TransportTime),
@@ -404,9 +442,11 @@ impl Stave {
         }
 
         // Note time moves
-        if response.ctx.input(|i| {
-            (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowRight))
-                || (i.modifiers.shift && i.key_pressed(Key::L))
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::ALT | Modifiers::SHIFT,
+                egui::Key::ArrowRight,
+            )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
         }) {
             self.history
                 .update_track(Some("note_shift_right"), |track| {
@@ -416,9 +456,11 @@ impl Stave {
                     );
                 });
         }
-        if response.ctx.input(|i| {
-            (i.modifiers.alt && i.modifiers.shift && i.key_pressed(Key::ArrowLeft))
-                || (i.modifiers.shift && i.key_pressed(Key::H))
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::ALT | Modifiers::SHIFT,
+                egui::Key::ArrowLeft,
+            )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
         }) {
             self.history.update_track(Some("note_shift_left"), |track| {
                 track.shift_events(
@@ -429,10 +471,9 @@ impl Stave {
         }
 
         // Note edits
-        if response
-            .ctx
-            .input(|i| !i.modifiers.shift && i.key_pressed(Key::H))
-        {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
+        }) {
             self.edit_selected_notes(
                 Some("note_duration_increase"),
                 &(|note| {
@@ -443,10 +484,9 @@ impl Stave {
                 }),
             );
         }
-        if response
-            .ctx
-            .input(|i| !i.modifiers.shift && i.key_pressed(Key::L))
-        {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
+        }) {
             self.edit_selected_notes(
                 Some("note_duration_decrease"),
                 &(|note| {
@@ -457,7 +497,9 @@ impl Stave {
                 }),
             );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::U)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::U))
+        }) {
             self.edit_selected_notes(
                 Some("note_pitch_up"),
                 &(|note| {
@@ -467,7 +509,9 @@ impl Stave {
                 }),
             );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::J)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::J))
+        }) {
             self.edit_selected_notes(
                 Some("note_pitch_down"),
                 &(|note| {
@@ -477,7 +521,9 @@ impl Stave {
                 }),
             );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::I)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::I))
+        }) {
             self.edit_selected_notes(
                 Some("note_velocity_increase"),
                 &(|note| {
@@ -485,7 +531,9 @@ impl Stave {
                 }),
             );
         }
-        if response.ctx.input(|i| i.key_pressed(Key::K)) {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::K))
+        }) {
             self.edit_selected_notes(
                 Some("note_velocity_decrease"),
                 &(|note| {
@@ -495,18 +543,89 @@ impl Stave {
         }
 
         // Undo/redo
-        if response
-            .ctx
-            .input(|i| i.modifiers.ctrl && !i.modifiers.shift && i.key_pressed(Key::Z))
-        {
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
+        }) {
             self.history.undo();
         }
-        if response.ctx.input(|i| {
-            (i.modifiers.ctrl && i.key_pressed(Key::Y))
-                || (i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::Z))
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
+                || i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    Modifiers::CTRL | Modifiers::SHIFT,
+                    egui::Key::Z,
+                ))
         }) {
             self.history.redo();
         }
+
+        // Bookmarks & time navigation
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
+        }) {
+            self.bookmarks.insert(self.cursor_position);
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::N))
+        }) {
+            self.bookmarks.remove(&self.cursor_position);
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL,
+                egui::Key::ArrowLeft,
+            ))
+        }) {
+            // Previous bookmark
+            match self
+                .bookmarks
+                .iter()
+                .rev()
+                .find(|&bm| bm < &self.cursor_position)
+            {
+                Some(bm) => return Some(*bm),
+                None => return Some(0),
+            }
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL,
+                egui::Key::ArrowRight,
+            ))
+        }) {
+            // Next bookmark
+            match self.bookmarks.iter().find(|&bm| bm > &self.cursor_position) {
+                Some(bm) => return Some(*bm),
+                None => {
+                    // To the end
+                    return Some(self.history.with_track(|track| track.max_time()) as StaveTime);
+                }
+            }
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL,
+                egui::Key::Home,
+            ))
+        }) {
+            return Some(0);
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::CTRL,
+                egui::Key::End,
+            ))
+        }) {
+            // To the end
+            return Some(self.history.with_track(|track| track.max_time()) as StaveTime);
+        }
+        if let Some(hover_pos) = response.hover_pos() {
+            if response.middle_clicked() {
+                let at = self.time_from_x(hover_pos.x);
+                return Some(at);
+            }
+        }
+
+        None
     }
 
     pub fn edit_selected_notes<Action: Fn(&mut Note)>(
@@ -532,7 +651,7 @@ impl Stave {
         });
     }
 
-    fn update_time_selection(&mut self, response: &Response, time: &Option<StaveTime>) {
+    fn update_time_selection(&mut self, response: &egui::Response, time: &Option<StaveTime>) {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
             self.time_selection = None;
@@ -556,7 +675,7 @@ impl Stave {
 
     fn update_note_draw(
         &mut self,
-        response: &Response,
+        response: &egui::Response,
         modifiers: &Modifiers,
         time: &Option<StaveTime>,
         pitch: &Option<Pitch>,
@@ -713,6 +832,18 @@ impl Stave {
                 color: color.gamma_multiply(2.0),
             },
         )
+    }
+
+    fn ensure_visible(&mut self, at: StaveTime) {
+        let x_range = self.view_rect.x_range();
+        let x = self.x_from_time(at);
+        if !x_range.contains(x) {
+            if x_range.max < x {
+                self.scroll_to(at, 0.8);
+            } else {
+                self.scroll_to(at, 0.2);
+            }
+        }
     }
 }
 

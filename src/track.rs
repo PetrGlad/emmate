@@ -18,6 +18,7 @@ pub type Level = u8;
 pub type ChannelId = u8;
 pub type EventId = u64;
 
+#[allow(dead_code)]
 pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
 // Damper pedal
 pub const MIDI_CC_SUSTAIN_ID: ControllerId = 64;
@@ -305,6 +306,19 @@ impl Track {
     pub fn delete_events(&mut self, event_ids: &HashSet<EventId>) {
         self.events.retain(|ev| !event_ids.contains(&ev.id));
         self.commit();
+    }
+
+    pub fn max_time(&self) -> TransportTime {
+        // Looks cumbersome. Maybe this is a case for handling MIDI (-like) events directly (see README).
+        let mut result = 0;
+        for ev in &self.events {
+            let end_time = match &ev.event {
+                TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
+                TrackEventType::Controller(_) => ev.at,
+            };
+            result = TransportTime::max(result, end_time);
+        }
+        result
     }
 }
 
