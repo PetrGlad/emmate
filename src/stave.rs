@@ -105,10 +105,10 @@ pub struct Bookmarks {
 }
 
 impl Bookmarks {
-    pub fn load_from(&mut self, file_path: &PathBuf) {
+    pub fn load_from(file_path: &PathBuf) -> Bookmarks {
         let binary = std::fs::read(file_path)
             .expect(&*format!("load bookmarks from {}", &file_path.display()));
-        self.list = rmp_serde::from_slice(&binary).expect("deserialize bookmarks");
+        rmp_serde::from_slice(&binary).expect("deserialize bookmarks")
     }
 
     pub fn store_to(&self, file_path: &PathBuf) {
@@ -904,4 +904,26 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
         Rgba::from_rgb(0.6, 0.7, 0.7)
     };
     egui::lerp(c..=Rgba::from_rgb(0.0, 0.0, 0.0), *velocity as f32 / 128.0).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bookmarks_serialization() {
+        let file_path = PathBuf::from("./target/test_bookmarks_serialization");
+        let bm1 = Bookmark { at: 12 };
+        let bm2 = Bookmark { at: 23 };
+
+        let mut bookmarks = Bookmarks::default();
+        bookmarks.list.insert(bm1);
+        bookmarks.list.insert(bm2);
+        bookmarks.store_to(&file_path);
+
+        let loaded = Bookmarks::load_from(&file_path);
+        assert_eq!(loaded.list.len(), 2);
+        assert!(loaded.list.contains(&bm1));
+        assert!(loaded.list.contains(&bm2));
+    }
 }

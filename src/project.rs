@@ -9,6 +9,7 @@ pub struct Project {
 
 impl Project {
     const DIRECTORY_NAME_SUFFIX: &'static str = "emmate";
+    const SNAPSHOTS_DIR_NAME: &'static str = "snapshots";
 
     pub fn open_file(source_file: &PathBuf) -> Project {
         dbg!("source file", source_file.to_string_lossy());
@@ -21,8 +22,15 @@ impl Project {
         }
         directory.set_extension("");
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
+
+        let mut snapshots_dir = directory.clone();
+        snapshots_dir.push(Self::SNAPSHOTS_DIR_NAME);
+        if !snapshots_dir.is_dir() {
+            fs::create_dir_all(&snapshots_dir).expect("create snapshots directory");
+        }
+
         let mut history = if directory.is_dir() {
-            TrackHistory::with_directory(&directory)
+            TrackHistory::with_directory(&snapshots_dir)
         } else {
             fs::create_dir_all(&directory).expect(
                 format!(
@@ -31,7 +39,7 @@ impl Project {
                 )
                 .as_str(),
             );
-            TrackHistory::with_directory(&directory).init(&source_file)
+            TrackHistory::with_directory(&snapshots_dir).init(&source_file)
         };
         history.open();
         Project {
