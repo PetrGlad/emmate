@@ -34,7 +34,7 @@ wav = "1.0.0"
 rodio = { git = "https://github.com/PetrGlad/rodio.git", branch = "configurable-buffer-size" }
 
 # https://docs.rs/alsa/latest/alsa/
-alsa = "0.8.0"
+alsa = "0.8.1"
 
 # see also https://github.com/RustAudio/cpal
 cpal = "0.15.2"
@@ -42,11 +42,13 @@ cpal = "0.15.2"
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
 midir = "0.9.1"
 
-log = "0.4.17"
-stderrlog = "0.5.3"
+log = "0.4.20"
+stderrlog = "0.5.4"
 
-toml = "0.8.1"
-serde = "1.0.188"
+toml = "0.8.6"
+serde = "1.0.191"
+rmp = "0.8.12"
+rmp-serde = "1.1.2"
 clap = "4.4.6"
 chrono = "0.4.31"
 glob = "0.3.1"
@@ -57,7 +59,7 @@ regex = "1.10.2"
 # itertools = "0.9"
 # rustc-hash = "1.1"
 # bytes = "1.4.0"
-# enum_dispatch="0.3.12"
+# enum_dispatch = "0.3.12"
 # rand = "0.8.5"
 
 [dev-dependencies]

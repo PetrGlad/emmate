@@ -8,6 +8,7 @@ use eframe::egui::{
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
 use crate::engine::TransportTime;
@@ -92,6 +93,33 @@ impl From<&TimeSelection> for track::TimeSelection {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct Bookmark {
+    at: StaveTime,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub struct Bookmarks {
+    // Maybe bookmarks should also be events in the track.
+    pub list: BTreeSet<Bookmark>,
+}
+
+impl Bookmarks {
+    pub fn load_from(&mut self, file_path: &PathBuf) {
+        let binary = std::fs::read(file_path)
+            .expect(&*format!("load bookmarks from {}", &file_path.display()));
+        self.list = rmp_serde::from_slice(&binary).expect("deserialize bookmarks");
+    }
+
+    pub fn store_to(&self, file_path: &PathBuf) {
+        let mut binary = Vec::new();
+        self.serialize(&mut rmp_serde::Serializer::new(&mut binary))
+            .expect("serialize bookmarks");
+        std::fs::write(file_path, binary)
+            .expect(&*format!("save bookmarks to {}", &file_path.display()));
+    }
+}
+
 #[derive(Debug)]
 pub struct Stave {
     pub history: TrackHistory,
@@ -102,7 +130,7 @@ pub struct Stave {
     pub view_rect: Rect,
 
     pub cursor_position: StaveTime,
-    pub bookmarks: BTreeSet<StaveTime>,
+    pub bookmarks: Bookmarks,
     pub time_selection: Option<TimeSelection>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
@@ -238,10 +266,10 @@ impl Stave {
                     Rgba::from_rgba_unmultiplied(0.1, 0.9, 0.1, 0.8).into(),
                 );
 
-                for &bm in &self.bookmarks {
+                for &bm in &self.bookmarks.list {
                     self.draw_cursor(
                         &painter,
-                        self.x_from_time(bm),
+                        self.x_from_time(bm.at),
                         Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
                     );
                 }
@@ -562,12 +590,16 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
         }) {
-            self.bookmarks.insert(self.cursor_position);
+            self.bookmarks.list.insert(Bookmark {
+                at: self.cursor_position,
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::N))
         }) {
-            self.bookmarks.remove(&self.cursor_position);
+            self.bookmarks.list.remove(&Bookmark {
+                at: self.cursor_position,
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -578,11 +610,12 @@ impl Stave {
             // Previous bookmark
             match self
                 .bookmarks
+                .list
                 .iter()
                 .rev()
-                .find(|&bm| bm < &self.cursor_position)
+                .find(|&bm| bm.at < self.cursor_position)
             {
-                Some(bm) => return Some(*bm),
+                Some(bm) => return Some(bm.at),
                 None => return Some(0),
             }
         }
@@ -593,8 +626,13 @@ impl Stave {
             ))
         }) {
             // Next bookmark
-            match self.bookmarks.iter().find(|&bm| bm > &self.cursor_position) {
-                Some(bm) => return Some(*bm),
+            match self
+                .bookmarks
+                .list
+                .iter()
+                .find(|&bm| bm.at > self.cursor_position)
+            {
+                Some(bm) => return Some(bm.at),
                 None => {
                     // To the end
                     return Some(self.history.with_track(|track| track.max_time()) as StaveTime);
