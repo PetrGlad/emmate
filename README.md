@@ -35,12 +35,9 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Persist bookmarks in project.
-- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
+- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change). 
 - [ ] Time marks on stave ("minute:second" from the beginning).
-- [ ] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
-- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
-- [ ] Find a way to separate actions from view logic with egui. It looks too messy now.
+- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
@@ -52,6 +49,8 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Copy/cut/paste.
 - [ ] Adjust tempo for selection.
 - [ ] Optimize undo history 2: save only minimal diff instead of the whole track.
+- [x] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. 
+- [x] Persist bookmarks in project.
 - [x] Have a separate edit-position and play-start cursors (time bookmarks), so it is easier to jump back and listen to
   the modified version.
 - [x] Optimize undo history: avoid O(N) algos; batch fast similar commands (e.g. tail or note shifts) saving at most

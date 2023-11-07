@@ -7,8 +7,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use midly::num::{u4, u7};
 use midly::{MidiMessage, TrackEventKind};
 
-use crate::common::VersionId;
-use crate::engine::TransportTime;
+use crate::common::{Time, VersionId};
 use crate::util::{is_ordered, range_contains};
 use crate::{midi, util};
 
@@ -33,7 +32,7 @@ pub fn is_cc_switch_on(x: Level) -> bool {
 pub struct Note {
     pub pitch: Pitch,
     pub velocity: Level,
-    pub duration: TransportTime,
+    pub duration: Time,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -52,12 +51,12 @@ pub enum TrackEventType {
 pub struct TrackEvent {
     pub id: EventId,
     /// Since the track beginning.
-    pub at: TransportTime,
+    pub at: Time,
     pub event: TrackEventType,
 }
 
 impl TrackEvent {
-    pub fn is_active(&self, at: TransportTime) -> bool {
+    pub fn is_active(&self, at: Time) -> bool {
         match &self.event {
             TrackEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
             _ => false,
@@ -81,25 +80,29 @@ impl Ord for TrackEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TimeSelection {
-    pub from: TransportTime,
-    pub to: TransportTime,
+    pub from: Time,
+    pub to: Time,
 }
 
 impl TimeSelection {
-    pub fn length(&self) -> TransportTime {
+    pub fn length(&self) -> Time {
         self.to - self.from
     }
 
-    pub fn contains(&self, at: TransportTime) -> bool {
+    pub fn contains(&self, at: Time) -> bool {
         self.from <= at && at < self.to
     }
 
-    pub fn before(&self, at: TransportTime) -> bool {
+    pub fn before(&self, at: Time) -> bool {
         self.to <= at
     }
 
-    pub fn after_start(&self, at: TransportTime) -> bool {
+    pub fn after_start(&self, at: Time) -> bool {
         self.from <= at
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.to - self.from <= 0
     }
 }
 
@@ -124,7 +127,7 @@ impl Track {
     pub fn load_from(&mut self, file_path: &PathBuf) {
         let data = std::fs::read(&file_path).unwrap();
         let events = midi::load_smf(&data);
-        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as u64);
+        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as Time);
         self.commit();
     }
 
@@ -138,12 +141,7 @@ impl Track {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
-    pub fn add_note(
-        &mut self,
-        time_range: (TransportTime, TransportTime),
-        pitch: Pitch,
-        level: Level,
-    ) {
+    pub fn add_note(&mut self, time_range: (Time, Time), pitch: Pitch, level: Level) {
         let ev = TrackEvent {
             id: self.id_seq.fetch_add(1, SeqCst),
             at: time_range.0,
@@ -167,7 +165,7 @@ impl Track {
         self.commit();
     }
 
-    fn clear_cc_events(&mut self, time_range: util::Range<TransportTime>, cc_id: ControllerId) {
+    fn clear_cc_events(&mut self, time_range: util::Range<Time>, cc_id: ControllerId) {
         let mut i = 0;
         loop {
             if let Some(ev) = self.events.get(i) {
@@ -186,7 +184,7 @@ impl Track {
         }
     }
 
-    pub fn set_damper_to(&mut self, time_range: util::Range<TransportTime>, on: bool) {
+    pub fn set_damper_to(&mut self, time_range: util::Range<Time>, on: bool) {
         dbg!("set_damper_range", time_range, on);
         let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
         let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
@@ -215,7 +213,7 @@ impl Track {
         self.commit();
     }
 
-    fn cc_value_at(&self, at: &TransportTime, cc_id: &ControllerId) -> Level {
+    fn cc_value_at(&self, at: &Time, cc_id: &ControllerId) -> Level {
         let mut idx = self.events.partition_point(|x| x.at < *at);
         while idx > 0 {
             idx -= 1;
@@ -230,7 +228,7 @@ impl Track {
         return 0; // default
     }
 
-    fn sustain_event(&mut self, at: &TransportTime, on: bool) -> TrackEvent {
+    fn sustain_event(&mut self, at: &Time, on: bool) -> TrackEvent {
         TrackEvent {
             id: next_id(&mut self.id_seq),
             at: *at,
@@ -264,7 +262,7 @@ impl Track {
         self.commit();
     }
 
-    pub fn shift_tail(&mut self, at: &TransportTime, dt: i64) {
+    pub fn shift_tail(&mut self, at: &Time, dt: i64) {
         dbg!("tail_shift", at, dt);
         self.shift_events(&|ev| &ev.at > at, dt);
         self.commit();
@@ -273,11 +271,7 @@ impl Track {
     pub fn shift_events<Pred: Fn(&TrackEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
         for ev in &mut self.events {
             if selector(ev) {
-                ev.at = ev
-                    .at
-                    .checked_add_signed(d)
-                    // Need to show some visual feedback and just cancel the operation instead.
-                    .expect("Should not shift event into negative times.");
+                ev.at = ev.at + d;
             }
         }
         // Should do this only for out-of-order events. Brute-forcing for now.
@@ -308,7 +302,7 @@ impl Track {
         self.commit();
     }
 
-    pub fn max_time(&self) -> TransportTime {
+    pub fn max_time(&self) -> Time {
         // Looks cumbersome. Maybe this is a case for handling MIDI (-like) events directly (see README).
         let mut result = 0;
         for ev in &self.events {
@@ -316,7 +310,7 @@ impl Track {
                 TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
                 TrackEventType::Controller(_) => ev.at,
             };
-            result = TransportTime::max(result, end_time);
+            result = Time::max(result, end_time);
         }
         result
     }
@@ -329,14 +323,14 @@ fn next_id(id_seq: &mut AtomicU64) -> EventId {
 pub fn from_midi_events(
     id_seq: &mut AtomicU64,
     events: Vec<midly::TrackEvent<'static>>,
-    tick_duration: TransportTime,
+    tick_duration: Time,
 ) -> Vec<TrackEvent> {
     // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
-    let mut ons: HashMap<Pitch, (TransportTime, MidiMessage)> = HashMap::new();
+    let mut ons: HashMap<Pitch, (Time, MidiMessage)> = HashMap::new();
     let mut track_events = vec![];
-    let mut at: TransportTime = 0;
+    let mut at: Time = 0;
     for ev in events {
-        at += ev.delta.as_int() as TransportTime * tick_duration;
+        at += ev.delta.as_int() as Time * tick_duration;
         match ev.kind {
             TrackEventKind::Midi { message, .. } => match message {
                 MidiMessage::NoteOn { key, .. } => {
@@ -384,7 +378,7 @@ pub fn to_midi_events(
     usec_per_tick: u32,
 ) -> Vec<midly::TrackEvent<'static>> {
     let channel = u4::from(0); // Channel hard coded.
-    let mut buffer: Vec<(TransportTime, TrackEventKind)> = vec![];
+    let mut buffer: Vec<(Time, TrackEventKind)> = vec![];
     for ev in events {
         match &ev.event {
             TrackEventType::Note(n) => {
@@ -425,7 +419,7 @@ pub fn to_midi_events(
     }
     buffer.sort_by_key(|(at, _)| at.to_owned());
     let mut midi_events = vec![];
-    let mut running_at: TransportTime = 0;
+    let mut running_at: Time = 0;
     for (at, kind) in buffer {
         midi_events.push(midly::TrackEvent {
             delta: (((at - running_at) as f64 / usec_per_tick as f64) as u32).into(),

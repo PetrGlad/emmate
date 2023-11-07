@@ -1,20 +1,21 @@
 use std::collections::BinaryHeap;
 use std::time::Duration;
 
+use crate::common::Time;
 use midly::io::WriteResult;
 use midly::live::LiveEvent;
 use midly::num::u15;
 use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
 
-use crate::engine::{EngineEvent, EventSource, TransportTime};
+use crate::engine::{EngineEvent, EventSource};
 use crate::track::{ChannelId, ControllerId, Level, Pitch};
 
 pub struct SmfSource {
     events: Vec<TrackEvent<'static>>,
     tick: Duration,
     current_idx: usize,
-    running_at: TransportTime,
+    running_at: Time,
 }
 
 pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
@@ -103,7 +104,7 @@ impl EventSource for SmfSource {
         self.current_idx < self.events.len()
     }
 
-    fn seek(&mut self, at: &TransportTime) {
+    fn seek(&mut self, at: &Time) {
         assert!(
             self.running_at > *at,
             "SmfSource back reset is not supported."
@@ -111,12 +112,12 @@ impl EventSource for SmfSource {
         self.running_at = at.to_owned();
     }
 
-    fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>) {
+    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>) {
         let track = &self.events;
         while self.is_running() {
             let event = track[self.current_idx];
             let running_at =
-                self.running_at + self.tick.as_micros() as u64 * event.delta.as_int() as u64;
+                self.running_at + self.tick.as_micros() as Time * event.delta.as_int() as Time;
             if running_at > *at {
                 return;
             }

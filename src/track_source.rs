@@ -1,4 +1,5 @@
-use crate::engine::{EngineEvent, EventSource, TransportTime};
+use crate::common::Time;
+use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::{Track, TrackEventType};
 use std::collections::BinaryHeap;
@@ -7,7 +8,7 @@ use std::sync::{Arc, RwLock};
 pub struct TrackSource {
     track: Arc<RwLock<Track>>,
     current_idx: usize,
-    running_at: TransportTime,
+    running_at: Time,
 }
 
 impl TrackSource {
@@ -25,7 +26,7 @@ impl EventSource for TrackSource {
         true
     }
 
-    fn seek(&mut self, at: &TransportTime) {
+    fn seek(&mut self, at: &Time) {
         let track = self.track.read().expect("Cannot read track.");
         let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
@@ -57,7 +58,7 @@ impl EventSource for TrackSource {
         self.running_at = *at;
     }
 
-    fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>) {
+    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>) {
         let track = self.track.read().expect("Cannot read track.");
         while self.current_idx < track.events.len() {
             let notes = &track.events;
@@ -80,7 +81,7 @@ impl EventSource for TrackSource {
                 }
                 TrackEventType::Controller(set_val) => {
                     queue.push(EngineEvent {
-                        at: running_at as u64,
+                        at: running_at,
                         event: controller_set(1, set_val.controller_id, set_val.value),
                     });
                 }
@@ -100,7 +101,7 @@ mod tests {
     fn empty_track() {
         let track = Arc::new(RwLock::new(Track::default()));
         let mut source = TrackSource::new(track);
-        source.seek(&100_000u64);
+        source.seek(&100_000i64);
         assert_eq!(source.running_at, 100_000);
         source.seek(&0);
         assert_eq!(source.running_at, 0);
@@ -125,10 +126,10 @@ mod tests {
         source.seek(&0);
         assert_eq!(source.running_at, 0);
         assert_eq!(source.current_idx, 0);
-        source.seek(&100u64);
+        source.seek(&100i64);
         assert_eq!(source.running_at, 100);
         assert_eq!(source.current_idx, 0);
-        source.seek(&2000u64);
+        source.seek(&2000i64);
         assert_eq!(source.running_at, 2000);
         assert_eq!(source.current_idx, 1)
     }

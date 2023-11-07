@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::common::Time;
 use midly::live::LiveEvent;
 use midly::MidiMessage;
 use vst::event::Event;
@@ -12,19 +13,16 @@ use vst::plugin::Plugin;
 use crate::midi_vst::Vst;
 use crate::track::MIDI_CC_SUSTAIN_ID;
 
-/// uSecs from the start.
-pub type TransportTime = u64;
-
 /** Event that is produced by engine. */
 #[derive(Clone, Debug)]
 pub enum StatusEvent {
-    TransportTime(TransportTime),
+    Time(Time),
 }
 
 /// A sound event to be rendered by the engine at given time.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct EngineEvent {
-    pub at: TransportTime,
+    pub at: Time,
     pub event: LiveEvent<'static>,
 }
 
@@ -49,10 +47,10 @@ pub trait EventSource {
     Use this to detach it from the engine. */
     fn is_running(&self) -> bool;
     /** Reset current source's time to this moment. */
-    fn seek(&mut self, at: &TransportTime);
+    fn seek(&mut self, at: &Time);
     /** The next event to be played at the instant. On subsequent
     calls instants must not decrease unless a reset call sets another time. */
-    fn next(&mut self, at: &TransportTime, queue: &mut BinaryHeap<EngineEvent>);
+    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>);
 }
 
 type EventSourceHandle = dyn EventSource + Send;
@@ -62,7 +60,7 @@ pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
 pub struct Engine {
     vst: Vst,
     sources: Vec<Box<EventSourceHandle>>,
-    running_at: TransportTime,
+    running_at: Time,
     reset_at: Instant,
     paused: bool,
     status_receiver: Option<Box<StatusEventReceiver>>,
@@ -152,13 +150,13 @@ impl Engine {
     }
 
     fn update_track_time(&mut self) {
-        self.running_at = Instant::now().duration_since(self.reset_at).as_micros() as u64;
+        self.running_at = Instant::now().duration_since(self.reset_at).as_micros() as Time;
         self.status_receiver
             .as_mut()
-            .map(|recv| recv(StatusEvent::TransportTime(self.running_at)));
+            .map(|recv| recv(StatusEvent::Time(self.running_at)));
     }
 
-    pub fn seek(&mut self, at: TransportTime) {
+    pub fn seek(&mut self, at: Time) {
         for s in self.sources.iter_mut() {
             s.seek(&at);
         }
@@ -183,7 +181,7 @@ impl Engine {
     }
 
     pub fn update_realtime(&mut self) {
-        self.reset_at = Instant::now() - Duration::from_micros(self.running_at);
+        self.reset_at = Instant::now() - Duration::from_micros(self.running_at as u64);
     }
 
     pub fn add(&mut self, source: Box<EventSourceHandle>) {

@@ -2,16 +2,17 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+use crate::common::Time;
 use eframe::egui::{Modifiers, Vec2};
 use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
-use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
+use crate::engine::{Engine, EngineCommand, StatusEvent};
 use crate::project::Project;
-use crate::stave::{Bookmarks, Stave, StaveTime};
+use crate::stave::{Bookmarks, Stave};
 
 enum Message {
-    UpdateTransportTime(TransportTime),
+    UpdateTime(Time),
 }
 
 pub struct EmApp {
@@ -50,8 +51,8 @@ impl EmApp {
             // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
             //      Should not miss one-off updates, maybe skip only in same-event-type runs.
             match ev {
-                StatusEvent::TransportTime(t) => {
-                    match message_sender.send(Message::UpdateTransportTime(t)) {
+                StatusEvent::Time(t) => {
+                    match message_sender.send(Message::UpdateTime(t)) {
                         Ok(_) => engine_receiver_ctx.request_repaint(),
                         _ => (), // Will try next time.
                     }
@@ -88,9 +89,9 @@ impl EmApp {
         self.stave.save_to(&PathBuf::from(path));
     }
 
-    fn engine_seek(&self, to: StaveTime) {
+    fn engine_seek(&self, to: Time) {
         self.engine_command_send
-            .send(Box::new(move |engine| engine.seek(to as TransportTime)))
+            .send(Box::new(move |engine| engine.seek(to)))
             .unwrap();
     }
 }
@@ -100,11 +101,11 @@ impl eframe::App for EmApp {
         self.stave.history.do_pending();
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
-                Message::UpdateTransportTime(t) => {
-                    self.stave.cursor_position = t as StaveTime;
+                Message::UpdateTime(t) => {
+                    self.stave.cursor_position = t;
                     if self.follow_playback {
                         let at = self.stave.cursor_position;
-                        self.stave.scroll_to(at as StaveTime, 0.1);
+                        self.stave.scroll_to(at, 0.1);
                     }
                 }
             }

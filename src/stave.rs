@@ -11,15 +11,13 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::common::VersionId;
-use crate::engine::TransportTime;
+use crate::common::{Time, VersionId};
 use crate::track::{
-    EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
+    EventId, Level, Note, Pitch, TimeSelection, Track, TrackEvent, TrackEventType,
+    MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_history::{ActionId, TrackHistory};
-use crate::{track, Pix};
-
-pub type StaveTime = i64;
+use crate::Pix;
 
 // Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -38,18 +36,6 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
         y -= step;
     }
     (lines, step)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TimeSelection {
-    pub from: StaveTime,
-    pub to: StaveTime,
-}
-
-impl TimeSelection {
-    pub fn is_empty(&self) -> bool {
-        self.to - self.from <= 0
-    }
 }
 
 #[derive(Debug)]
@@ -81,22 +67,9 @@ impl NotesSelection {
     }
 }
 
-fn to_transport_time(value: StaveTime) -> TransportTime {
-    value.max(0) as TransportTime
-}
-
-impl From<&TimeSelection> for track::TimeSelection {
-    fn from(value: &TimeSelection) -> Self {
-        track::TimeSelection {
-            from: to_transport_time(value.from),
-            to: to_transport_time(value.to),
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Bookmark {
-    at: StaveTime,
+    at: Time,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -114,17 +87,17 @@ impl Bookmarks {
         }
     }
 
-    pub fn set(&mut self, at: StaveTime) {
+    pub fn set(&mut self, at: Time) {
         self.list.insert(Bookmark { at });
         self.store_to(&self.file_path);
     }
 
-    pub fn remove(&mut self, at: &StaveTime) {
+    pub fn remove(&mut self, at: &Time) {
         self.list.remove(&Bookmark { at: *at });
         self.store_to(&self.file_path);
     }
 
-    pub fn previous(&self, here: &StaveTime) -> Option<StaveTime> {
+    pub fn previous(&self, here: &Time) -> Option<Time> {
         self.list
             .iter()
             .rev()
@@ -132,7 +105,7 @@ impl Bookmarks {
             .map(|bm| bm.at)
     }
 
-    pub fn next(&self, here: &StaveTime) -> Option<StaveTime> {
+    pub fn next(&self, here: &Time) -> Option<Time> {
         self.list.iter().find(|&bm| bm.at > *here).map(|bm| bm.at)
     }
 
@@ -161,11 +134,11 @@ pub struct Stave {
     pub history: TrackHistory,
     pub track_version: VersionId,
 
-    pub time_left: StaveTime,
-    pub time_right: StaveTime,
+    pub time_left: Time,
+    pub time_right: Time,
     pub view_rect: Rect,
 
-    pub cursor_position: StaveTime,
+    pub cursor_position: Time,
     pub bookmarks: Bookmarks,
     pub time_selection: Option<TimeSelection>,
     pub note_draw: Option<NoteDraw>,
@@ -178,14 +151,14 @@ const COLOR_HOVERED: Rgba = COLOR_SELECTED;
 struct InnerResponse {
     response: egui::Response,
     pitch_hovered: Option<Pitch>,
-    time_hovered: Option<StaveTime>,
+    time_hovered: Option<Time>,
     note_hovered: Option<EventId>,
     modifiers: Modifiers,
 }
 
 pub struct StaveResponse {
     pub ui_response: egui::Response,
-    pub new_cursor_position: Option<StaveTime>,
+    pub new_cursor_position: Option<Time>,
 }
 
 impl Stave {
@@ -218,39 +191,39 @@ impl Stave {
         self.view_rect.width() / (self.time_right - self.time_left) as f32
     }
 
-    pub fn x_from_time(&self, at: StaveTime) -> Pix {
+    pub fn x_from_time(&self, at: Time) -> Pix {
         self.view_rect.min.x + (at as f32 - self.time_left as f32) * self.time_scale()
     }
 
-    pub fn time_from_x(&self, x: Pix) -> StaveTime {
-        self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as StaveTime
+    pub fn time_from_x(&self, x: Pix) -> Time {
+        self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as Time
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that position under mouse pointer stays put.
         let at = self.time_from_x(mouse_x);
-        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as StaveTime;
-        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as StaveTime;
+        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time;
+        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time;
     }
 
-    pub fn scroll(&mut self, dt: StaveTime) {
+    pub fn scroll(&mut self, dt: Time) {
         self.time_left += dt;
         self.time_right += dt;
     }
 
     pub fn scroll_by(&mut self, dx: Pix) {
-        self.scroll((dx / self.time_scale()) as StaveTime);
+        self.scroll((dx / self.time_scale()) as Time);
     }
 
-    pub fn scroll_to(&mut self, at: StaveTime, view_fraction: f32) {
+    pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
         self.scroll(
-            at - ((self.time_right - self.time_left) as f32 * view_fraction) as StaveTime
+            at - ((self.time_right - self.time_left) as f32 * view_fraction) as Time
                 - self.time_left,
         );
     }
 
     const NOTHING_ZONE: TimeSelection = TimeSelection {
-        from: StaveTime::MIN,
+        from: Time::MIN,
         to: 0,
     };
 
@@ -337,12 +310,12 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<StaveTime>,
+        time_hovered: &Option<Time>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
         track: &Track,
     ) {
-        let mut last_damper_value: (StaveTime, Level) = (0, 0);
+        let mut last_damper_value: (Time, Level) = (0, 0);
         for i in 0..track.events.len() {
             let event = &track.events[i];
             match &event.event {
@@ -356,10 +329,7 @@ impl Stave {
                         self.draw_note(
                             &painter,
                             note.velocity,
-                            (
-                                event.at as StaveTime,
-                                (event.at + note.duration) as StaveTime,
-                            ),
+                            (event.at, event.at + note.duration),
                             *y,
                             *half_tone_step,
                             self.note_selection.contains(&event),
@@ -368,7 +338,7 @@ impl Stave {
                 }
                 TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                     if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                        let at = event.at as StaveTime;
+                        let at = event.at;
                         self.draw_cc(
                             &painter,
                             last_damper_value.0,
@@ -420,13 +390,13 @@ impl Stave {
 
     fn event_hovered(
         pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<StaveTime>,
+        time_hovered: &Option<Time>,
         event: &TrackEvent,
         pitch: &Pitch,
     ) -> bool {
         if let Some(t) = &time_hovered {
             if let Some(p) = pitch_hovered {
-                event.is_active(*t as TransportTime) && p == pitch
+                event.is_active(*t) && p == pitch
             } else {
                 false
             }
@@ -435,9 +405,9 @@ impl Stave {
         }
     }
 
-    const KEYBOARD_TIME_STEP: StaveTime = 10_000;
+    const KEYBOARD_TIME_STEP: Time = 10_000;
 
-    fn handle_commands(&mut self, response: &egui::Response) -> Option<StaveTime> {
+    fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
         // Need to see if duplication here can be reduced.
         // Likely the dispatch needs some hash map that for each input state defines a unique command.
         // Need to support focus somehow so the commands only active when stave is focused.
@@ -458,7 +428,7 @@ impl Stave {
         }) {
             self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
-                    track.tape_cut(&time_selection.into());
+                    track.tape_cut(&time_selection);
                 }
                 track.delete_events(&self.note_selection.selected);
             });
@@ -471,7 +441,7 @@ impl Stave {
         }) {
             self.history.update_track(None, |track| {
                 if let Some(time_selection) = &self.time_selection {
-                    track.tape_insert(&time_selection.into());
+                    track.tape_insert(&time_selection);
                 }
             });
         }
@@ -485,10 +455,7 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("tail_shift_right"), |track| {
-                    track.shift_tail(
-                        &(self.cursor_position as TransportTime),
-                        Stave::KEYBOARD_TIME_STEP,
-                    );
+                    track.shift_tail(&(self.cursor_position), Stave::KEYBOARD_TIME_STEP);
                 });
         }
         if response.ctx.input_mut(|i| {
@@ -498,10 +465,7 @@ impl Stave {
             ))
         }) {
             self.history.update_track(Some("tail_shift_left"), |track| {
-                track.shift_tail(
-                    &(self.cursor_position as TransportTime),
-                    -Stave::KEYBOARD_TIME_STEP,
-                );
+                track.shift_tail(&(self.cursor_position), -Stave::KEYBOARD_TIME_STEP);
             });
         }
 
@@ -543,7 +507,7 @@ impl Stave {
                 &(|note| {
                     note.duration = note
                         .duration
-                        .checked_sub(Stave::KEYBOARD_TIME_STEP as TransportTime)
+                        .checked_sub(Stave::KEYBOARD_TIME_STEP)
                         .unwrap_or(0);
                 }),
             );
@@ -556,7 +520,7 @@ impl Stave {
                 &(|note| {
                     note.duration = note
                         .duration
-                        .checked_add(Stave::KEYBOARD_TIME_STEP as TransportTime)
+                        .checked_add(Stave::KEYBOARD_TIME_STEP)
                         .unwrap_or(0);
                 }),
             );
@@ -678,8 +642,8 @@ impl Stave {
         None
     }
 
-    fn max_time(&self) -> StaveTime {
-        self.history.with_track(|track| track.max_time()) as StaveTime
+    fn max_time(&self) -> Time {
+        self.history.with_track(|track| track.max_time())
     }
 
     pub fn edit_selected_notes<Action: Fn(&mut Note)>(
@@ -705,7 +669,7 @@ impl Stave {
         });
     }
 
-    fn update_time_selection(&mut self, response: &egui::Response, time: &Option<StaveTime>) {
+    fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
             self.time_selection = None;
@@ -731,7 +695,7 @@ impl Stave {
         &mut self,
         response: &egui::Response,
         modifiers: &Modifiers,
-        time: &Option<StaveTime>,
+        time: &Option<Time>,
         pitch: &Option<Pitch>,
     ) {
         // TODO Extract the drag pattern? See also update_time_selection.
@@ -756,10 +720,7 @@ impl Stave {
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
                     self.history.update_track(None, |track| {
-                        let time_range = (
-                            draw.time.from as TransportTime,
-                            draw.time.to as TransportTime,
-                        );
+                        let time_range = (draw.time.from, draw.time.to);
                         if draw.pitch == PIANO_DAMPER_LINE {
                             if modifiers.alt {
                                 track.set_damper_to(time_range, false);
@@ -794,7 +755,7 @@ impl Stave {
         &self,
         painter: &Painter,
         velocity: Level,
-        x_range: (StaveTime, StaveTime),
+        x_range: (Time, Time),
         y: Pix,
         height: Pix,
         selected: bool,
@@ -816,8 +777,8 @@ impl Stave {
     fn draw_cc(
         &self,
         painter: &Painter,
-        last_time: StaveTime,
-        at: StaveTime,
+        last_time: Time,
+        at: Time,
         value: Level,
         y: Pix,
         height: Pix,
@@ -889,7 +850,7 @@ impl Stave {
         )
     }
 
-    fn ensure_visible(&mut self, at: StaveTime) {
+    fn ensure_visible(&mut self, at: Time) {
         let x_range = self.view_rect.x_range();
         let x = self.x_from_time(at);
         if !x_range.contains(x) {
