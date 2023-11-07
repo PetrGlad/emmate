@@ -8,7 +8,7 @@ use egui_extras::{Size, StripBuilder};
 
 use crate::engine::{Engine, EngineCommand, StatusEvent, TransportTime};
 use crate::project::Project;
-use crate::stave::{Stave, StaveTime};
+use crate::stave::{Bookmarks, Stave, StaveTime};
 
 enum Message {
     UpdateTransportTime(TransportTime),
@@ -29,9 +29,17 @@ impl EmApp {
         project: Project,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
+
+        let mut bookmarks_path = project.home_path.clone();
+        bookmarks_path.push("bookmarks.mpack");
+        let mut bookmarks = Bookmarks::new(&bookmarks_path);
+        if bookmarks_path.is_file() {
+            bookmarks.load_from(&bookmarks_path);
+        }
+
         let app = EmApp {
             home_path: project.home_path,
-            stave: Stave::new(project.history),
+            stave: Stave::new(project.history, bookmarks),
             engine_command_send,
             message_receiver,
             follow_playback: false,

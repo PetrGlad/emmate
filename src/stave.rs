@@ -1,3 +1,4 @@
+use std::collections::btree_set::Iter;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -98,22 +99,57 @@ pub struct Bookmark {
     at: StaveTime,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Bookmarks {
     // Maybe bookmarks should also be events in the track.
     pub list: BTreeSet<Bookmark>,
+    file_path: PathBuf,
 }
 
 impl Bookmarks {
-    pub fn load_from(file_path: &PathBuf) -> Bookmarks {
+    pub fn new(file_path: &PathBuf) -> Bookmarks {
+        Bookmarks {
+            list: BTreeSet::default(),
+            file_path: file_path.to_owned(),
+        }
+    }
+
+    pub fn set(&mut self, at: StaveTime) {
+        self.list.insert(Bookmark { at });
+        self.store_to(&self.file_path);
+    }
+
+    pub fn remove(&mut self, at: &StaveTime) {
+        self.list.remove(&Bookmark { at: *at });
+        self.store_to(&self.file_path);
+    }
+
+    pub fn previous(&self, here: &StaveTime) -> Option<StaveTime> {
+        self.list
+            .iter()
+            .rev()
+            .find(|&bm| bm.at < *here)
+            .map(|bm| bm.at)
+    }
+
+    pub fn next(&self, here: &StaveTime) -> Option<StaveTime> {
+        self.list.iter().find(|&bm| bm.at > *here).map(|bm| bm.at)
+    }
+
+    pub fn iter(&self) -> Iter<Bookmark> {
+        self.list.iter()
+    }
+
+    pub fn load_from(&mut self, file_path: &PathBuf) {
         let binary = std::fs::read(file_path)
             .expect(&*format!("load bookmarks from {}", &file_path.display()));
-        rmp_serde::from_slice(&binary).expect("deserialize bookmarks")
+        self.list = rmp_serde::from_slice(&binary).expect("deserialize bookmarks");
     }
 
     pub fn store_to(&self, file_path: &PathBuf) {
         let mut binary = Vec::new();
-        self.serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
+        self.list
+            .serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
             .expect("serialize bookmarks");
         std::fs::write(file_path, binary)
             .expect(&*format!("save bookmarks to {}", &file_path.display()));
@@ -153,7 +189,7 @@ pub struct StaveResponse {
 }
 
 impl Stave {
-    pub fn new(history: TrackHistory) -> Stave {
+    pub fn new(history: TrackHistory, bookmarks: Bookmarks) -> Stave {
         Stave {
             history,
             track_version: 0,
@@ -161,7 +197,7 @@ impl Stave {
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
             cursor_position: 0,
-            bookmarks: Default::default(),
+            bookmarks,
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
@@ -590,16 +626,12 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
         }) {
-            self.bookmarks.list.insert(Bookmark {
-                at: self.cursor_position,
-            });
+            self.bookmarks.set(self.cursor_position);
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::N))
         }) {
-            self.bookmarks.list.remove(&Bookmark {
-                at: self.cursor_position,
-            });
+            self.bookmarks.remove(&self.cursor_position);
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -607,17 +639,7 @@ impl Stave {
                 egui::Key::ArrowLeft,
             ))
         }) {
-            // Previous bookmark
-            match self
-                .bookmarks
-                .list
-                .iter()
-                .rev()
-                .find(|&bm| bm.at < self.cursor_position)
-            {
-                Some(bm) => return Some(bm.at),
-                None => return Some(0),
-            }
+            return self.bookmarks.previous(&self.cursor_position).or(Some(0));
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -625,19 +647,10 @@ impl Stave {
                 egui::Key::ArrowRight,
             ))
         }) {
-            // Next bookmark
-            match self
+            return self
                 .bookmarks
-                .list
-                .iter()
-                .find(|&bm| bm.at > self.cursor_position)
-            {
-                Some(bm) => return Some(bm.at),
-                None => {
-                    // To the end
-                    return Some(self.history.with_track(|track| track.max_time()) as StaveTime);
-                }
-            }
+                .next(&self.cursor_position)
+                .or(Some(self.max_time()));
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -653,8 +666,7 @@ impl Stave {
                 egui::Key::End,
             ))
         }) {
-            // To the end
-            return Some(self.history.with_track(|track| track.max_time()) as StaveTime);
+            return Some(self.max_time());
         }
         if let Some(hover_pos) = response.hover_pos() {
             if response.middle_clicked() {
@@ -664,6 +676,10 @@ impl Stave {
         }
 
         None
+    }
+
+    fn max_time(&self) -> StaveTime {
+        self.history.with_track(|track| track.max_time()) as StaveTime
     }
 
     pub fn edit_selected_notes<Action: Fn(&mut Note)>(
@@ -913,18 +929,18 @@ mod tests {
 
     #[test]
     fn bookmarks_serialization() {
-        let file_path = PathBuf::from("./target/test_bookmarks_serialization");
-        let bm1 = Bookmark { at: 12 };
-        let bm2 = Bookmark { at: 23 };
+        let file_path = PathBuf::from("./target/test_bookmarks_serialization.mpack");
 
-        let mut bookmarks = Bookmarks::default();
-        bookmarks.list.insert(bm1);
-        bookmarks.list.insert(bm2);
+        let mut bookmarks = Bookmarks::new(&file_path);
+        bookmarks.set(12);
+        bookmarks.set(23);
         bookmarks.store_to(&file_path);
 
-        let loaded = Bookmarks::load_from(&file_path);
-        assert_eq!(loaded.list.len(), 2);
-        assert!(loaded.list.contains(&bm1));
-        assert!(loaded.list.contains(&bm2));
+        let mut bookmarks = Bookmarks::new(&file_path);
+        bookmarks.load_from(&file_path);
+        assert_eq!(bookmarks.list.len(), 2);
+        assert_eq!(bookmarks.iter().count(), 2);
+        assert!(bookmarks.list.contains(&Bookmark { at: 12 }));
+        assert!(bookmarks.list.contains(&Bookmark { at: 23 }));
     }
 }

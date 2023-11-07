@@ -44,7 +44,7 @@ struct Version {
 impl TrackHistory {
     const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
 
-    pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&mut self, action: Action) -> Out {
+    pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read().expect("Read track.");
         action(&track)
     }
