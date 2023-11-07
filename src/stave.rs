@@ -113,7 +113,7 @@ impl Bookmarks {
 
     pub fn store_to(&self, file_path: &PathBuf) {
         let mut binary = Vec::new();
-        self.serialize(&mut rmp_serde::Serializer::new(&mut binary))
+        self.serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
             .expect("serialize bookmarks");
         std::fs::write(file_path, binary)
             .expect(&*format!("save bookmarks to {}", &file_path.display()));
@@ -719,6 +719,7 @@ impl Stave {
         pitch: &Option<Pitch>,
     ) {
         // TODO Extract the drag pattern? See also update_time_selection.
+        //      See how egui can help, there seem to be already some drag&drop support.
         let drag_button = PointerButton::Middle;
         if response.clicked_by(drag_button) {
             self.note_draw = None;
