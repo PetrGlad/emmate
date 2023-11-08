@@ -25,19 +25,12 @@ impl Project {
 
         let mut snapshots_dir = directory.clone();
         snapshots_dir.push(Self::SNAPSHOTS_DIR_NAME);
-        if !snapshots_dir.is_dir() {
-            fs::create_dir_all(&snapshots_dir).expect("create snapshots directory");
-        }
 
-        let mut history = if directory.is_dir() {
+        let mut history = if snapshots_dir.is_dir() {
             TrackHistory::with_directory(&snapshots_dir)
         } else {
-            fs::create_dir_all(&directory).expect(
-                format!(
-                    "Cannot create project directory {:?}",
-                    directory.to_string_lossy()
-                )
-                .as_str(),
+            fs::create_dir_all(&snapshots_dir).expect(
+                format!("create project directory {:?}", directory.to_string_lossy()).as_str(),
             );
             TrackHistory::with_directory(&snapshots_dir).init(&source_file)
         };
