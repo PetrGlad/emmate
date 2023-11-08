@@ -86,7 +86,7 @@ fn usec_per_tick(timing: &Timing) -> u32 {
 }
 
 fn ticks_per_beat(timing: &Timing) -> u32 {
-    // TODO Also maybe support Tempo messages. Tempo messages set micros per beat.
+    // Also maybe support Tempo messages. Tempo messages set micros per beat.
     match timing {
         Timing::Metrical(d) => d.as_int() as u32,
         _ => panic!("Timing format {:#?} is not supported.", timing),
@@ -106,10 +106,10 @@ impl EventSource for SmfSource {
 
     fn seek(&mut self, at: &Time) {
         assert!(
-            self.running_at > *at,
+            self.running_at >= *at,
             "SmfSource back reset is not supported."
         );
-        self.running_at = at.to_owned();
+        self.running_at = *at;
     }
 
     fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>) {
