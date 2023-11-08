@@ -35,6 +35,7 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] Adjust tempo for selection.
 - [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change). 
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
@@ -47,7 +48,6 @@ I use Pianoteq, but that is a commercial product.
   them are currently visible.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
 - [ ] Copy/cut/paste.
-- [ ] Adjust tempo for selection.
 - [ ] Optimize undo history 2: save only minimal diff instead of the whole track.
 - [x] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. 
 - [x] Persist bookmarks in project.

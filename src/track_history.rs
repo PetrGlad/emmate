@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use glob::glob;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
 use crate::track::Track;
@@ -86,32 +87,32 @@ impl TrackHistory {
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub fn update(&mut self) {
-        let track = self.track.clone();
-        let track = track.read().expect("Read track.");
-        if track.version != self.track_version {
+        let track_version = self.with_track(|t| t.version);
+        if track_version != self.track_version {
             self.push();
             // It is possible co keep these, but that would complicate implementation, and UI.
             self.discard_tail();
         }
     }
 
-    // version_diff < 0 for undo. version_diff == 1 - save new version.
+    // version_diff < 0 for undo, version_diff > 0 to the next version or redo.
     pub fn shift_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
-        self.version
-            .checked_add(version_diff)
-            .filter(|v| *v >= 0)
-            .and_then(|v| {
-                self.version = v;
-                Some(v)
-            })
+        let v = self.version + version_diff;
+        if v >= 0 {
+            self.version = v;
+            Some(v)
+        } else {
+            None
+        }
     }
 
-    pub fn go_to(&mut self, version: VersionId) -> bool {
-        if let Some(v) = self.get_version(version) {
+    pub fn go_to_version(&mut self) -> bool {
+        if let Some(v) = self.get_version(self.version) {
             let track = self.track.clone();
             let mut track = track.write().expect("Read track.");
             track.load_from(&v.snapshot_path);
             self.track_version = track.version;
+            self.write_meta();
             true
         } else {
             false
@@ -125,12 +126,13 @@ impl TrackHistory {
         let track = track.read().expect("Read track.");
         track.save_to(&self.current_snapshot_path());
         self.track_version = track.version;
+        self.write_meta();
     }
 
     /// Restore track from the last saved version.
     pub fn undo(&mut self) {
         if self.shift_version(-1).is_some() {
-            if !self.go_to(self.version) {
+            if !self.go_to_version() {
                 self.shift_version(1);
             }
         }
@@ -138,7 +140,7 @@ impl TrackHistory {
 
     pub fn redo(&mut self) {
         if self.shift_version(1).is_some() {
-            if !self.go_to(self.version) {
+            if !self.go_to_version() {
                 self.shift_version(-1);
             }
         }
@@ -191,6 +193,7 @@ impl TrackHistory {
         }
     }
 
+    /// Create the fist version of a new history.
     pub fn init(self, source_file: &PathBuf) -> Self {
         if !self.is_empty() {
             panic!("Cannot init with new source file: the project history is not empty.")
@@ -204,22 +207,39 @@ impl TrackHistory {
             );
         }
         fs::copy(&source_file, &starting_snapshot_path).expect("Cannot create starting snapshot.");
+        self.write_meta();
         self
     }
 
     pub fn open(&mut self) {
-        dbg!(
-            "revisions list",
-            self.list_revisions().collect::<Vec<Version>>()
-        );
-        // Seek to the latest version.
-        match self.list_revisions().last() {
-            Some(v) => {
-                self.version = v.id;
-                let file_path = self.current_snapshot_path();
-                self.update_track(None, |track| track.load_from(&file_path));
-            }
-            None => panic!("No revision history in the project."),
+        dbg!(self.list_revisions().collect::<Vec<Version>>());
+        if let Some(meta) = self.load_meta() {
+            self.version = meta.current_version;
+            let file_path = self.current_snapshot_path();
+            self.update_track(None, |track| track.load_from(&file_path));
+        } else {
+            panic!("Cannot load revision history metadata.");
+        }
+    }
+
+    fn write_meta(&self) {
+        let mut binary = Vec::new();
+        let meta = Meta {
+            current_version: self.version,
+        };
+        dbg!(&meta);
+        meta.serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
+            .expect("serialize history meta");
+        fs::write(self.make_meta_path(), binary).expect("store history meta");
+    }
+
+    fn load_meta(&mut self) -> Option<Meta> {
+        if let Ok(binary) = fs::read(self.make_meta_path()) {
+            let meta = rmp_serde::from_slice(&binary).expect("deserialize history meta");
+            dbg!(&meta);
+            Some(meta)
+        } else {
+            None
         }
     }
 
@@ -277,9 +297,21 @@ impl TrackHistory {
         path
     }
 
+    fn make_meta_path(&self) -> PathBuf {
+        let mut path = self.directory.clone();
+        path.push("meta.mpack");
+        path
+    }
+
     pub fn current_snapshot_path(&self) -> PathBuf {
         self.make_snapshot_path(self.version)
     }
+}
+
+/// Additional history data that should be persisted.
+#[derive(Debug, Serialize, Deserialize)]
+struct Meta {
+    current_version: VersionId,
 }
 
 #[cfg(test)]
