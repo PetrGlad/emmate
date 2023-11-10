@@ -234,7 +234,7 @@ impl TrackHistory {
         fs::write(self.make_meta_path(), binary).expect("store history meta");
     }
 
-    fn load_meta(&mut self) -> Option<Meta> {
+    fn load_meta(&self) -> Option<Meta> {
         if let Ok(binary) = fs::read(self.make_meta_path()) {
             let meta = rmp_serde::from_slice(&binary).expect("deserialize history meta");
             dbg!(&meta);
@@ -333,11 +333,21 @@ mod tests {
     }
 
     #[test]
-    fn check_snapshot_path() {
+    fn snapshot_path() {
         let history = TrackHistory::with_directory(&PathBuf::from("."));
         assert_eq!(
             TrackHistory::parse_snapshot_name(&history.make_snapshot_path(123)),
             Some(123)
         );
+    }
+
+    #[test]
+    fn meta_serialization() {
+        let mut history = TrackHistory::with_directory(&PathBuf::from("target"));
+        history.version = 321;
+        history.write_meta();
+        history.version = 12;
+        let m = history.load_meta();
+        assert_eq!(321, m.unwrap().current_version);
     }
 }
