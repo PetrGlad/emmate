@@ -26,13 +26,12 @@ impl Project {
         let mut snapshots_dir = directory.clone();
         snapshots_dir.push(Self::SNAPSHOTS_DIR_NAME);
 
-        let mut history = if snapshots_dir.is_dir() {
-            TrackHistory::with_directory(&snapshots_dir)
-        } else {
+        let mut history = TrackHistory::with_directory(&snapshots_dir);
+        if !snapshots_dir.is_dir() {
             fs::create_dir_all(&snapshots_dir).expect(
                 format!("create project directory {:?}", directory.to_string_lossy()).as_str(),
             );
-            TrackHistory::with_directory(&snapshots_dir).init(&source_file)
+            history = history.init(&source_file)
         };
         history.open();
         Project {

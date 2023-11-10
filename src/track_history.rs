@@ -90,8 +90,8 @@ impl TrackHistory {
         let track_version = self.with_track(|t| t.version);
         if track_version != self.track_version {
             self.push();
-            // It is possible co keep these, but that would complicate implementation, and UI.
             self.discard_tail();
+            self.track_version = track_version;
         }
     }
 
@@ -182,7 +182,6 @@ impl TrackHistory {
 
     pub fn with_directory(directory: &PathBuf) -> Self {
         dbg!("history directory", directory.to_string_lossy());
-        Self::check_directory_writable(directory);
         Self {
             directory: directory.to_owned(),
             version: 0,
@@ -212,11 +211,13 @@ impl TrackHistory {
     }
 
     pub fn open(&mut self) {
+        Self::check_directory_writable(&self.directory);
         dbg!(self.list_revisions().collect::<Vec<Version>>());
         if let Some(meta) = self.load_meta() {
             self.version = meta.current_version;
             let file_path = self.current_snapshot_path();
-            self.update_track(None, |track| track.load_from(&file_path));
+            let mut track = self.track.write().expect("Write to track.");
+            track.load_from(&file_path);
         } else {
             panic!("Cannot load revision history metadata.");
         }
