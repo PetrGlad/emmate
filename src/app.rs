@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::common::Time;
 use eframe::egui::{Modifiers, Vec2};
@@ -48,12 +49,12 @@ impl EmApp {
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
         let engine_status_receiver = Box::new(move |ev| {
-            // TODO (optimization?) Throttle updates (30..60 times per second should be enough).
-            //      Should not miss one-off updates, maybe skip only in same-event-type runs.
             match ev {
                 StatusEvent::Time(t) => {
                     match message_sender.send(Message::UpdateTime(t)) {
-                        Ok(_) => engine_receiver_ctx.request_repaint(),
+                        Ok(_) => {
+                            engine_receiver_ctx.request_repaint_after(Duration::from_micros(15_000))
+                        }
                         _ => (), // Will try next time.
                     }
                 }
