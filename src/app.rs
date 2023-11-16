@@ -53,7 +53,7 @@ impl EmApp {
                 StatusEvent::Time(t) => {
                     match message_sender.send(Message::UpdateTime(t)) {
                         Ok(_) => {
-                            engine_receiver_ctx.request_repaint_after(Duration::from_micros(15_000))
+                            engine_receiver_ctx.request_repaint_after(Duration::from_micros(20_000))
                         }
                         _ => (), // Will try next time.
                     }

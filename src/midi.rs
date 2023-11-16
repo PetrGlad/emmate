@@ -1,13 +1,13 @@
 use std::collections::BinaryHeap;
 use std::time::Duration;
 
-use crate::common::Time;
 use midly::io::WriteResult;
 use midly::live::LiveEvent;
 use midly::num::u15;
 use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
 
+use crate::common::Time;
 use crate::engine::{EngineEvent, EventSource};
 use crate::track::{ChannelId, ControllerId, Level, Pitch};
 

@@ -100,7 +100,6 @@ impl Engine {
                 }
                 if locked.paused {
                     // Mute ongoing notes before clearing.
-                    // TODO Some sounds may still continue on sustain. Need a panic button.
                     // TODO Avoid doing this at every iteration?
                     for ev in queue.iter() {
                         if let LiveEvent::Midi {
@@ -175,7 +174,7 @@ impl Engine {
     /// Stop all sounds.
     pub fn reset(&mut self) {
         self.paused = true;
-        // TODO These SIGSEV. Use other API instead (LV2)?
+        // TODO These SIGSEV. Use other API instead (LV2)? See also https://github.com/RustAudio/vst-rs/issues/193
         // self.vst.host.lock().unwrap().idle();
         // self.vst.plugin.lock().unwrap().suspend();
     }

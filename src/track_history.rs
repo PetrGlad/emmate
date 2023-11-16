@@ -1,21 +1,24 @@
-use std::fs;
+use eframe::egui::ahash::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use std::{fs, mem};
 
 use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
+use crate::edit_actions::Changeset;
 use crate::track::Track;
 
 pub type ActionId = Option<&'static str>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct ActionThrottle {
     timestamp: Instant,
     action_id: ActionId,
+    changeset: Changeset,
 }
 
 impl ActionThrottle {
@@ -32,8 +35,9 @@ pub struct TrackHistory {
     track_version: VersionId,
     pub version: VersionId,
     pub directory: PathBuf,
-
     throttle: Option<ActionThrottle>,
+    // TODO Changesets should be persisted. Keeping in memory as a prototype implementation.
+    changesets: HashMap<VersionId, Changeset>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,46 +54,53 @@ impl TrackHistory {
         action(&track)
     }
 
-    pub fn update_track<Action: FnOnce(&mut Track)>(
+    pub fn update_track<Action: FnOnce(&mut Track, &mut Changeset)>(
         &mut self,
         action_id: ActionId,
         action: Action,
     ) {
-        {
+        let changeset = {
             let mut track = self.track.write().expect("Write to track.");
-            action(&mut track);
-        }
+            let mut changeset = Changeset::default();
+            action(&mut track, &mut changeset);
+            changeset
+        };
 
         let now = Instant::now();
-        if let Some(throttle) = self.throttle {
+        if let Some(throttle) = &mut self.throttle {
             if throttle.action_id == action_id && throttle.is_waiting(now) {
+                throttle.changeset.merge(changeset);
                 return;
             }
+            let throttle = mem::replace(&mut self.throttle, None).unwrap();
+            self.update(throttle.changeset);
+        } else {
+            self.throttle = Some(ActionThrottle {
+                timestamp: now,
+                action_id,
+                changeset,
+            });
         }
-        self.throttle = Some(ActionThrottle {
-            timestamp: now,
-            action_id,
-        });
-        self.update();
     }
 
     pub fn do_pending(&mut self) {
         // This is ugly, just making it work for now. History may need some scheduled events.
         // To do this asynchronously one would need to put id behind an Arc<RwLock<>> or
         // use Tokio here (and in the engine).
-        if let Some(throttle) = self.throttle {
+        if let Some(throttle) = &self.throttle {
             if !throttle.is_waiting(Instant::now()) {
-                self.update();
+                let throttle = mem::replace(&mut self.throttle, None).unwrap();
+                self.update(throttle.changeset);
                 self.throttle = None;
             }
         }
     }
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
-    pub fn update(&mut self) {
+    pub fn update(&mut self, changeset: Changeset) {
         let track_version = self.with_track(|t| t.version);
         if track_version != self.track_version {
-            self.push();
+            self.push(changeset);
             self.discard_tail();
             self.track_version = track_version;
         }
@@ -120,8 +131,9 @@ impl TrackHistory {
     }
 
     /// Save current version into history.
-    pub fn push(&mut self) {
+    pub fn push(&mut self, changeset: Changeset) {
         self.shift_version(1).unwrap();
+        self.changesets.insert(self.version, changeset);
         let track = self.track.clone();
         let track = track.read().expect("Read track.");
         track.save_to(&self.current_snapshot_path());
@@ -187,8 +199,8 @@ impl TrackHistory {
             version: 0,
             track: Default::default(),
             track_version: -1,
-
             throttle: None,
+            changesets: HashMap::default(),
         }
     }
 

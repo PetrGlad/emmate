@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
@@ -8,6 +9,7 @@ use midly::num::{u4, u7};
 use midly::{MidiMessage, TrackEventKind};
 
 use crate::common::{Time, VersionId};
+use crate::edit_actions::{Changeset, EventAction, EventFn};
 use crate::util::{is_ordered, range_contains};
 use crate::{midi, util};
 
@@ -28,26 +30,26 @@ pub fn is_cc_switch_on(x: Level) -> bool {
     x >= 64
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Note {
     pub pitch: Pitch,
     pub velocity: Level,
     pub duration: Time,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ControllerSetValue {
     pub controller_id: ControllerId,
     pub value: Level,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum TrackEventType {
     Note(Note),
     Controller(ControllerSetValue),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct TrackEvent {
     pub id: EventId,
     /// Since the track beginning.
@@ -141,7 +143,13 @@ impl Track {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
-    pub fn add_note(&mut self, time_range: (Time, Time), pitch: Pitch, level: Level) {
+    pub fn add_note(
+        &mut self,
+        time_range: (Time, Time),
+        pitch: Pitch,
+        level: Level,
+        changeset: &mut Changeset,
+    ) {
         let ev = TrackEvent {
             id: self.id_seq.fetch_add(1, SeqCst),
             at: time_range.0,
@@ -151,7 +159,7 @@ impl Track {
                 duration: time_range.1 - time_range.0,
             }),
         };
-        self.insert_event(ev);
+        self.insert_event(ev, changeset);
     }
 
     fn commit(&mut self) {
@@ -159,8 +167,9 @@ impl Track {
         self.version += 1;
     }
 
-    pub fn insert_event(&mut self, ev: TrackEvent) {
+    pub fn insert_event(&mut self, ev: TrackEvent, changeset: &mut Changeset) {
         let idx = self.events.partition_point(|x| x < &ev);
+        changeset.put(EventAction::Insert(ev.clone()));
         self.events.insert(idx, ev);
         self.commit();
     }
@@ -184,7 +193,12 @@ impl Track {
         }
     }
 
-    pub fn set_damper_to(&mut self, time_range: util::Range<Time>, on: bool) {
+    pub fn set_damper_to(
+        &mut self,
+        time_range: util::Range<Time>,
+        on: bool,
+        changeset: &mut Changeset,
+    ) {
         dbg!("set_damper_range", time_range, on);
         let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
         let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
@@ -194,23 +208,24 @@ impl Track {
         if on {
             if !on_before {
                 let on_ev = self.sustain_event(&time_range.0, true);
-                self.insert_event(on_ev);
+                self.insert_event(on_ev, changeset);
             }
             if !on_after {
                 let off_ev = self.sustain_event(&time_range.1, false);
-                self.insert_event(off_ev);
+                self.insert_event(off_ev, changeset);
             }
         } else {
             if on_before {
                 let off_ev = self.sustain_event(&time_range.0, false);
-                self.insert_event(off_ev);
+                self.insert_event(off_ev, changeset);
             }
             if on_after {
                 let on_ev = self.sustain_event(&time_range.1, true);
-                self.insert_event(on_ev);
+                self.insert_event(on_ev, changeset);
             }
         }
         self.commit();
+        todo!("update changeset");
     }
 
     fn cc_value_at(&self, at: &Time, cc_id: &ControllerId) -> Level {
@@ -243,35 +258,43 @@ impl Track {
         }
     }
 
-    pub fn tape_cut(&mut self, time_selection: &TimeSelection) {
+    pub fn tape_cut(&mut self, time_selection: &TimeSelection, changeset: &mut Changeset) {
         dbg!("tape_cut", time_selection);
         self.events.retain(|ev| !time_selection.contains(ev.at));
         self.shift_events(
             &|ev| time_selection.before(ev.at),
             -(time_selection.length() as i64),
+            changeset,
         );
         self.commit();
     }
 
-    pub fn tape_insert(&mut self, time_selection: &TimeSelection) {
+    pub fn tape_insert(&mut self, time_selection: &TimeSelection, changeset: &mut Changeset) {
         dbg!("tape_insert", time_selection);
         self.shift_events(
             &|ev| time_selection.after_start(ev.at),
             time_selection.length() as i64,
+            changeset,
         );
         self.commit();
     }
 
-    pub fn shift_tail(&mut self, at: &Time, dt: i64) {
+    pub fn shift_tail(&mut self, at: &Time, dt: i64, changeset: &mut Changeset) {
         dbg!("tail_shift", at, dt);
-        self.shift_events(&|ev| &ev.at > at, dt);
+        self.shift_events(&|ev| &ev.at > at, dt, changeset);
         self.commit();
     }
 
-    pub fn shift_events<Pred: Fn(&TrackEvent) -> bool>(&mut self, selector: &Pred, d: i64) {
+    pub fn shift_events<Pred: Fn(&TrackEvent) -> bool>(
+        &mut self,
+        selector: &Pred,
+        d: i64,
+        changeset: &mut Changeset,
+    ) {
         for ev in &mut self.events {
             if selector(ev) {
                 ev.at = ev.at + d;
+                changeset.put(EventAction::Update(ev.clone()));
             }
         }
         // Should do this only for out-of-order events. Brute-forcing for now.
@@ -279,26 +302,31 @@ impl Track {
         self.commit();
     }
 
-    // Is it worth it?
-    pub fn edit_events<
-        'a,
-        T: 'a,
-        Selector: Fn(&'a mut TrackEvent) -> Option<&'a mut T>,
-        Action: Fn(&'a mut T),
-    >(
-        &'a mut self,
+    pub fn edit_events<Selector: Fn(&TrackEvent) -> bool>(
+        &mut self,
         selector: &Selector,
-        action: &Action,
+        action: &EventFn,
+        changeset: &mut Changeset,
     ) {
         for ev in &mut self.events {
-            if let Some(x) = selector(ev) {
-                action(x);
+            if selector(&ev) {
+                if let Some(a) = action(&ev) {
+                    changeset.put(a);
+                    todo!("apply the action")
+                }
             }
         }
     }
 
-    pub fn delete_events(&mut self, event_ids: &HashSet<EventId>) {
-        self.events.retain(|ev| !event_ids.contains(&ev.id));
+    pub fn delete_events(&mut self, event_ids: &HashSet<EventId>, changeset: &mut Changeset) {
+        self.events.retain(|ev| {
+            if !event_ids.contains(&ev.id) {
+                true
+            } else {
+                changeset.put(EventAction::Delete(ev.id));
+                false
+            }
+        });
         self.commit();
     }
 
