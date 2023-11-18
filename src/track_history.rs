@@ -8,8 +8,8 @@ use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::changeset::Changeset;
 use crate::common::VersionId;
-use crate::edit_actions::Changeset;
 use crate::track::Track;
 
 pub type ActionId = Option<&'static str>;

@@ -8,9 +8,9 @@ use crate::track_source::TrackSource;
 
 mod app;
 mod audio_setup;
+mod changeset;
 mod common;
 mod config;
-mod edit_actions;
 mod engine;
 mod midi;
 mod midi_vst;

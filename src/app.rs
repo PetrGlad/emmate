@@ -123,6 +123,7 @@ impl eframe::App for EmApp {
                 self.stave.history.version(),
                 self.stave.track_version.to_string()
             ));
+
             StripBuilder::new(ui)
                 .size(Size::remainder())
                 .size(Size::exact(20.0))
@@ -147,26 +148,24 @@ impl eframe::App for EmApp {
                     strip.cell(|ui| {
                         ui.horizontal(|ui| {
                             let mouse_x = ui.painter().clip_rect().min.x;
-                            if ui.button("Zoom in").clicked() {
+                            if ui.button(" + ").clicked() {
                                 self.stave.zoom(1.05, mouse_x);
                             }
-                            if ui.button("Zoom out").clicked() {
+                            if ui.button(" - ").clicked() {
                                 self.stave.zoom(1.0 / 1.05, mouse_x);
                             }
                             let scroll_step = ui.painter().clip_rect().size().x * 0.15;
-                            if ui.button("< Scroll").clicked() {
+                            if ui.button(" << ").clicked() {
                                 self.stave.scroll_by(-scroll_step);
                             }
-                            if ui.button("Scroll >").clicked() {
+                            if ui.button(" >> ").clicked() {
                                 self.stave.scroll_by(scroll_step);
                             }
-                        });
-                        ui.horizontal(|ui| {
                             ui.checkbox(&mut self.follow_playback, "Follow playback");
-                            if ui.button("⏮ Rewind").clicked() {
+                            if ui.button(" ⏮ ").clicked() {
                                 self.engine_seek(0);
                             }
-                            if ui.button("🔇 Stop it").clicked() {
+                            if ui.button("🔇").clicked() {
                                 self.engine_command_send
                                     .send(Box::new(Engine::reset))
                                     .unwrap();
@@ -188,6 +187,15 @@ impl eframe::App for EmApp {
                             if ui.button("⤴ Redo").clicked() {
                                 self.stave.history.redo();
                             }
+                        });
+                        ui.horizontal(|ui| {
+                            // Status line
+                            let event_count = self.stave.history.with_track(|t| t.events.len());
+                            ui.label(format!(
+                                "len={}  nsel={}",
+                                event_count,
+                                self.stave.note_selection.count()
+                            ));
                         });
                     })
                 });

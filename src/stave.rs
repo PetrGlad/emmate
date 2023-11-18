@@ -11,8 +11,8 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
+use crate::changeset::EventAction;
 use crate::common::{Time, VersionId};
-use crate::edit_actions::EventAction;
 use crate::track::{
     EventId, Level, Note, Pitch, TimeSelection, Track, TrackEvent, TrackEventType,
     MIDI_CC_SUSTAIN_ID,
@@ -65,6 +65,10 @@ impl NotesSelection {
 
     fn clear(&mut self) {
         self.selected.clear();
+    }
+
+    pub fn count(&self) -> usize {
+        self.selected.len()
     }
 }
 
@@ -241,8 +245,6 @@ impl Stave {
                 //             ui.label("Here!");
                 //         })
                 //     });
-                ui.label("Here!");
-
                 let bounds = ui.available_rect_before_wrap();
                 self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
@@ -670,7 +672,7 @@ impl Stave {
                 if let Some(n) = action(n) {
                     let mut ev = ev.clone();
                     ev.event = TrackEventType::Note(n);
-                    return Some(EventAction::Update(ev));
+                    return Some(EventAction::Update(ev.clone(), ev));
                 }
             }
             None

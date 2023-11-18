@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
@@ -9,8 +8,8 @@ use std::sync::atomic::Ordering::SeqCst;
 use midly::num::{u4, u7};
 use midly::{MidiMessage, TrackEventKind};
 
+use crate::changeset::{Changeset, EventAction, EventFn};
 use crate::common::{Time, VersionId};
-use crate::edit_actions::{Changeset, EventAction, EventFn};
 use crate::util::{is_ordered, range_contains};
 use crate::{midi, util};
 
@@ -153,10 +152,10 @@ impl Track {
         }
         for ea in changeset.changes.values() {
             match ea {
-                EventAction::Delete(id) => {
-                    track_map.remove(id);
+                EventAction::Delete(ev) => {
+                    track_map.remove(&ev.id);
                 }
-                EventAction::Update(ev) => {
+                EventAction::Update(_, ev) => {
                     track_map.insert(ev.id, ev);
                 }
                 EventAction::Insert(ev) => {
@@ -323,9 +322,9 @@ impl Track {
         self.edit_events(
             selector,
             &move |ev| {
-                let mut ev = ev.clone();
-                ev.at += d;
-                Some(EventAction::Update(ev))
+                let mut nev = ev.clone();
+                nev.at += d;
+                Some(EventAction::Update(ev.clone(), nev))
             },
             changeset,
         );
@@ -356,7 +355,7 @@ impl Track {
             if !event_ids.contains(&ev.id) {
                 true
             } else {
-                changeset.put(EventAction::Delete(ev.id));
+                changeset.put(EventAction::Delete(ev.clone()));
                 false
             }
         });
