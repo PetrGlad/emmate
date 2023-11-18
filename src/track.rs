@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
@@ -143,6 +144,32 @@ impl Track {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
+    ////////// New experimental  API ///////////
+
+    pub fn patch(&mut self, changeset: &Changeset) {
+        let mut track_map = HashMap::with_capacity(self.events.len());
+        for ev in &self.events {
+            track_map.insert(ev.id, ev);
+        }
+        for ea in changeset.changes.values() {
+            match ea {
+                EventAction::Delete(id) => {
+                    track_map.remove(id);
+                }
+                EventAction::Update(ev) => {
+                    track_map.insert(ev.id, ev);
+                }
+                EventAction::Insert(ev) => {
+                    track_map.insert(ev.id, ev);
+                }
+            }
+        }
+        self.events = track_map.iter().map(|(id, ev)| *ev).cloned().collect();
+        self.events.sort();
+    }
+
+    /////////////////////////////////////////////
+
     pub fn add_note(
         &mut self,
         time_range: (Time, Time),
@@ -162,7 +189,7 @@ impl Track {
         self.insert_event(ev, changeset);
     }
 
-    fn commit(&mut self) {
+    pub fn commit(&mut self) {
         assert!(is_ordered(&self.events));
         self.version += 1;
     }
@@ -191,6 +218,7 @@ impl Track {
                 break;
             }
         }
+        todo!("update changeset")
     }
 
     pub fn set_damper_to(
@@ -225,7 +253,6 @@ impl Track {
             }
         }
         self.commit();
-        todo!("update changeset");
     }
 
     fn cc_value_at(&self, at: &Time, cc_id: &ControllerId) -> Level {
@@ -279,9 +306,11 @@ impl Track {
         self.commit();
     }
 
-    pub fn shift_tail(&mut self, at: &Time, dt: i64, changeset: &mut Changeset) {
+    pub fn shift_tail(&mut self, at: &Time, dt: i64) {
         dbg!("tail_shift", at, dt);
-        self.shift_events(&|ev| &ev.at > at, dt, changeset);
+        let mut changeset = Changeset::default();
+        self.shift_events(&|ev| &ev.at > at, dt, &mut changeset);
+        self.patch(&changeset);
         self.commit();
     }
 
@@ -291,15 +320,19 @@ impl Track {
         d: i64,
         changeset: &mut Changeset,
     ) {
-        for ev in &mut self.events {
-            if selector(ev) {
-                ev.at = ev.at + d;
-                changeset.put(EventAction::Update(ev.clone()));
-            }
-        }
-        // Should do this only for out-of-order events. Brute-forcing for now.
-        self.events.sort();
-        self.commit();
+        self.edit_events(
+            selector,
+            &move |ev| {
+                let mut ev = ev.clone();
+                ev.at += d;
+                Some(EventAction::Update(ev))
+            },
+            changeset,
+        );
+
+        //// // Should do this only for out-of-order events. Brute-forcing for now.
+        //// self.events.sort();
+        ///// self.commit();
     }
 
     pub fn edit_events<Selector: Fn(&TrackEvent) -> bool>(
@@ -312,10 +345,10 @@ impl Track {
             if selector(&ev) {
                 if let Some(a) = action(&ev) {
                     changeset.put(a);
-                    todo!("apply the action")
                 }
             }
         }
+        // TODO Commit?
     }
 
     pub fn delete_events(&mut self, event_ids: &HashSet<EventId>, changeset: &mut Changeset) {

@@ -467,11 +467,7 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("tail_shift_right"), |track, changeset| {
-                    track.shift_tail(
-                        &(self.cursor_position),
-                        Stave::KEYBOARD_TIME_STEP,
-                        changeset,
-                    );
+                    track.shift_tail(&(self.cursor_position), Stave::KEYBOARD_TIME_STEP);
                 });
         }
         if response.ctx.input_mut(|i| {
@@ -482,11 +478,7 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("tail_shift_left"), |track, changeset| {
-                    track.shift_tail(
-                        &(self.cursor_position),
-                        -Stave::KEYBOARD_TIME_STEP,
-                        changeset,
-                    );
+                    track.shift_tail(&(self.cursor_position), -Stave::KEYBOARD_TIME_STEP);
                 });
         }
 
