@@ -1,9 +1,12 @@
+use crate::common::VersionId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use crate::track::{EventId, Note, TrackEvent, TrackEventType};
 
 /// Simplest track edit operation. See Changeset for uses.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventAction {
     // TODO It is possible to recover necessary state by patching one of the recent (preferably the
     //   most recent) snapshots. Such snapshots (the ones that track event ids) are not
@@ -49,12 +52,50 @@ pub struct Changeset {
 }
 
 impl Changeset {
-    pub fn put(&mut self, action: EventAction) {
+    pub fn add(&mut self, action: EventAction) {
         self.changes.insert(action.event_id(), action);
     }
 
     pub fn merge(&mut self, other: Self) {
         self.changes.extend(other.changes);
+    }
+}
+
+/// Serializable changeset, diff. Storing these to keep whole edit history persistent, help with
+/// undo hints (so it is obvious what is currently changing), and avoid storing whole track
+/// every time. See also [Snapshot], [Changeset].
+#[derive(Serialize, Deserialize)]
+pub struct Patch {
+    pub base_version: VersionId,
+    pub version: VersionId,
+    pub changes: Vec<EventAction>,
+}
+
+impl Patch {
+    pub fn load(&mut self, file_path: PathBuf) {
+        todo!("load changeset from file");
+    }
+
+    pub fn store(&self, file_path: PathBuf) {
+        todo!("load changeset from file");
+    }
+}
+
+/// Serializable snapshot of a complete track state that can be exported or used as a base
+/// for Patch sequence. See also [Patch].
+#[derive(Serialize, Deserialize)]
+pub struct Snapshot {
+    pub version: VersionId,
+    pub events: Vec<TrackEvent>,
+}
+
+impl Snapshot {
+    pub fn load(&mut self, file_path: PathBuf) {
+        todo!("load changeset from file");
+    }
+
+    pub fn store(&self, file_path: PathBuf) {
+        todo!("load changeset from file");
     }
 }
 
@@ -66,7 +107,7 @@ pub struct UpdateCommand {
 }
 
 /// Convenience wrapper
-pub fn event_to_note_action<NoteFn: Fn(&Note) -> Option<Note> + 'static>(
+pub fn to_event_action<NoteFn: Fn(&Note) -> Option<Note> + 'static>(
     action: NoteFn,
 ) -> Box<EventFn> {
     Box::new(move |ev| {

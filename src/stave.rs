@@ -11,12 +11,13 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::EventAction;
+use crate::changeset::{Changeset, EventAction};
 use crate::common::{Time, VersionId};
 use crate::track::{
     EventId, Level, Note, Pitch, TimeSelection, Track, TrackEvent, TrackEventType,
     MIDI_CC_SUSTAIN_ID,
 };
+use crate::track_edit::{add_note, set_damper_to};
 use crate::track_history::{ActionId, TrackHistory};
 use crate::Pix;
 
@@ -183,12 +184,14 @@ impl Stave {
     }
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
-        self.history.with_track(|track| track.save_to(file_path));
+        todo!();
+        // self.history.with_track(|track| track.save_to(file_path));
     }
 
     pub fn load_from(&mut self, file_path: &PathBuf) {
-        self.history
-            .update_track(None, |track, _| track.load_from(file_path));
+        todo!();
+        // self.history
+        //     .update_track(None, |track, _| track.load_from(file_path));
     }
 
     /// Pixel/uSec, can be cached.
@@ -736,18 +739,21 @@ impl Stave {
             dbg!("drag_released", &self.note_draw);
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
-                    self.history.update_track(None, |track, changeset| {
-                        let time_range = (draw.time.from, draw.time.to);
-                        if draw.pitch == PIANO_DAMPER_LINE {
-                            if modifiers.alt {
-                                track.set_damper_to(time_range, false, changeset);
+                    let time_range = (draw.time.from, draw.time.to);
+                    self.history.update_track(
+                        None,
+                        |track: &mut Track, changeset: &mut Changeset| {
+                            if draw.pitch == PIANO_DAMPER_LINE {
+                                if modifiers.alt {
+                                    set_damper_to(track, changeset, time_range, false);
+                                } else {
+                                    set_damper_to(track, changeset, time_range, true);
+                                }
                             } else {
-                                track.set_damper_to(time_range, true, changeset);
+                                add_note(track, changeset, time_range, draw.pitch, 64);
                             }
-                        } else {
-                            track.add_note(time_range, draw.pitch, 64, changeset);
-                        }
-                    });
+                        },
+                    );
                 }
             }
             self.note_draw = None;

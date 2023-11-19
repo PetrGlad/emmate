@@ -2,22 +2,23 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::SeqCst;
 
-use midly::num::{u4, u7};
+use midly::num::u4;
 use midly::{MidiMessage, TrackEventKind};
+use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventAction, EventFn};
 use crate::common::{Time, VersionId};
-use crate::util::{is_ordered, range_contains};
-use crate::{midi, util};
+use crate::midi;
+use crate::util::{is_ordered, IdSeq};
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
 pub type Level = u8;
 pub type ChannelId = u8;
 pub type EventId = u64;
+
+pub const MAX_LEVEL: Level = 127; // Should be equal to u7::max_value().as_int();
 
 #[allow(dead_code)]
 pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
@@ -30,30 +31,29 @@ pub fn is_cc_switch_on(x: Level) -> bool {
     x >= 64
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: Pitch,
     pub velocity: Level,
     pub duration: Time,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct ControllerSetValue {
     pub controller_id: ControllerId,
     pub value: Level,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TrackEventType {
     Note(Note),
     Controller(ControllerSetValue),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct TrackEvent {
     pub id: EventId,
-    /// Since the track beginning.
-    pub at: Time,
+    pub at: Time, // Since the track beginning.
     pub event: TrackEventType,
 }
 
@@ -114,26 +114,37 @@ pub struct Track {
     This is a requirement of TrackSource. */
     pub events: Vec<TrackEvent>,
     pub version: VersionId,
-    id_seq: AtomicU64,
+    pub id_seq: IdSeq,
 }
 
 impl Track {
-    pub fn new(events: Vec<TrackEvent>) -> Track {
-        Track {
-            events,
-            version: 0,
-            id_seq: AtomicU64::new(0),
-        }
-    }
-
-    pub fn load_from(&mut self, file_path: &PathBuf) {
+    pub fn import_smf(&mut self, file_path: &PathBuf) {
         let data = std::fs::read(&file_path).unwrap();
         let events = midi::load_smf(&data);
         self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as Time);
         self.commit();
     }
 
-    pub fn save_to(&self, file_path: &PathBuf) {
+    pub fn export_smf(&self, file_path: &PathBuf) {
+        let usec_per_tick = 26u32;
+        let midi_events = to_midi_events(&self.events, usec_per_tick);
+        let mut binary = Vec::new();
+        midi::serialize_smf(midi_events, usec_per_tick, &mut binary)
+            .expect("Cannot store SMF track.");
+        std::fs::write(&file_path, binary)
+            .expect(&*format!("Cannot save to {}", &file_path.display()));
+    }
+
+    pub fn load_snapshot(&mut self, file_path: &PathBuf) {
+        todo!();
+        let data = std::fs::read(&file_path).unwrap();
+        let events = midi::load_smf(&data);
+        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as Time);
+        self.commit();
+    }
+
+    pub fn store_snapshot(&self, file_path: &PathBuf) {
+        todo!();
         let usec_per_tick = 26u32;
         let midi_events = to_midi_events(&self.events, usec_per_tick);
         let mut binary = Vec::new();
@@ -143,49 +154,23 @@ impl Track {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
-    ////////// New experimental  API ///////////
-
     pub fn patch(&mut self, changeset: &Changeset) {
         let mut track_map = HashMap::with_capacity(self.events.len());
         for ev in &self.events {
             track_map.insert(ev.id, ev);
         }
         for ea in changeset.changes.values() {
-            match ea {
-                EventAction::Delete(ev) => {
-                    track_map.remove(&ev.id);
-                }
-                EventAction::Update(_, ev) => {
+            match ea.after() {
+                Some(ev) => {
                     track_map.insert(ev.id, ev);
                 }
-                EventAction::Insert(ev) => {
-                    track_map.insert(ev.id, ev);
+                None => {
+                    track_map.remove(&ea.event_id());
                 }
             }
         }
-        self.events = track_map.iter().map(|(id, ev)| *ev).cloned().collect();
+        self.events = track_map.iter().map(|(_id, ev)| *ev).cloned().collect();
         self.events.sort();
-    }
-
-    /////////////////////////////////////////////
-
-    pub fn add_note(
-        &mut self,
-        time_range: (Time, Time),
-        pitch: Pitch,
-        level: Level,
-        changeset: &mut Changeset,
-    ) {
-        let ev = TrackEvent {
-            id: self.id_seq.fetch_add(1, SeqCst),
-            at: time_range.0,
-            event: TrackEventType::Note(Note {
-                pitch,
-                velocity: level,
-                duration: time_range.1 - time_range.0,
-            }),
-        };
-        self.insert_event(ev, changeset);
     }
 
     pub fn commit(&mut self) {
@@ -193,95 +178,10 @@ impl Track {
         self.version += 1;
     }
 
-    pub fn insert_event(&mut self, ev: TrackEvent, changeset: &mut Changeset) {
+    pub fn insert_event(&mut self, ev: TrackEvent) {
         let idx = self.events.partition_point(|x| x < &ev);
-        changeset.put(EventAction::Insert(ev.clone()));
         self.events.insert(idx, ev);
         self.commit();
-    }
-
-    fn clear_cc_events(&mut self, time_range: util::Range<Time>, cc_id: ControllerId) {
-        let mut i = 0;
-        loop {
-            if let Some(ev) = self.events.get(i) {
-                if range_contains(time_range, ev.at) {
-                    if let TrackEventType::Controller(ev) = &ev.event {
-                        if ev.controller_id == cc_id {
-                            self.events.remove(i);
-                            continue;
-                        }
-                    }
-                }
-                i += 1;
-            } else {
-                break;
-            }
-        }
-        todo!("update changeset")
-    }
-
-    pub fn set_damper_to(
-        &mut self,
-        time_range: util::Range<Time>,
-        on: bool,
-        changeset: &mut Changeset,
-    ) {
-        dbg!("set_damper_range", time_range, on);
-        let on_before = is_cc_switch_on(self.cc_value_at(&time_range.0, &MIDI_CC_SUSTAIN_ID));
-        let on_after = is_cc_switch_on(self.cc_value_at(&time_range.1, &MIDI_CC_SUSTAIN_ID));
-
-        self.clear_cc_events(time_range, MIDI_CC_SUSTAIN_ID);
-
-        if on {
-            if !on_before {
-                let on_ev = self.sustain_event(&time_range.0, true);
-                self.insert_event(on_ev, changeset);
-            }
-            if !on_after {
-                let off_ev = self.sustain_event(&time_range.1, false);
-                self.insert_event(off_ev, changeset);
-            }
-        } else {
-            if on_before {
-                let off_ev = self.sustain_event(&time_range.0, false);
-                self.insert_event(off_ev, changeset);
-            }
-            if on_after {
-                let on_ev = self.sustain_event(&time_range.1, true);
-                self.insert_event(on_ev, changeset);
-            }
-        }
-        self.commit();
-    }
-
-    fn cc_value_at(&self, at: &Time, cc_id: &ControllerId) -> Level {
-        let mut idx = self.events.partition_point(|x| x.at < *at);
-        while idx > 0 {
-            idx -= 1;
-            if let Some(ev) = self.events.get(idx) {
-                if let TrackEventType::Controller(cc) = &ev.event {
-                    if cc.controller_id == *cc_id {
-                        return cc.value;
-                    }
-                }
-            }
-        }
-        return 0; // default
-    }
-
-    fn sustain_event(&mut self, at: &Time, on: bool) -> TrackEvent {
-        TrackEvent {
-            id: next_id(&mut self.id_seq),
-            at: *at,
-            event: TrackEventType::Controller(ControllerSetValue {
-                controller_id: MIDI_CC_SUSTAIN_ID,
-                value: if on {
-                    u7::max_value().as_int() as Level
-                } else {
-                    0
-                },
-            }),
-        }
     }
 
     pub fn tape_cut(&mut self, time_selection: &TimeSelection, changeset: &mut Changeset) {
@@ -343,7 +243,7 @@ impl Track {
         for ev in &mut self.events {
             if selector(&ev) {
                 if let Some(a) = action(&ev) {
-                    changeset.put(a);
+                    changeset.add(a);
                 }
             }
         }
@@ -355,7 +255,7 @@ impl Track {
             if !event_ids.contains(&ev.id) {
                 true
             } else {
-                changeset.put(EventAction::Delete(ev.clone()));
+                changeset.add(EventAction::Delete(ev.clone()));
                 false
             }
         });
@@ -376,12 +276,8 @@ impl Track {
     }
 }
 
-fn next_id(id_seq: &mut AtomicU64) -> EventId {
-    id_seq.fetch_add(1, SeqCst)
-}
-
 pub fn from_midi_events(
-    id_seq: &mut AtomicU64,
+    id_seq: &mut IdSeq,
     events: Vec<midly::TrackEvent<'static>>,
     tick_duration: Time,
 ) -> Vec<TrackEvent> {
@@ -401,7 +297,7 @@ pub fn from_midi_events(
                     match on {
                         Some((t, MidiMessage::NoteOn { key, vel })) => {
                             track_events.push(TrackEvent {
-                                id: next_id(id_seq),
+                                id: id_seq.next(),
                                 at: t,
                                 event: TrackEventType::Note(Note {
                                     duration: at - t,
@@ -415,7 +311,7 @@ pub fn from_midi_events(
                     }
                 }
                 MidiMessage::Controller { controller, value } => track_events.push(TrackEvent {
-                    id: id_seq.fetch_add(1, SeqCst),
+                    id: id_seq.next(),
                     at,
                     event: TrackEventType::Controller(ControllerSetValue {
                         controller_id: controller.into(),

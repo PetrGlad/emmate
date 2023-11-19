@@ -17,6 +17,7 @@ mod midi_vst;
 mod project;
 mod stave;
 mod track;
+mod track_edit;
 mod track_history;
 mod track_source;
 mod util;

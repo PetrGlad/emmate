@@ -190,11 +190,23 @@ impl eframe::App for EmApp {
                         });
                         ui.horizontal(|ui| {
                             // Status line
-                            let event_count = self.stave.history.with_track(|t| t.events.len());
                             ui.label(format!(
-                                "len={}  nsel={}",
-                                event_count,
-                                self.stave.note_selection.count()
+                                "track_len={}  n_sel={}  t_sel={}  at={}s ",
+                                self.stave.history.with_track(|t| t.events.len()),
+                                self.stave.note_selection.count(),
+                                self.stave.time_selection.as_ref().map_or(
+                                    "()".to_string(),
+                                    |sel| {
+                                        format!(
+                                            "[{}s,{}s)/{}s",
+                                            Duration::from_micros(sel.from as u64).as_secs(),
+                                            Duration::from_micros(sel.to as u64).as_secs(),
+                                            Duration::from_micros(sel.length().abs() as u64)
+                                                .as_secs()
+                                        )
+                                    },
+                                ),
+                                Duration::from_micros(self.stave.cursor_position as u64).as_secs()
                             ));
                         });
                     })

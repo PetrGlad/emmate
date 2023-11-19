@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::Changeset;
 use crate::common::VersionId;
 use crate::track::Track;
+use crate::util::IdSeq;
 
 pub type ActionId = Option<&'static str>;
 
@@ -63,6 +64,7 @@ impl TrackHistory {
             let mut track = self.track.write().expect("Write to track.");
             let mut changeset = Changeset::default();
             action(&mut track, &mut changeset);
+            track.patch(&changeset);
             changeset
         };
 
@@ -121,10 +123,11 @@ impl TrackHistory {
         if let Some(v) = self.get_version(self.version) {
             let track = self.track.clone();
             let mut track = track.write().expect("Read track.");
-            track.load_from(&v.snapshot_path);
-            self.track_version = track.version;
-            self.write_meta();
-            true
+            todo!();
+            // track.load_from_snapshot(&v.snapshot_path);
+            // self.track_version = track.version;
+            // self.write_meta();
+            // true
         } else {
             false
         }
@@ -136,9 +139,10 @@ impl TrackHistory {
         self.changesets.insert(self.version, changeset);
         let track = self.track.clone();
         let track = track.read().expect("Read track.");
-        track.save_to(&self.current_snapshot_path());
-        self.track_version = track.version;
-        self.write_meta();
+        todo!();
+        // track.save_to(&self.current_snapshot_path());
+        // self.track_version = track.version;
+        // self.write_meta();
     }
 
     /// Restore track from the last saved version.
@@ -159,7 +163,7 @@ impl TrackHistory {
     }
 
     fn discard_tail(&mut self) {
-        for v in self.list_revisions() {
+        for v in self.list_snapshots() {
             if self.version < v.id {
                 fs::remove_file(v.snapshot_path).expect("Delete snapshot.");
             }
@@ -224,12 +228,14 @@ impl TrackHistory {
 
     pub fn open(&mut self) {
         Self::check_directory_writable(&self.directory);
-        dbg!(self.list_revisions().collect::<Vec<Version>>());
+        dbg!(self.list_snapshots().collect::<Vec<Version>>());
         if let Some(meta) = self.load_meta() {
             self.version = meta.current_version;
             let file_path = self.current_snapshot_path();
             let mut track = self.track.write().expect("Write to track.");
-            track.load_from(&file_path);
+            track.id_seq = IdSeq::new(meta.id_seq);
+            todo!();
+            // track.load_from_snapshot(&file_path);
         } else {
             panic!("Cannot load revision history metadata.");
         }
@@ -238,6 +244,7 @@ impl TrackHistory {
     fn write_meta(&self) {
         let mut binary = Vec::new();
         let meta = Meta {
+            id_seq: self.with_track(|t| t.id_seq.current()),
             current_version: self.version,
         };
         dbg!(&meta);
@@ -256,7 +263,7 @@ impl TrackHistory {
         }
     }
 
-    fn list_revisions(&self) -> impl Iterator<Item = Version> {
+    fn list_snapshots(&self) -> impl Iterator<Item = Version> {
         let mut pattern = self.directory.to_owned();
         pattern.push("*.".to_string() + Self::SNAPSHOT_NAME_EXT);
         let files = glob(pattern.to_str().unwrap()).expect("List snapshots directory.");
@@ -290,7 +297,7 @@ impl TrackHistory {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.list_revisions().next().is_none()
+        self.list_snapshots().next().is_none()
     }
 
     pub fn parse_snapshot_name(file: &PathBuf) -> Option<VersionId> {
@@ -324,6 +331,7 @@ impl TrackHistory {
 /// Additional history data that should be persisted.
 #[derive(Debug, Serialize, Deserialize)]
 struct Meta {
+    id_seq: u64,
     current_version: VersionId,
 }
 

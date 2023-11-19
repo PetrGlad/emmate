@@ -1,3 +1,5 @@
+use std::sync::atomic;
+
 pub type Range<T> = (T, T);
 
 // Could not find a simple library for this.
@@ -17,6 +19,23 @@ pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
         }
     }
     true
+}
+
+#[derive(Debug, Default)]
+pub struct IdSeq(atomic::AtomicU64);
+
+impl IdSeq {
+    pub fn new(init: u64) -> Self {
+        IdSeq(atomic::AtomicU64::new(init))
+    }
+
+    pub fn next(&mut self) -> u64 {
+        self.0.fetch_add(1, atomic::Ordering::SeqCst)
+    }
+
+    pub fn current(&self) -> u64 {
+        self.0.load(atomic::Ordering::SeqCst)
+    }
 }
 
 #[cfg(test)]
