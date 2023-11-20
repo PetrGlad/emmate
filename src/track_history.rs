@@ -8,9 +8,10 @@ use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::Changeset;
+use crate::changeset::{Changeset, Patch, Snapshot};
 use crate::common::VersionId;
 use crate::track::Track;
+use crate::util;
 use crate::util::IdSeq;
 
 pub type ActionId = Option<&'static str>;
@@ -33,7 +34,6 @@ impl ActionThrottle {
 pub struct TrackHistory {
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub track: Arc<RwLock<Track>>,
-    track_version: VersionId,
     pub version: VersionId,
     pub directory: PathBuf,
     throttle: Option<ActionThrottle>,
@@ -48,7 +48,8 @@ struct Version {
 }
 
 impl TrackHistory {
-    const SNAPSHOT_NAME_EXT: &'static str = "emmrev.mid";
+    const SNAPSHOT_NAME_EXT: &'static str = ".snapshot.mpack";
+    const DIFF_NAME_EXT: &'static str = ".diff.mpack";
 
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read().expect("Read track.");
@@ -62,7 +63,7 @@ impl TrackHistory {
     ) {
         let changeset = {
             let mut track = self.track.write().expect("Write to track.");
-            let mut changeset = Changeset::default();
+            let mut changeset = Changeset::empty();
             action(&mut track, &mut changeset);
             track.patch(&changeset);
             changeset
@@ -100,12 +101,8 @@ impl TrackHistory {
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub fn update(&mut self, changeset: Changeset) {
-        let track_version = self.with_track(|t| t.version);
-        if track_version != self.track_version {
-            self.push(changeset);
-            self.discard_tail();
-            self.track_version = track_version;
-        }
+        self.push(changeset);
+        self.discard_tail();
     }
 
     // version_diff < 0 for undo, version_diff > 0 to the next version or redo.
@@ -202,14 +199,13 @@ impl TrackHistory {
             directory: directory.to_owned(),
             version: 0,
             track: Default::default(),
-            track_version: -1,
             throttle: None,
             changesets: HashMap::default(),
         }
     }
 
     /// Create the fist version of a new history.
-    pub fn init(self, source_file: &PathBuf) -> Self {
+    pub fn init(mut self, source_file: &PathBuf) -> Self {
         if !self.is_empty() {
             panic!("Cannot init with new source file: the project history is not empty.")
         }
@@ -221,7 +217,11 @@ impl TrackHistory {
                 &starting_snapshot_path.to_string_lossy()
             );
         }
-        fs::copy(&source_file, &starting_snapshot_path).expect("Cannot create starting snapshot.");
+        let version = self.version;
+        self.update_track(None, |track, changeset| {
+            track.import_smf(source_file);
+            Snapshot::of_track(version, track).store(starting_snapshot_path);
+        });
         self.write_meta();
         self
     }
@@ -229,38 +229,36 @@ impl TrackHistory {
     pub fn open(&mut self) {
         Self::check_directory_writable(&self.directory);
         dbg!(self.list_snapshots().collect::<Vec<Version>>());
-        if let Some(meta) = self.load_meta() {
-            self.version = meta.current_version;
-            let file_path = self.current_snapshot_path();
-            let mut track = self.track.write().expect("Write to track.");
-            track.id_seq = IdSeq::new(meta.id_seq);
-            todo!();
-            // track.load_from_snapshot(&file_path);
-        } else {
-            panic!("Cannot load revision history metadata.");
+        let meta = self.load_meta();
+        self.version = meta.current_version;
+        let mut track = self.track.write().expect("Write to track.");
+        track.id_seq = IdSeq::new(meta.id_seq);
+        {
+            // TODO Implementation: for now use only starting snapshot, and diffs.
+            let mut v = 0;
+            let ss = Snapshot::load(self.diff_path(v));
+            track.events = ss.events;
+            while v <= self.version {
+                let d = Patch::load(self.diff_path(v));
+                let mut cs = Changeset::empty();
+                cs.add_all(&d.changes);
+                track.patch(&cs);
+                v += 1;
+            }
         }
     }
 
     fn write_meta(&self) {
-        let mut binary = Vec::new();
         let meta = Meta {
             id_seq: self.with_track(|t| t.id_seq.current()),
             current_version: self.version,
         };
         dbg!(&meta);
-        meta.serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
-            .expect("serialize history meta");
-        fs::write(self.make_meta_path(), binary).expect("store history meta");
+        util::store(&meta, &self.make_meta_path());
     }
 
-    fn load_meta(&self) -> Option<Meta> {
-        if let Ok(binary) = fs::read(self.make_meta_path()) {
-            let meta = rmp_serde::from_slice(&binary).expect("deserialize history meta");
-            dbg!(&meta);
-            Some(meta)
-        } else {
-            None
-        }
+    fn load_meta(&self) -> Meta {
+        util::load(&self.make_meta_path())
     }
 
     fn list_snapshots(&self) -> impl Iterator<Item = Version> {
@@ -285,7 +283,7 @@ impl TrackHistory {
     }
 
     fn get_version(&self, version_id: VersionId) -> Option<Version> {
-        let path = self.make_snapshot_path(version_id);
+        let path = self.diff_path(version_id);
         if path.is_file() {
             Some(Version {
                 id: version_id,
@@ -311,9 +309,15 @@ impl TrackHistory {
             .and_then(|id_str| str::parse::<VersionId>(id_str.as_str()).ok())
     }
 
-    fn make_snapshot_path(&self, version: VersionId) -> PathBuf {
+    fn snapshot_path(&self, version: VersionId) -> PathBuf {
         let mut path = self.directory.clone();
         path.push(format!("{}.{}", version, Self::SNAPSHOT_NAME_EXT));
+        path
+    }
+
+    fn diff_path(&self, version: VersionId) -> PathBuf {
+        let mut path = self.directory.clone();
+        path.push(format!("{}.{}", version, Self::DIFF_NAME_EXT));
         path
     }
 
@@ -324,7 +328,7 @@ impl TrackHistory {
     }
 
     pub fn current_snapshot_path(&self) -> PathBuf {
-        self.make_snapshot_path(self.version)
+        self.diff_path(self.version)
     }
 }
 
@@ -356,7 +360,7 @@ mod tests {
     fn snapshot_path() {
         let history = TrackHistory::with_directory(&PathBuf::from("."));
         assert_eq!(
-            TrackHistory::parse_snapshot_name(&history.make_snapshot_path(123)),
+            TrackHistory::parse_snapshot_name(&history.diff_path(123)),
             Some(123)
         );
     }

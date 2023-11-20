@@ -8,7 +8,7 @@ use midly::{MidiMessage, TrackEventKind};
 use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventAction, EventFn};
-use crate::common::{Time, VersionId};
+use crate::common::Time;
 use crate::midi;
 use crate::util::{is_ordered, IdSeq};
 
@@ -113,7 +113,6 @@ pub struct Track {
     /* Events should always be kept ordered by start time ascending.
     This is a requirement of TrackSource. */
     pub events: Vec<TrackEvent>,
-    pub version: VersionId,
     pub id_seq: IdSeq,
 }
 
@@ -131,25 +130,6 @@ impl Track {
         let mut binary = Vec::new();
         midi::serialize_smf(midi_events, usec_per_tick, &mut binary)
             .expect("Cannot store SMF track.");
-        std::fs::write(&file_path, binary)
-            .expect(&*format!("Cannot save to {}", &file_path.display()));
-    }
-
-    pub fn load_snapshot(&mut self, file_path: &PathBuf) {
-        todo!();
-        let data = std::fs::read(&file_path).unwrap();
-        let events = midi::load_smf(&data);
-        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as Time);
-        self.commit();
-    }
-
-    pub fn store_snapshot(&self, file_path: &PathBuf) {
-        todo!();
-        let usec_per_tick = 26u32;
-        let midi_events = to_midi_events(&self.events, usec_per_tick);
-        let mut binary = Vec::new();
-        midi::serialize_smf(midi_events, usec_per_tick, &mut binary)
-            .expect("Cannot serialize midi track.");
         std::fs::write(&file_path, binary)
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
@@ -175,7 +155,6 @@ impl Track {
 
     pub fn commit(&mut self) {
         assert!(is_ordered(&self.events));
-        self.version += 1;
     }
 
     pub fn insert_event(&mut self, ev: TrackEvent) {
@@ -207,7 +186,7 @@ impl Track {
 
     pub fn shift_tail(&mut self, at: &Time, dt: i64) {
         dbg!("tail_shift", at, dt);
-        let mut changeset = Changeset::default();
+        let mut changeset = Changeset::empty();
         self.shift_events(&|ev| &ev.at > at, dt, &mut changeset);
         self.patch(&changeset);
         self.commit();

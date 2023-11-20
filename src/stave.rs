@@ -19,7 +19,7 @@ use crate::track::{
 };
 use crate::track_edit::{add_note, set_damper_to};
 use crate::track_history::{ActionId, TrackHistory};
-use crate::Pix;
+use crate::{util, Pix};
 
 // Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -120,18 +120,11 @@ impl Bookmarks {
     }
 
     pub fn load_from(&mut self, file_path: &PathBuf) {
-        let binary = std::fs::read(file_path)
-            .expect(&*format!("load bookmarks from {}", &file_path.display()));
-        self.list = rmp_serde::from_slice(&binary).expect("deserialize bookmarks");
+        self.list = util::load(file_path);
     }
 
     pub fn store_to(&self, file_path: &PathBuf) {
-        let mut binary = Vec::new();
-        self.list
-            .serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
-            .expect("serialize bookmarks");
-        std::fs::write(file_path, binary)
-            .expect(&*format!("save bookmarks to {}", &file_path.display()));
+        util::store(&self.list, file_path);
     }
 }
 
@@ -282,7 +275,6 @@ impl Stave {
                         &painter,
                         &track,
                     );
-                    self.track_version = track.version;
                 }
 
                 self.draw_cursor(

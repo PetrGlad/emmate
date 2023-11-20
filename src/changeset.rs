@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::track::{EventId, Note, TrackEvent, TrackEventType};
+use crate::track::{EventId, Note, Track, TrackEvent, TrackEventType};
 
 /// Simplest track edit operation. See Changeset for uses.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum EventAction {
     // TODO It is possible to recover necessary state by patching one of the recent (preferably the
     //   most recent) snapshots. Such snapshots (the ones that track event ids) are not
@@ -43,17 +43,29 @@ impl EventAction {
     }
 }
 
-/// Complete patch of a track edit action.
+/// Complete patch of a track editing action.
 /// TODO This should be a part of the persisted edit history, then it should contain the complete event values instead of ids.
 ///   Note that this would also require event ids that are unique within the whole project history (the generator value should be)
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Changeset {
     pub changes: HashMap<EventId, EventAction>,
 }
 
 impl Changeset {
+    pub fn empty() -> Self {
+        Changeset {
+            changes: HashMap::new(),
+        }
+    }
+
     pub fn add(&mut self, action: EventAction) {
         self.changes.insert(action.event_id(), action);
+    }
+
+    pub fn add_all(&mut self, actions: &Vec<EventAction>) {
+        for a in actions.iter().cloned() {
+            self.add(a);
+        }
     }
 
     pub fn merge(&mut self, other: Self) {
@@ -72,7 +84,7 @@ pub struct Patch {
 }
 
 impl Patch {
-    pub fn load(&mut self, file_path: PathBuf) {
+    pub fn load(file_path: PathBuf) -> Self {
         todo!("load changeset from file");
     }
 
@@ -90,7 +102,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn load(&mut self, file_path: PathBuf) {
+    pub fn of_track(version: VersionId, track: &Track) -> Self {
+        Snapshot {
+            version,
+            events: track.events.clone(),
+        }
+    }
+
+    pub fn load(file_path: PathBuf) -> Self {
         todo!("load changeset from file");
     }
 
