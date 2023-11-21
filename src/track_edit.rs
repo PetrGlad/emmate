@@ -1,11 +1,44 @@
-use crate::changeset::{Changeset, EventAction};
+// TODO (cleanup) All functions in this module should accept only immutable track.
+//   Review remaining usages that require mut Track.
+
+use std::collections::HashSet;
+
+use crate::changeset::{Changeset, EventAction, EventFn};
 use crate::common::Time;
 use crate::track::{
-    is_cc_switch_on, ControllerId, ControllerSetValue, Level, Note, Pitch, Track, TrackEvent,
-    TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    ControllerId, ControllerSetValue, EventId, is_cc_switch_on, Level, MAX_LEVEL, MIDI_CC_SUSTAIN_ID, Note,
+    Pitch, Track, TrackEvent, TrackEventType,
 };
 use crate::util;
-use crate::util::{range_contains, IdSeq};
+use crate::util::{IdSeq, range_contains};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TimeSelection {
+    pub from: Time,
+    pub to: Time,
+}
+
+impl TimeSelection {
+    pub fn length(&self) -> Time {
+        self.to - self.from
+    }
+
+    pub fn contains(&self, at: Time) -> bool {
+        self.from <= at && at < self.to
+    }
+
+    pub fn before(&self, at: Time) -> bool {
+        self.to <= at
+    }
+
+    pub fn after_start(&self, at: Time) -> bool {
+        self.from <= at
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.to - self.from <= 0
+    }
+}
 
 pub fn add_note(
     track: &mut Track,
@@ -23,6 +56,71 @@ pub fn add_note(
             duration: time_range.1 - time_range.0,
         }),
     }));
+}
+
+pub fn edit_events<Selector: Fn(&TrackEvent) -> bool>(
+    track: &mut Track,
+    changeset: &mut Changeset,
+    selector: &Selector,
+    action: &EventFn,
+) {
+    for ev in &mut track.events {
+        if selector(&ev) {
+            if let Some(a) = action(&ev) {
+                changeset.add(a);
+            }
+        }
+    }
+}
+
+pub fn delete_events(track: &mut Track, changeset: &mut Changeset, event_ids: &HashSet<EventId>) {
+    edit_events(track, changeset, &|ev| event_ids.contains(&ev.id), &|ev| {
+        Some(EventAction::Delete(ev.clone()))
+    });
+}
+
+pub fn tape_cut(track: &mut Track, changeset: &mut Changeset, time_selection: &TimeSelection) {
+    dbg!("tape_cut", time_selection);
+    edit_events(
+        track,
+        changeset,
+        &|ev| time_selection.contains(ev.at),
+        &|ev| Some(EventAction::Delete(ev.clone())),
+    );
+    shift_events(
+        track,
+        changeset,
+        &|ev| time_selection.before(ev.at),
+        -(time_selection.length() as i64),
+    );
+}
+
+pub fn shift_events<Pred: Fn(&TrackEvent) -> bool>(
+    track: &mut Track,
+    changeset: &mut Changeset,
+    selector: &Pred,
+    d: i64,
+) {
+    edit_events(track, changeset, selector, &move |ev| {
+        let mut nev = ev.clone();
+        nev.at += d;
+        Some(EventAction::Update(ev.clone(), nev))
+    });
+}
+
+pub fn tape_insert(track: &mut Track, changeset: &mut Changeset, time_selection: &TimeSelection) {
+    dbg!("tape_insert", time_selection);
+    shift_events(
+        track,
+        changeset,
+        &|ev| time_selection.after_start(ev.at),
+        time_selection.length() as i64,
+    );
+}
+
+pub fn shift_tail(track: &mut Track, changeset: &mut Changeset, at: &Time, dt: i64) {
+    dbg!("tail_shift", at, dt);
+    shift_events(track, changeset, &|ev| &ev.at >= at, dt);
 }
 
 fn clear_cc_events(

@@ -1,9 +1,9 @@
-use cpal::{FrameCount, SampleRate};
-use rodio::Source;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use cpal::{FrameCount, SampleRate};
+use rodio::Source;
 use vst::api::Supported;
 use vst::host::{Host, HostBuffer, PluginInstance, PluginLoader};
 use vst::plugin::{CanDo, Plugin};

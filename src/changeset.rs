@@ -1,8 +1,8 @@
-use crate::common::VersionId;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
+use crate::common::VersionId;
 use crate::track::{EventId, Note, Track, TrackEvent, TrackEventType};
 
 /// Simplest track edit operation. See Changeset for uses.
@@ -83,16 +83,6 @@ pub struct Patch {
     pub changes: Vec<EventAction>,
 }
 
-impl Patch {
-    pub fn load(file_path: PathBuf) -> Self {
-        todo!("load changeset from file");
-    }
-
-    pub fn store(&self, file_path: PathBuf) {
-        todo!("load changeset from file");
-    }
-}
-
 /// Serializable snapshot of a complete track state that can be exported or used as a base
 /// for Patch sequence. See also [Patch].
 #[derive(Serialize, Deserialize)]
@@ -108,22 +98,9 @@ impl Snapshot {
             events: track.events.clone(),
         }
     }
-
-    pub fn load(file_path: PathBuf) -> Self {
-        todo!("load changeset from file");
-    }
-
-    pub fn store(&self, file_path: PathBuf) {
-        todo!("load changeset from file");
-    }
 }
 
 pub type EventFn = dyn Fn(&TrackEvent) -> Option<EventAction> + 'static;
-
-pub struct UpdateCommand {
-    id: String,
-    proc: Box<EventFn>,
-}
 
 /// Convenience wrapper
 pub fn to_event_action<NoteFn: Fn(&Note) -> Option<Note> + 'static>(

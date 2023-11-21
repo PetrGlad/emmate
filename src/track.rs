@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
 
@@ -7,7 +7,7 @@ use midly::num::u4;
 use midly::{MidiMessage, TrackEventKind};
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction, EventFn};
+use crate::changeset::{Changeset, EventAction, Snapshot};
 use crate::common::Time;
 use crate::midi;
 use crate::util::{is_ordered, IdSeq};
@@ -26,7 +26,6 @@ pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
 pub const MIDI_CC_SUSTAIN_ID: ControllerId = 64;
 
 pub fn is_cc_switch_on(x: Level) -> bool {
-    // Pianoteq seem to support continuous damper values, may support this later.
     // Not using crappy SLP3-D anyway.
     x >= 64
 }
@@ -80,34 +79,6 @@ impl Ord for TrackEvent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TimeSelection {
-    pub from: Time,
-    pub to: Time,
-}
-
-impl TimeSelection {
-    pub fn length(&self) -> Time {
-        self.to - self.from
-    }
-
-    pub fn contains(&self, at: Time) -> bool {
-        self.from <= at && at < self.to
-    }
-
-    pub fn before(&self, at: Time) -> bool {
-        self.to <= at
-    }
-
-    pub fn after_start(&self, at: Time) -> bool {
-        self.from <= at
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.to - self.from <= 0
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct Track {
     /* Events should always be kept ordered by start time ascending.
@@ -134,23 +105,58 @@ impl Track {
             .expect(&*format!("Cannot save to {}", &file_path.display()));
     }
 
-    pub fn patch(&mut self, changeset: &Changeset) {
+    pub fn reset(&mut self, snapshot: Snapshot) {
+        self.events = snapshot.events;
+    }
+
+    fn index_events(&self) -> HashMap<EventId, TrackEvent> {
         let mut track_map = HashMap::with_capacity(self.events.len());
         for ev in &self.events {
-            track_map.insert(ev.id, ev);
+            track_map.insert(ev.id, ev.clone());
         }
+        track_map
+    }
+
+    fn splat_events(&mut self, indexed: &HashMap<EventId, TrackEvent>) {
+        self.events = indexed.values().cloned().collect();
+        self.events.sort();
+    }
+
+    pub fn patch(&mut self, changeset: &Changeset) {
+        // Can this be shorter? See also [revert]
+        let mut track_map = self.index_events();
         for ea in changeset.changes.values() {
             match ea.after() {
                 Some(ev) => {
-                    track_map.insert(ev.id, ev);
+                    assert_eq!(
+                        track_map.insert(ev.id, ev.clone()).is_some(),
+                        matches!(ea, EventAction::Update(_, _))
+                    );
                 }
                 None => {
-                    track_map.remove(&ea.event_id());
+                    assert!(track_map.remove(&ea.event_id()).is_some());
                 }
             }
         }
-        self.events = track_map.iter().map(|(_id, ev)| *ev).cloned().collect();
-        self.events.sort();
+        self.splat_events(&track_map);
+    }
+
+    pub fn revert(&mut self, changeset: &Changeset) {
+        let mut track_map = self.index_events();
+        for ea in changeset.changes.values() {
+            match ea.before() {
+                Some(ev) => {
+                    assert_eq!(
+                        track_map.insert(ev.id, ev.clone()).is_some(),
+                        matches!(ea, EventAction::Update(_, _))
+                    );
+                }
+                None => {
+                    assert!(track_map.remove(&ea.event_id()).is_some());
+                }
+            }
+        }
+        self.splat_events(&track_map);
     }
 
     pub fn commit(&mut self) {
@@ -160,84 +166,6 @@ impl Track {
     pub fn insert_event(&mut self, ev: TrackEvent) {
         let idx = self.events.partition_point(|x| x < &ev);
         self.events.insert(idx, ev);
-        self.commit();
-    }
-
-    pub fn tape_cut(&mut self, time_selection: &TimeSelection, changeset: &mut Changeset) {
-        dbg!("tape_cut", time_selection);
-        self.events.retain(|ev| !time_selection.contains(ev.at));
-        self.shift_events(
-            &|ev| time_selection.before(ev.at),
-            -(time_selection.length() as i64),
-            changeset,
-        );
-        self.commit();
-    }
-
-    pub fn tape_insert(&mut self, time_selection: &TimeSelection, changeset: &mut Changeset) {
-        dbg!("tape_insert", time_selection);
-        self.shift_events(
-            &|ev| time_selection.after_start(ev.at),
-            time_selection.length() as i64,
-            changeset,
-        );
-        self.commit();
-    }
-
-    pub fn shift_tail(&mut self, at: &Time, dt: i64) {
-        dbg!("tail_shift", at, dt);
-        let mut changeset = Changeset::empty();
-        self.shift_events(&|ev| &ev.at > at, dt, &mut changeset);
-        self.patch(&changeset);
-        self.commit();
-    }
-
-    pub fn shift_events<Pred: Fn(&TrackEvent) -> bool>(
-        &mut self,
-        selector: &Pred,
-        d: i64,
-        changeset: &mut Changeset,
-    ) {
-        self.edit_events(
-            selector,
-            &move |ev| {
-                let mut nev = ev.clone();
-                nev.at += d;
-                Some(EventAction::Update(ev.clone(), nev))
-            },
-            changeset,
-        );
-
-        //// // Should do this only for out-of-order events. Brute-forcing for now.
-        //// self.events.sort();
-        ///// self.commit();
-    }
-
-    pub fn edit_events<Selector: Fn(&TrackEvent) -> bool>(
-        &mut self,
-        selector: &Selector,
-        action: &EventFn,
-        changeset: &mut Changeset,
-    ) {
-        for ev in &mut self.events {
-            if selector(&ev) {
-                if let Some(a) = action(&ev) {
-                    changeset.add(a);
-                }
-            }
-        }
-        // TODO Commit?
-    }
-
-    pub fn delete_events(&mut self, event_ids: &HashSet<EventId>, changeset: &mut Changeset) {
-        self.events.retain(|ev| {
-            if !event_ids.contains(&ev.id) {
-                true
-            } else {
-                changeset.add(EventAction::Delete(ev.clone()));
-                false
-            }
-        });
         self.commit();
     }
 

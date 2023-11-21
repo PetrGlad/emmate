@@ -1,9 +1,10 @@
+use std::collections::BinaryHeap;
+use std::sync::{Arc, RwLock};
+
 use crate::common::Time;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::{Track, TrackEventType};
-use std::collections::BinaryHeap;
-use std::sync::{Arc, RwLock};
 
 pub struct TrackSource {
     track: Arc<RwLock<Track>>,
@@ -93,9 +94,10 @@ impl EventSource for TrackSource {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::track;
     use crate::track::TrackEvent;
+
+    use super::*;
 
     #[test]
     fn empty_track() {

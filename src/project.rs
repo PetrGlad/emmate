@@ -1,6 +1,7 @@
-use crate::track_history::TrackHistory;
 use std::fs;
 use std::path::PathBuf;
+
+use crate::track_history::TrackHistory;
 
 pub struct Project {
     pub history: TrackHistory,
@@ -9,7 +10,7 @@ pub struct Project {
 
 impl Project {
     const DIRECTORY_NAME_SUFFIX: &'static str = "emmate";
-    const SNAPSHOTS_DIR_NAME: &'static str = "snapshots";
+    const HISTORY_DIR_NAME: &'static str = "history";
 
     pub fn open_file(source_file: &PathBuf) -> Project {
         dbg!("source file", source_file.to_string_lossy());
@@ -24,7 +25,7 @@ impl Project {
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
 
         let mut snapshots_dir = directory.clone();
-        snapshots_dir.push(Self::SNAPSHOTS_DIR_NAME);
+        snapshots_dir.push(Self::HISTORY_DIR_NAME);
 
         let mut history = TrackHistory::with_directory(&snapshots_dir);
         if !snapshots_dir.is_dir() {

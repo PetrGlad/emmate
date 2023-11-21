@@ -1,8 +1,13 @@
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
+use rmp::decode::RmpRead;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic;
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 pub type Range<T> = (T, T);
 
@@ -44,14 +49,25 @@ impl IdSeq {
 
 pub fn load<T: DeserializeOwned>(file_path: &PathBuf) -> T {
     let binary = std::fs::read(file_path).expect(&*format!("load from {}", &file_path.display()));
+    let mut decoder = GzDecoder::new(binary.as_slice());
+    let mut binary = vec![];
+    decoder.read_to_end(&mut binary).expect("unzip serialized");
     rmp_serde::from_slice(&binary).expect("deserialize")
 }
 
 pub fn store<T: Serialize>(x: &T, file_path: &PathBuf) {
     let mut binary = Vec::new();
-    x.serialize(&mut rmp_serde::Serializer::new(&mut binary).with_struct_map())
-        .expect("serialize");
-    std::fs::write(file_path, binary).expect(&*format!("write to {}", &file_path.display()));
+    // TODO When using compact representation, add some format version info in the data and/or in file names.
+    x.serialize(
+        &mut rmp_serde::Serializer::new(&mut binary), /*.with_struct_map()*/
+    )
+    .expect("serialize");
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder
+        .write_all(&binary.as_slice())
+        .expect("gzip serialized");
+    let binary = encoder.finish().expect("gzip serialized");
+    std::fs::write(file_path, &binary).expect(&*format!("write to {}", &file_path.display()));
 }
 
 #[cfg(test)]

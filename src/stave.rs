@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{Changeset, EventAction};
 use crate::common::{Time, VersionId};
 use crate::track::{
-    EventId, Level, Note, Pitch, TimeSelection, Track, TrackEvent, TrackEventType,
-    MIDI_CC_SUSTAIN_ID,
+    EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
-use crate::track_edit::{add_note, set_damper_to};
+use crate::track_edit::{
+    add_note, delete_events, edit_events, set_damper_to, shift_events, shift_tail, tape_cut,
+    tape_insert, TimeSelection,
+};
 use crate::track_history::{ActionId, TrackHistory};
 use crate::{util, Pix};
 
@@ -177,8 +179,7 @@ impl Stave {
     }
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
-        todo!();
-        // self.history.with_track(|track| track.save_to(file_path));
+        self.history.with_track(|track| track.export_smf(file_path));
     }
 
     pub fn load_from(&mut self, file_path: &PathBuf) {
@@ -416,10 +417,11 @@ impl Stave {
     const KEYBOARD_TIME_STEP: Time = 10_000;
 
     fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
-        // Need to see if duplication here can be reduced.
-        // Likely the dispatch needs some hash map that for each input state defines a unique command.
-        // Need to support focus somehow so the commands only active when stave is focused.
-        // Currently commands also affect other widgets (e.g. arrows change button focus).
+        // TODO
+        //   Need to see if duplication here can be reduced.
+        //   Likely the dispatch needs some hash map that for each input state defines a unique command.
+        //   Need to support focus somehow so the commands only active when stave is focused.
+        //   Currently commands also affect other widgets (e.g. arrows change button focus).
 
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::Q))
@@ -436,10 +438,10 @@ impl Stave {
         }) {
             self.history.update_track(None, |track, changeset| {
                 if let Some(time_selection) = &self.time_selection {
-                    track.tape_cut(&time_selection, changeset);
+                    tape_cut(track, changeset, &time_selection);
                 }
-                // Deleting both time and event selection in one command, these can be separate.
-                track.delete_events(&self.note_selection.selected, changeset);
+                // Deleting both time and event selection in one command for convenience, these can be separate.
+                delete_events(track, changeset, &self.note_selection.selected);
             });
         }
         if response.ctx.input_mut(|i| {
@@ -450,7 +452,7 @@ impl Stave {
         }) {
             self.history.update_track(None, |track, changeset| {
                 if let Some(time_selection) = &self.time_selection {
-                    track.tape_insert(&time_selection, changeset);
+                    tape_insert(track, changeset, &time_selection);
                 }
             });
         }
@@ -464,7 +466,12 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("tail_shift_right"), |track, changeset| {
-                    track.shift_tail(&(self.cursor_position), Stave::KEYBOARD_TIME_STEP);
+                    shift_tail(
+                        track,
+                        changeset,
+                        &(self.cursor_position),
+                        Stave::KEYBOARD_TIME_STEP,
+                    );
                 });
         }
         if response.ctx.input_mut(|i| {
@@ -475,7 +482,12 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("tail_shift_left"), |track, changeset| {
-                    track.shift_tail(&(self.cursor_position), -Stave::KEYBOARD_TIME_STEP);
+                    shift_tail(
+                        track,
+                        changeset,
+                        &(self.cursor_position),
+                        -Stave::KEYBOARD_TIME_STEP,
+                    );
                 });
         }
 
@@ -488,10 +500,11 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("note_shift_right"), |track, changeset| {
-                    track.shift_events(
+                    shift_events(
+                        track,
+                        changeset,
                         &(|ev| self.note_selection.contains(ev)),
                         Stave::KEYBOARD_TIME_STEP,
-                        changeset,
                     );
                 });
         }
@@ -503,17 +516,18 @@ impl Stave {
         }) {
             self.history
                 .update_track(Some("note_shift_left"), |track, changeset| {
-                    track.shift_events(
+                    shift_events(
+                        track,
+                        changeset,
                         &(|ev| self.note_selection.contains(ev)),
                         -Stave::KEYBOARD_TIME_STEP,
-                        changeset,
                     );
                 });
         }
 
         // Note edits
         if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::H))
         }) {
             self.edit_selected_notes(Some("note_duration_increase"), |note| {
                 let mut note = note.clone();
@@ -525,7 +539,7 @@ impl Stave {
             });
         }
         if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::L))
         }) {
             self.edit_selected_notes(Some("note_duration_decrease"), |note| {
                 let mut note = note.clone();
@@ -658,6 +672,7 @@ impl Stave {
         action_id: ActionId,
         action: Action,
     ) {
+        // Adapt note action as event action.
         let event_action = move |ev: &TrackEvent| {
             if let TrackEvent {
                 event: TrackEventType::Note(n),
@@ -673,10 +688,11 @@ impl Stave {
             None
         };
         self.history.update_track(action_id, |track, changeset| {
-            track.edit_events(
+            edit_events(
+                track,
+                changeset,
                 &|ev| self.note_selection.contains(ev),
                 &event_action,
-                changeset,
             );
         });
     }

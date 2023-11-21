@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::common::Time;
+use eframe::{self, CreationContext, egui};
 use eframe::egui::{Modifiers, Vec2};
-use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
+use crate::common::Time;
 use crate::engine::{Engine, EngineCommand, StatusEvent};
 use crate::project::Project;
 use crate::stave::{Bookmarks, Stave};

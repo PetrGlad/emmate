@@ -1,9 +1,9 @@
+use std::sync::{Arc, mpsc, Mutex};
 use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex};
 
-use cpal::traits::{DeviceTrait, HostTrait};
-use cpal::SampleFormat::F32;
 use cpal::{BufferSize, StreamConfig};
+use cpal::SampleFormat::F32;
+use cpal::traits::{DeviceTrait, HostTrait};
 use midir::{MidiInput, MidiInputConnection};
 use midly::live::LiveEvent;
 use rodio::OutputStream;

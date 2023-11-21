@@ -1,4 +1,3 @@
-use eframe::egui::ahash::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -37,19 +36,24 @@ pub struct TrackHistory {
     pub version: VersionId,
     pub directory: PathBuf,
     throttle: Option<ActionThrottle>,
-    // TODO Changesets should be persisted. Keeping in memory as a prototype implementation.
-    changesets: HashMap<VersionId, Changeset>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Version {
     id: VersionId,
-    snapshot_path: PathBuf,
+    snapshot_path: Option<PathBuf>,
+    diff_path: Option<PathBuf>,
+}
+
+impl Version {
+    pub fn is_empty(&self) -> bool {
+        self.snapshot_path.is_none() && self.diff_path.is_none()
+    }
 }
 
 impl TrackHistory {
-    const SNAPSHOT_NAME_EXT: &'static str = ".snapshot.mpack";
-    const DIFF_NAME_EXT: &'static str = ".diff.mpack";
+    const SNAPSHOT_NAME_EXT: &'static str = "snapshot.mpack";
+    const DIFF_NAME_EXT: &'static str = "diff.mpack";
 
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read().expect("Read track.");
@@ -66,24 +70,30 @@ impl TrackHistory {
             let mut changeset = Changeset::empty();
             action(&mut track, &mut changeset);
             track.patch(&changeset);
+            track.commit();
             changeset
         };
 
-        let now = Instant::now();
-        if let Some(throttle) = &mut self.throttle {
-            if throttle.action_id == action_id && throttle.is_waiting(now) {
-                throttle.changeset.merge(changeset);
-                return;
-            }
-            let throttle = mem::replace(&mut self.throttle, None).unwrap();
-            self.update(throttle.changeset);
-        } else {
-            self.throttle = Some(ActionThrottle {
-                timestamp: now,
-                action_id,
-                changeset,
-            });
-        }
+        // TODO Reimplement throttling (batch sequences of repeatable
+        //   heavy operations like tail_shift).
+        dbg!(action_id, changeset.changes.len());
+        self.update(changeset);
+        // let now = Instant::now();
+        // if let Some(throttle) = &mut self.throttle {
+        //     if action_id.is_some() && throttle.action_id == action_id && throttle.is_waiting(now) {
+        //         throttle.changeset.merge(changeset);
+        //         return;
+        //     }
+        //     let throttle = mem::replace(&mut self.throttle, None).unwrap();
+        //     self.update(throttle.changeset);
+        //     self.throttle = None;
+        // } else {
+        //     self.throttle = Some(ActionThrottle {
+        //         timestamp: now,
+        //         action_id,
+        //         changeset,
+        //     });
+        // }
     }
 
     pub fn do_pending(&mut self) {
@@ -100,69 +110,100 @@ impl TrackHistory {
     }
 
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
-    pub fn update(&mut self, changeset: Changeset) {
+    fn update(&mut self, changeset: Changeset) {
+        if changeset.changes.is_empty() {
+            return;
+        }
+        // The changeset should be already applied to track by now.
         self.push(changeset);
         self.discard_tail();
     }
 
-    // version_diff < 0 for undo, version_diff > 0 to the next version or redo.
-    pub fn shift_version(&mut self, version_diff: VersionId) -> Option<VersionId> {
-        let v = self.version + version_diff;
-        if v >= 0 {
-            self.version = v;
-            Some(v)
-        } else {
-            None
-        }
+    pub fn is_valid_version_id(v: VersionId) -> bool {
+        v >= 0
     }
 
-    pub fn go_to_version(&mut self) -> bool {
-        if let Some(v) = self.get_version(self.version) {
-            let track = self.track.clone();
-            let mut track = track.write().expect("Read track.");
-            todo!();
-            // track.load_from_snapshot(&v.snapshot_path);
-            // self.track_version = track.version;
-            // self.write_meta();
-            // true
-        } else {
-            false
+    pub fn go_to_version(&mut self, version_id: VersionId) -> bool {
+        assert!(TrackHistory::is_valid_version_id(version_id));
+        let version = self.get_version(version_id);
+        assert_eq!(version.id, version_id);
+        if version.is_empty() {
+            return false;
         }
+        let track = self.track.clone();
+        let mut track = track.write().expect("Read track.");
+        // TODO Support multiple snapshots. Now expecting only a starting one with id 0.
+        //   Should use snapshot if it is found but diff is missing.
+        //   Maybe prefer snapshots when both diff and snapshot are present.
+        if let Some(snapshot_path) = version.snapshot_path {
+            track.reset(util::load(&snapshot_path));
+            self.version = version.id;
+            return true;
+        }
+        // Replays
+        while self.version < version_id {
+            let diff: Patch = util::load(&self.diff_path(self.version + 1));
+            assert_eq!(diff.base_version, self.version);
+            assert!(diff.version > self.version);
+            let mut cs = Changeset::empty();
+            cs.add_all(&diff.changes);
+            track.patch(&cs);
+            self.version = diff.version;
+        }
+        // Rollbacks
+        while self.version > version_id {
+            let diff: Patch = util::load(&self.diff_path(self.version));
+            assert_eq!(diff.version, self.version);
+            assert!(diff.base_version < self.version);
+            let mut cs = Changeset::empty();
+            cs.add_all(&diff.changes);
+            track.revert(&cs);
+            self.version = diff.base_version;
+        }
+        dbg!(self.version, version_id);
+        self.version == version_id
     }
 
     /// Save current version into history.
     pub fn push(&mut self, changeset: Changeset) {
-        self.shift_version(1).unwrap();
-        self.changesets.insert(self.version, changeset);
-        let track = self.track.clone();
-        let track = track.read().expect("Read track.");
-        todo!();
-        // track.save_to(&self.current_snapshot_path());
-        // self.track_version = track.version;
-        // self.write_meta();
+        let diff = Patch {
+            base_version: self.version,
+            version: self.version + 1,
+            changes: changeset.changes.values().cloned().collect(),
+        };
+        util::store(&diff, &self.diff_path(diff.version));
+        // TODO also store a new snapshot here if necessary
+        //   (avoid long timeouts and long diff-only runs between snapshots).
+        self.version = diff.version;
+        self.write_meta();
     }
 
-    /// Restore track from the last saved version.
+    /// Maybe undo last edit action.
     pub fn undo(&mut self) {
-        if self.shift_version(-1).is_some() {
-            if !self.go_to_version() {
-                self.shift_version(1);
-            }
+        let prev_version_id = self.version - 1;
+        if TrackHistory::is_valid_version_id(prev_version_id) {
+            assert!(self.go_to_version(prev_version_id));
         }
     }
 
+    /// Maybe redo next edit action.
     pub fn redo(&mut self) {
-        if self.shift_version(1).is_some() {
-            if !self.go_to_version() {
-                self.shift_version(-1);
-            }
-        }
+        self.go_to_version(self.version + 1);
     }
 
     fn discard_tail(&mut self) {
-        for v in self.list_snapshots() {
-            if self.version < v.id {
-                fs::remove_file(v.snapshot_path).expect("Delete snapshot.");
+        let mut version_id = self.version;
+        loop {
+            version_id += 1;
+            let version = self.get_version(version_id);
+            if version.is_empty() {
+                break;
+            }
+            if let Some(path) = version.snapshot_path {
+                fs::remove_file(path).expect("delete snapshot");
+            }
+            if let Some(path) = version.diff_path {
+                fs::remove_file(path).expect("delete diff");
             }
         }
     }
@@ -200,7 +241,6 @@ impl TrackHistory {
             version: 0,
             track: Default::default(),
             throttle: None,
-            changesets: HashMap::default(),
         }
     }
 
@@ -218,9 +258,9 @@ impl TrackHistory {
             );
         }
         let version = self.version;
-        self.update_track(None, |track, changeset| {
+        self.update_track(None, |track, _changeset| {
             track.import_smf(source_file);
-            Snapshot::of_track(version, track).store(starting_snapshot_path);
+            util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
         });
         self.write_meta();
         self
@@ -228,24 +268,15 @@ impl TrackHistory {
 
     pub fn open(&mut self) {
         Self::check_directory_writable(&self.directory);
-        dbg!(self.list_snapshots().collect::<Vec<Version>>());
         let meta = self.load_meta();
-        self.version = meta.current_version;
-        let mut track = self.track.write().expect("Write to track.");
-        track.id_seq = IdSeq::new(meta.id_seq);
+        let initial_version_id = 0;
         {
-            // TODO Implementation: for now use only starting snapshot, and diffs.
-            let mut v = 0;
-            let ss = Snapshot::load(self.diff_path(v));
-            track.events = ss.events;
-            while v <= self.version {
-                let d = Patch::load(self.diff_path(v));
-                let mut cs = Changeset::empty();
-                cs.add_all(&d.changes);
-                track.patch(&cs);
-                v += 1;
-            }
+            let mut track = self.track.write().expect("Write to track.");
+            track.id_seq = IdSeq::new(meta.id_seq);
+            track.reset(util::load(&self.snapshot_path(initial_version_id)));
         }
+        self.version = initial_version_id;
+        assert!(self.go_to_version(meta.current_version));
     }
 
     fn write_meta(&self) {
@@ -261,20 +292,16 @@ impl TrackHistory {
         util::load(&self.make_meta_path())
     }
 
-    fn list_snapshots(&self) -> impl Iterator<Item = Version> {
+    fn list_snapshots(&self) -> impl Iterator<Item = (VersionId, PathBuf)> {
         let mut pattern = self.directory.to_owned();
         pattern.push("*.".to_string() + Self::SNAPSHOT_NAME_EXT);
         let files = glob(pattern.to_str().unwrap()).expect("List snapshots directory.");
         files
-            // XXX `flatten` may hide metadata errors
-            .flatten()
+            .flatten() // XXX `flatten` may hide metadata errors.
             .map(|p| {
                 assert!(p.is_file());
                 if let Some(id) = Self::parse_snapshot_name(&p) {
-                    Some(Version {
-                        id,
-                        snapshot_path: p.to_owned(),
-                    })
+                    Some((id, p.to_owned()))
                 } else {
                     None
                 }
@@ -282,20 +309,26 @@ impl TrackHistory {
             .flatten()
     }
 
-    fn get_version(&self, version_id: VersionId) -> Option<Version> {
-        let path = self.diff_path(version_id);
-        if path.is_file() {
-            Some(Version {
-                id: version_id,
-                snapshot_path: path,
-            })
-        } else {
-            None
+    fn get_version(&self, version_id: VersionId) -> Version {
+        let diff_path = self.diff_path(version_id);
+        let snapshot_path = self.snapshot_path(version_id);
+        Version {
+            id: version_id,
+            snapshot_path: if snapshot_path.is_file() {
+                Some(snapshot_path)
+            } else {
+                None
+            },
+            diff_path: if diff_path.is_file() {
+                Some(diff_path)
+            } else {
+                None
+            },
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.list_snapshots().next().is_none()
+        self.get_version(0).is_empty()
     }
 
     pub fn parse_snapshot_name(file: &PathBuf) -> Option<VersionId> {
@@ -328,7 +361,7 @@ impl TrackHistory {
     }
 
     pub fn current_snapshot_path(&self) -> PathBuf {
-        self.diff_path(self.version)
+        self.snapshot_path(self.version)
     }
 }
 

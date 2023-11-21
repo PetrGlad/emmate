@@ -1166,6 +1166,7 @@ dependencies = [
  "cpal",
  "eframe",
  "egui_extras",
+ "flate2",
  "glob",
  "log",
  "midir",
