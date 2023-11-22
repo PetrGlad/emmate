@@ -183,9 +183,8 @@ impl Stave {
     }
 
     pub fn load_from(&mut self, file_path: &PathBuf) {
-        todo!();
-        // self.history
-        //     .update_track(None, |track, _| track.load_from(file_path));
+        self.history
+            .update_track(None, |track, _| track.import_smf(file_path));
     }
 
     /// Pixel/uSec, can be cached.
@@ -924,7 +923,7 @@ mod tests {
 
     #[test]
     fn bookmarks_serialization() {
-        let file_path = PathBuf::from("./target/test_bookmarks_serialization.mpack");
+        let file_path = PathBuf::from("./target/test_bookmarks_serialization");
 
         let mut bookmarks = Bookmarks::new(&file_path);
         bookmarks.set(12);

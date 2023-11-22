@@ -303,106 +303,20 @@ mod tests {
         assert!(track.events.is_empty());
 
         let path = PathBuf::from("./target/test_track_load.mid");
-        track.save_to(&path);
-        track.load_from(&path);
+        track.export_smf(&path);
+        track.import_smf(&path);
         assert!(track.events.is_empty());
 
         let short = PathBuf::from("./test/files/short.mid");
-        track.load_from(&short);
+        track.import_smf(&short);
         assert_eq!(track.events.len(), 10);
-        track.save_to(&path);
+        track.export_smf(&path);
 
         // The recorded SMD may have some additional system/heartbeat events,
         // so comparing the sequence only after a save.
         let mut track_loaded = Track::default();
-        track_loaded.load_from(&path);
+        track_loaded.import_smf(&path);
         assert_eq!(track_loaded.events.len(), 10);
         assert_eq!(track.events, track_loaded.events);
-    }
-
-    fn make_test_track() -> Track {
-        let mut events: Vec<TrackEvent> = vec![];
-        events.push(TrackEvent {
-            id: 10,
-            at: 10,
-            event: TrackEventType::Controller(ControllerSetValue {
-                controller_id: 13,
-                value: 55,
-            }),
-        });
-        events.push(TrackEvent {
-            id: 20,
-            at: 14,
-            event: TrackEventType::Note(Note {
-                pitch: 10,
-                velocity: 20,
-                duration: 30,
-            }),
-        });
-        events.push(TrackEvent {
-            id: 30,
-            at: 15,
-            event: TrackEventType::Controller(ControllerSetValue {
-                controller_id: 44,
-                value: 60,
-            }),
-        });
-        events.push(TrackEvent {
-            id: 40,
-            at: 20,
-            event: TrackEventType::Controller(ControllerSetValue {
-                controller_id: 13,
-                value: 66,
-            }),
-        });
-        Track::new(events)
-    }
-
-    #[test]
-    fn cc_value_at() {
-        let track = make_test_track();
-
-        assert_eq!(55, track.cc_value_at(&20, &13));
-        assert_eq!(66, track.cc_value_at(&21, &13));
-        assert_eq!(60, track.cc_value_at(&21, &44));
-        assert_eq!(0, track.cc_value_at(&21, &99));
-        assert_eq!(0, track.cc_value_at(&0, &99));
-    }
-
-    #[test]
-    fn set_damper_to() {
-        let mut track = make_test_track();
-        track.set_damper_to((14, 17), true);
-
-        let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
-        assert_eq!(
-            expected_ids,
-            track
-                .events
-                .iter()
-                .map(|ev| ev.id)
-                .collect::<Vec<EventId>>()
-        );
-
-        let expected_states: Vec<Option<bool>> = vec![
-            Some(false),
-            Some(true),
-            None,
-            Some(false),
-            Some(false),
-            Some(true),
-        ];
-        assert_eq!(
-            expected_states,
-            track
-                .events
-                .iter()
-                .map(|ev| if let TrackEventType::Controller(ctl) = &ev.event {
-                    Some(is_cc_switch_on(ctl.value))
-                } else {
-                    None
-                })
-                .collect::<Vec<Option<bool>>>()
-        );
     }
 }

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use eframe::{self, CreationContext, egui};
 use eframe::egui::{Modifiers, Vec2};
+use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::common::Time;
@@ -33,7 +33,7 @@ impl EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
 
         let mut bookmarks_path = project.home_path.clone();
-        bookmarks_path.push("bookmarks.mpack");
+        bookmarks_path.push("bookmarks");
         let mut bookmarks = Bookmarks::new(&bookmarks_path);
         if bookmarks_path.is_file() {
             bookmarks.load_from(&bookmarks_path);

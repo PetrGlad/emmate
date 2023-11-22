@@ -1,16 +1,16 @@
 // TODO (cleanup) All functions in this module should accept only immutable track.
-//   Review remaining usages that require mut Track.
+//   It is possible to not use id generator here, by having some id-placeholder value.
 
 use std::collections::HashSet;
 
 use crate::changeset::{Changeset, EventAction, EventFn};
 use crate::common::Time;
 use crate::track::{
-    ControllerId, ControllerSetValue, EventId, is_cc_switch_on, Level, MAX_LEVEL, MIDI_CC_SUSTAIN_ID, Note,
-    Pitch, Track, TrackEvent, TrackEventType,
+    is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
+    TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::util;
-use crate::util::{IdSeq, range_contains};
+use crate::util::{range_contains, IdSeq};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TimeSelection {
@@ -205,4 +205,99 @@ fn cc_value_at(events: &Vec<TrackEvent>, at: &Time, cc_id: &ControllerId) -> Lev
         }
     }
     return 0; // default
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_track() -> Track {
+        let mut events: Vec<TrackEvent> = vec![];
+        events.push(TrackEvent {
+            id: 10,
+            at: 10,
+            event: TrackEventType::Controller(ControllerSetValue {
+                controller_id: 13,
+                value: 55,
+            }),
+        });
+        events.push(TrackEvent {
+            id: 20,
+            at: 14,
+            event: TrackEventType::Note(Note {
+                pitch: 10,
+                velocity: 20,
+                duration: 30,
+            }),
+        });
+        events.push(TrackEvent {
+            id: 30,
+            at: 15,
+            event: TrackEventType::Controller(ControllerSetValue {
+                controller_id: 44,
+                value: 60,
+            }),
+        });
+        events.push(TrackEvent {
+            id: 40,
+            at: 20,
+            event: TrackEventType::Controller(ControllerSetValue {
+                controller_id: 13,
+                value: 66,
+            }),
+        });
+        let mut track = Track::default();
+        track.events = events;
+        track
+    }
+
+    #[test]
+    fn check_cc_value_at() {
+        let track = make_test_track();
+
+        assert_eq!(55, cc_value_at(&track.events, &20, &13));
+        assert_eq!(66, cc_value_at(&track.events, &21, &13));
+        assert_eq!(60, cc_value_at(&track.events, &21, &44));
+        assert_eq!(0, cc_value_at(&track.events, &21, &99));
+        assert_eq!(0, cc_value_at(&track.events, &0, &99));
+    }
+
+    #[test]
+    fn check_set_damper_to() {
+        let mut track = make_test_track();
+        let mut changeset = Changeset::empty();
+        set_damper_to(&mut track, &mut changeset, (14, 17), true);
+        track.patch(&changeset);
+
+        let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
+        assert_eq!(
+            expected_ids,
+            track
+                .events
+                .iter()
+                .map(|ev| ev.id)
+                .collect::<Vec<EventId>>()
+        );
+
+        let expected_states: Vec<Option<bool>> = vec![
+            Some(false),
+            Some(true),
+            None,
+            Some(false),
+            Some(false),
+            Some(true),
+        ];
+        assert_eq!(
+            expected_states,
+            track
+                .events
+                .iter()
+                .map(|ev| if let TrackEventType::Controller(ctl) = &ev.event {
+                    Some(is_cc_switch_on(ctl.value))
+                } else {
+                    None
+                })
+                .collect::<Vec<Option<bool>>>()
+        );
+    }
 }

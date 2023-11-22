@@ -52,8 +52,8 @@ impl Version {
 }
 
 impl TrackHistory {
-    const SNAPSHOT_NAME_EXT: &'static str = "snapshot.mpack";
-    const DIFF_NAME_EXT: &'static str = "diff.mpack";
+    const SNAPSHOT_NAME_EXT: &'static str = "snapshot";
+    const DIFF_NAME_EXT: &'static str = "changeset";
 
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read().expect("Read track.");
@@ -272,7 +272,7 @@ impl TrackHistory {
         let initial_version_id = 0;
         {
             let mut track = self.track.write().expect("Write to track.");
-            track.id_seq = IdSeq::new(meta.id_seq);
+            track.id_seq = IdSeq::new(meta.next_id);
             track.reset(util::load(&self.snapshot_path(initial_version_id)));
         }
         self.version = initial_version_id;
@@ -281,7 +281,7 @@ impl TrackHistory {
 
     fn write_meta(&self) {
         let meta = Meta {
-            id_seq: self.with_track(|t| t.id_seq.current()),
+            next_id: self.with_track(|t| t.id_seq.current()),
             current_version: self.version,
         };
         dbg!(&meta);
@@ -356,7 +356,7 @@ impl TrackHistory {
 
     fn make_meta_path(&self) -> PathBuf {
         let mut path = self.directory.clone();
-        path.push("meta.mpack");
+        path.push("meta");
         path
     }
 
@@ -368,7 +368,7 @@ impl TrackHistory {
 /// Additional history data that should be persisted.
 #[derive(Debug, Serialize, Deserialize)]
 struct Meta {
-    id_seq: u64,
+    next_id: u64,
     current_version: VersionId,
 }
 
@@ -381,11 +381,11 @@ mod tests {
         assert!(TrackHistory::parse_snapshot_name(&PathBuf::from("asdfsadf")).is_none());
         assert_eq!(
             Some(5),
-            TrackHistory::parse_snapshot_name(&PathBuf::from("5.emmrev.mid"))
+            TrackHistory::parse_snapshot_name(&PathBuf::from("5.snapshot"))
         );
         assert_eq!(
             Some(145),
-            TrackHistory::parse_snapshot_name(&PathBuf::from("145.emmrev.mid"))
+            TrackHistory::parse_snapshot_name(&PathBuf::from("145.snapshot"))
         );
     }
 
@@ -393,7 +393,7 @@ mod tests {
     fn snapshot_path() {
         let history = TrackHistory::with_directory(&PathBuf::from("."));
         assert_eq!(
-            TrackHistory::parse_snapshot_name(&history.diff_path(123)),
+            TrackHistory::parse_snapshot_name(&history.snapshot_path(123)),
             Some(123)
         );
     }
@@ -405,6 +405,7 @@ mod tests {
         history.write_meta();
         history.version = 12;
         let m = history.load_meta();
-        assert_eq!(321, m.unwrap().current_version);
+        assert_eq!(321, m.current_version);
+        assert_eq!(0, m.next_id);
     }
 }
