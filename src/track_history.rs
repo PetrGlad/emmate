@@ -34,6 +34,7 @@ pub struct TrackHistory {
     /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub track: Arc<RwLock<Track>>,
     pub version: VersionId,
+    pub max_version: VersionId, // May be higher than self.version after an undo.
     pub directory: PathBuf,
     throttle: Option<ActionThrottle>,
 }
@@ -116,7 +117,7 @@ impl TrackHistory {
         }
         // The changeset should be already applied to track by now.
         self.push(changeset);
-        self.discard_tail();
+        self.discard_tail(self.max_version);
     }
 
     pub fn is_valid_version_id(v: VersionId) -> bool {
@@ -130,37 +131,40 @@ impl TrackHistory {
         if version.is_empty() {
             return false;
         }
-        let track = self.track.clone();
-        let mut track = track.write().expect("Read track.");
-        // TODO Support multiple snapshots. Now expecting only a starting one with id 0.
-        //   Should use snapshot if it is found but diff is missing.
-        //   Maybe prefer snapshots when both diff and snapshot are present.
-        if let Some(snapshot_path) = version.snapshot_path {
-            track.reset(util::load(&snapshot_path));
-            self.version = version.id;
-            return true;
-        }
-        // Replays
-        while self.version < version_id {
-            let diff: Patch = util::load(&self.diff_path(self.version + 1));
-            assert_eq!(diff.base_version, self.version);
-            assert!(diff.version > self.version);
-            let mut cs = Changeset::empty();
-            cs.add_all(&diff.changes);
-            track.patch(&cs);
-            self.version = diff.version;
-        }
-        // Rollbacks
-        while self.version > version_id {
-            let diff: Patch = util::load(&self.diff_path(self.version));
-            assert_eq!(diff.version, self.version);
-            assert!(diff.base_version < self.version);
-            let mut cs = Changeset::empty();
-            cs.add_all(&diff.changes);
-            track.revert(&cs);
-            self.version = diff.base_version;
+        {
+            let track = self.track.clone();
+            let mut track = track.write().expect("Read track.");
+            // TODO Support multiple snapshots. Now expecting only a starting one with id 0.
+            //   Should use snapshot if it is found but diff is missing.
+            //   Maybe prefer snapshots when both diff and snapshot are present.
+            if let Some(snapshot_path) = version.snapshot_path {
+                track.reset(util::load(&snapshot_path));
+                self.set_version(version.id);
+                return true;
+            }
+            // Replays
+            while self.version < version_id {
+                let diff: Patch = util::load(&self.diff_path(self.version + 1));
+                assert_eq!(diff.base_version, self.version);
+                assert!(diff.version > self.version);
+                let mut cs = Changeset::empty();
+                cs.add_all(&diff.changes);
+                track.patch(&cs);
+                self.set_version(diff.version);
+            }
+            // Rollbacks
+            while self.version > version_id {
+                let diff: Patch = util::load(&self.diff_path(self.version));
+                assert_eq!(diff.version, self.version);
+                assert!(diff.base_version < self.version);
+                let mut cs = Changeset::empty();
+                cs.add_all(&diff.changes);
+                track.revert(&cs);
+                self.set_version(diff.base_version);
+            }
         }
         dbg!(self.version, version_id);
+        self.write_meta();
         self.version == version_id
     }
 
@@ -174,7 +178,8 @@ impl TrackHistory {
         util::store(&diff, &self.diff_path(diff.version));
         // TODO also store a new snapshot here if necessary
         //   (avoid long timeouts and long diff-only runs between snapshots).
-        self.version = diff.version;
+        self.set_version(diff.version);
+        self.max_version = self.version;
         self.write_meta();
     }
 
@@ -191,8 +196,10 @@ impl TrackHistory {
         self.go_to_version(self.version + 1);
     }
 
-    fn discard_tail(&mut self) {
-        let mut version_id = self.version;
+    fn discard_tail(&mut self, max_version: VersionId) {
+        // Note that  in some cases (e.g. program termination) this procedure may not complete,
+        // leaving some of the files in place.
+        let mut version_id = max_version;
         loop {
             version_id += 1;
             let version = self.get_version(version_id);
@@ -239,6 +246,7 @@ impl TrackHistory {
         Self {
             directory: directory.to_owned(),
             version: 0,
+            max_version: 0,
             track: Default::default(),
             throttle: None,
         }
@@ -275,14 +283,24 @@ impl TrackHistory {
             track.id_seq = IdSeq::new(meta.next_id);
             track.reset(util::load(&self.snapshot_path(initial_version_id)));
         }
-        self.version = initial_version_id;
+        self.set_version(initial_version_id);
         assert!(self.go_to_version(meta.current_version));
+    }
+
+    fn set_version(&mut self, version_id: VersionId) {
+        assert!(TrackHistory::is_valid_version_id(version_id));
+        assert!(TrackHistory::is_valid_version_id(self.max_version));
+        self.version = version_id;
+        if self.max_version < self.version {
+            self.max_version = self.version
+        }
     }
 
     fn write_meta(&self) {
         let meta = Meta {
             next_id: self.with_track(|t| t.id_seq.current()),
             current_version: self.version,
+            max_version: self.max_version,
         };
         dbg!(&meta);
         util::store(&meta, &self.make_meta_path());
@@ -370,6 +388,7 @@ impl TrackHistory {
 struct Meta {
     next_id: u64,
     current_version: VersionId,
+    max_version: VersionId,
 }
 
 #[cfg(test)]
@@ -401,9 +420,9 @@ mod tests {
     #[test]
     fn meta_serialization() {
         let mut history = TrackHistory::with_directory(&PathBuf::from("target"));
-        history.version = 321;
+        history.set_version(321);
         history.write_meta();
-        history.version = 12;
+        history.set_version(12);
         let m = history.load_meta();
         assert_eq!(321, m.current_version);
         assert_eq!(0, m.next_id);
