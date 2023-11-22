@@ -266,7 +266,7 @@ mod tests {
     fn check_set_damper_to() {
         let mut track = make_test_track();
         let mut changeset = Changeset::empty();
-        set_damper_to(&mut track, &mut changeset, (14, 17), true);
+        set_damper_to(&mut track, &mut changeset, (13, 17), true);
         track.patch(&changeset);
 
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
