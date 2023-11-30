@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::track::{import_smf, Track};
-use crate::track_edit::{apply_diffs, revert_diffs, CommandDiff, EditCommandId};
+use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
 use crate::util;
 use crate::util::IdSeq;
 
@@ -45,19 +45,19 @@ impl TrackHistory {
         action(&track)
     }
 
-    pub fn update_track<Action: FnOnce(&Track) -> (EditCommandId, Vec<CommandDiff>)>(
-        &mut self,
-        action: Action,
-    ) {
+    pub fn update_track<Action: FnOnce(&Track) -> AppliedCommand>(&mut self, action: Action) {
         let applied_command = {
-            let mut track = self.track.write().expect("Write to track.");
-            let applied_command = action(&track);
-            apply_diffs(&mut track, &applied_command.1);
-            track.commit();
-            applied_command
+            let track = self.track.write().expect("read track");
+            action(&track)
         };
-
-        self.update(applied_command);
+        if let Some(applied_command) = applied_command {
+            {
+                let mut track = self.track.write().expect("write to track");
+                apply_diffs(&mut track, &applied_command.1);
+                track.commit();
+            }
+            self.update(applied_command);
+        }
     }
 
     fn update(&mut self, applied_command: (EditCommandId, Vec<CommandDiff>)) {
@@ -223,7 +223,7 @@ impl TrackHistory {
                     patch.push(EventAction::Insert(ev));
                 }
                 util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
-                (EditCommandId::Load, vec![CommandDiff::Changeset { patch }])
+                Some((EditCommandId::Load, vec![CommandDiff::Changeset { patch }]))
             });
         }
         self.write_meta();

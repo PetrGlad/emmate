@@ -36,7 +36,7 @@ pub enum CommandDiff {
     TailShift { at: Time, delta: Time },
 }
 
-pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
+pub type AppliedCommand = Option<(EditCommandId, Vec<CommandDiff>)>;
 
 pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>) {
     for d in diffs {
@@ -72,32 +72,25 @@ pub fn revert_diff(track: &Track, diff: &CommandDiff, changeset: &mut Changeset)
     }
 }
 
-pub fn shift_tail(at: &Time, delta: &Time) -> (EditCommandId, Vec<CommandDiff>) {
-    (
-        EditCommandId::ShiftTail,
-        vec![CommandDiff::TailShift {
-            at: *at,
-            delta: *delta,
-        }],
-    )
+pub fn shift_tail(track: &Track, at: &Time, delta: &Time) -> AppliedCommand {
+    checked_tail_shift(&track, &at, &at, &delta).map(|tail_shift| {
+        (
+            EditCommandId::ShiftTail,
+            vec![CommandDiff::TailShift {
+                at: *at,
+                delta: *delta,
+            }],
+        )
+    })
 }
 
 // TODO (cleanup) Organize the naming? Functions updating changeset, vs functions producing CommandDiffs
 fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changeset: &mut Changeset) {
-    // TODO (improvement) When moving earlier adjust last delta so the events will start exactly at 'at'.
     let mut actions = vec![];
     for ev in &track.events {
         if *at < ev.at {
-            /* The action should be replayable and undoable. If we allow events to move earlier
-            then 'at' time, then on undo we should somehow find them still while not confusing them
-            with unchanged events in (at - delta, at] range (when if delta > 0).
-            Track events are expected to be in sorted order, so this will likely trigger early.
-            TODO (implementation) This is a normal situation, should just not apply the command,
-              and maybe hint user that we hit the wall already. Need a way to interrupt this
-              gracefully, or do the check before applying the command diff.
-             */
             assert!(
-                *at <= (ev.at + delta),
+                *at < (ev.at + delta),
                 "the shift_tail is not undoable at={}, delta={}",
                 at,
                 delta
@@ -114,7 +107,7 @@ pub fn tape_insert(range: &Range<Time>) -> AppliedCommand {
     let delta = range.1 - range.0;
     assert!(delta >= 0);
     diffs.push(CommandDiff::TailShift { at: range.0, delta });
-    (EditCommandId::TapeInsert, diffs)
+    Some((EditCommandId::TapeInsert, diffs))
 }
 
 pub fn tape_delete(track: &Track, range: &Range<Time>) -> AppliedCommand {
@@ -126,16 +119,31 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> AppliedCommand {
             patch.push(EventAction::Delete(ev.clone()));
         }
     }
-    (
-        EditCommandId::TapeInsert,
-        vec![
-            CommandDiff::Changeset { patch },
-            CommandDiff::TailShift {
-                at: range.0,
-                delta: -delta,
-            },
-        ],
-    )
+    checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
+        (
+            EditCommandId::TapeInsert,
+            vec![CommandDiff::Changeset { patch }, tail_shift],
+        )
+    })
+}
+
+fn checked_tail_shift(track: &Track, at: &Time, after: &Time, delta: &Time) -> Option<CommandDiff> {
+    // Ensure that when applied, the command will still be undoable.
+    // If we allow events to move earlier than 'at' time, then on undo we should somehow
+    // find them still while not confusing them with unchanged events in (at - delta, at]
+    // range (when if delta > 0). Track events are expected to be in sorted order.
+    let idx = track.events.partition_point(|x| x.at < *after);
+    if idx < track.events.len() {
+        let ev_at = track.events[idx].at;
+        if ev_at + delta < *at {
+            return None;
+        }
+    }
+    // TODO (improvement) When shifting earlier adjust last delta so the events will start exactly at 'at'.
+    Some(CommandDiff::TailShift {
+        at: *at,
+        delta: *delta,
+    })
 }
 
 fn edit_selected(
@@ -181,7 +189,7 @@ pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> AppliedCo
     let diff = edit_selected(track, selection, &|ev| {
         Some(EventAction::Delete(ev.clone()))
     });
-    (EditCommandId::DeleteEvents, diff)
+    Some((EditCommandId::DeleteEvents, diff))
 }
 
 fn shift_event(ev: &TrackEvent, delta: &Time) -> EventAction {
@@ -192,7 +200,7 @@ fn shift_event(ev: &TrackEvent, delta: &Time) -> EventAction {
 
 pub fn shift_selected(track: &Track, selection: &HashSet<EventId>, delta: &Time) -> AppliedCommand {
     let diff = edit_selected(track, selection, &|ev| Some(shift_event(ev, delta)));
-    (EditCommandId::EventsShift, diff)
+    Some((EditCommandId::EventsShift, diff))
 }
 
 pub fn stretch_selected_notes(
@@ -205,7 +213,7 @@ pub fn stretch_selected_notes(
         note.duration += delta;
         Some(note)
     });
-    (EditCommandId::NotesStretch, diff)
+    Some((EditCommandId::NotesStretch, diff))
 }
 
 pub fn transpose_selected_notes(
@@ -223,7 +231,7 @@ pub fn transpose_selected_notes(
         }
         None
     });
-    (EditCommandId::NotesTranspose, diff)
+    Some((EditCommandId::NotesTranspose, diff))
 }
 
 pub fn accent_selected_notes(
@@ -240,7 +248,7 @@ pub fn accent_selected_notes(
             None
         }
     });
-    (EditCommandId::NotesAccent, diff)
+    Some((EditCommandId::NotesAccent, diff))
 }
 
 pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> AppliedCommand {
@@ -257,7 +265,7 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Appli
             }),
         })],
     });
-    (EditCommandId::AddNote, diff)
+    Some((EditCommandId::AddNote, diff))
 }
 
 fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
@@ -301,10 +309,10 @@ pub fn set_damper(id_seq: &IdSeq, track: &Track, range: &Range<Time>, on: bool) 
         }
     }
 
-    (
+    Some((
         EditCommandId::SetDamper,
         vec![CommandDiff::Changeset { patch }],
-    )
+    ))
 }
 
 fn clear_cc_events(
@@ -398,7 +406,7 @@ mod tests {
     fn check_set_damper_to() {
         let mut track = make_test_track();
         let id_seq = IdSeq::new(0);
-        let applied_command = set_damper(&id_seq, &track, &(13, 17), true);
+        let applied_command = set_damper(&id_seq, &track, &(13, 17), true).unwrap();
         apply_diffs(&mut track, &applied_command.1);
 
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];

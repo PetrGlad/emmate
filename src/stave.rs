@@ -460,8 +460,8 @@ impl Stave {
                 egui::Key::ArrowRight,
             ))
         }) {
-            self.history.update_track(|_track| {
-                shift_tail(&(self.cursor_position), &Stave::KEYBOARD_TIME_STEP)
+            self.history.update_track(|track| {
+                shift_tail(track, &(self.cursor_position), &Stave::KEYBOARD_TIME_STEP)
             });
         }
         if response.ctx.input_mut(|i| {
@@ -470,8 +470,8 @@ impl Stave {
                 egui::Key::ArrowLeft,
             ))
         }) {
-            self.history.update_track(|_track| {
-                shift_tail(&(self.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
+            self.history.update_track(|track| {
+                shift_tail(track, &(self.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
             });
         }
 
