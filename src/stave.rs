@@ -11,23 +11,24 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction};
 use crate::common::{Time, VersionId};
+use crate::edit_commands::{
+    accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
+    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes,
+};
 use crate::track::{
-    EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
+    export_smf, EventId, Level, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
-use crate::track_edit::{
-    add_note, delete_events, edit_events, set_damper_to, shift_events, shift_tail, tape_cut,
-    tape_insert, TimeSelection,
-};
-use crate::track_history::{ActionId, TrackHistory};
+use crate::track_edit::TimeSelection;
+use crate::track_history::TrackHistory;
 use crate::{util, Pix};
 
 // Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
-const PIANO_KEY_LINES: Range<Pitch> = PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
+    PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 // Lines including controller values placeholder.
 const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
@@ -179,12 +180,8 @@ impl Stave {
     }
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
-        self.history.with_track(|track| track.export_smf(file_path));
-    }
-
-    pub fn load_from(&mut self, file_path: &PathBuf) {
         self.history
-            .update_track(None, |track, _| track.import_smf(file_path));
+            .with_track(|track| export_smf(&track.events, file_path));
     }
 
     /// Pixel/uSec, can be cached.
@@ -435,13 +432,17 @@ impl Stave {
                 egui::Key::Delete,
             ))
         }) {
-            self.history.update_track(None, |track, changeset| {
-                if let Some(time_selection) = &self.time_selection {
-                    tape_cut(track, changeset, &time_selection);
-                }
-                // Deleting both time and event selection in one command for convenience, these can be separate.
-                delete_events(track, changeset, &self.note_selection.selected);
-            });
+            if let Some(time_selection) = &self.time_selection {
+                self.history.update_track(|track| {
+                    tape_delete(track, &(time_selection.from, time_selection.to))
+                });
+            }
+            if !self.note_selection.selected.is_empty() {
+                self.history.update_track(|track| {
+                    // Deleting both time and event selection in one command for convenience, these can be separate.
+                    delete_selected(track, &self.note_selection.selected)
+                });
+            }
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -449,11 +450,10 @@ impl Stave {
                 egui::Key::Insert,
             ))
         }) {
-            self.history.update_track(None, |track, changeset| {
-                if let Some(time_selection) = &self.time_selection {
-                    tape_insert(track, changeset, &time_selection);
-                }
-            });
+            if let Some(time_selection) = &self.time_selection {
+                self.history
+                    .update_track(|_track| tape_insert(&(time_selection.from, time_selection.to)));
+            }
         }
 
         // Tail shift
@@ -463,15 +463,9 @@ impl Stave {
                 egui::Key::ArrowRight,
             ))
         }) {
-            self.history
-                .update_track(Some("tail_shift_right"), |track, changeset| {
-                    shift_tail(
-                        track,
-                        changeset,
-                        &(self.cursor_position),
-                        Stave::KEYBOARD_TIME_STEP,
-                    );
-                });
+            self.history.update_track(|_track| {
+                shift_tail(&(self.cursor_position), &Stave::KEYBOARD_TIME_STEP)
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -479,15 +473,9 @@ impl Stave {
                 egui::Key::ArrowLeft,
             ))
         }) {
-            self.history
-                .update_track(Some("tail_shift_left"), |track, changeset| {
-                    shift_tail(
-                        track,
-                        changeset,
-                        &(self.cursor_position),
-                        -Stave::KEYBOARD_TIME_STEP,
-                    );
-                });
+            self.history.update_track(|_track| {
+                shift_tail(&(self.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
+            });
         }
 
         // Note time moves
@@ -497,15 +485,13 @@ impl Stave {
                 egui::Key::ArrowRight,
             )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
         }) {
-            self.history
-                .update_track(Some("note_shift_right"), |track, changeset| {
-                    shift_events(
-                        track,
-                        changeset,
-                        &(|ev| self.note_selection.contains(ev)),
-                        Stave::KEYBOARD_TIME_STEP,
-                    );
-                });
+            self.history.update_track(|track| {
+                shift_selected(
+                    track,
+                    &self.note_selection.selected,
+                    &Stave::KEYBOARD_TIME_STEP,
+                )
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -513,80 +499,64 @@ impl Stave {
                 egui::Key::ArrowLeft,
             )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
         }) {
-            self.history
-                .update_track(Some("note_shift_left"), |track, changeset| {
-                    shift_events(
-                        track,
-                        changeset,
-                        &(|ev| self.note_selection.contains(ev)),
-                        -Stave::KEYBOARD_TIME_STEP,
-                    );
-                });
+            self.history.update_track(|track| {
+                shift_selected(
+                    track,
+                    &self.note_selection.selected,
+                    &-Stave::KEYBOARD_TIME_STEP,
+                )
+            });
         }
 
         // Note edits
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::H))
         }) {
-            self.edit_selected_notes(Some("note_duration_increase"), |note| {
-                let mut note = note.clone();
-                note.duration = note
-                    .duration
-                    .checked_sub(Stave::KEYBOARD_TIME_STEP)
-                    .unwrap_or(0);
-                Some(note)
+            self.history.update_track(|track| {
+                stretch_selected_notes(
+                    track,
+                    &self.note_selection.selected,
+                    &-Stave::KEYBOARD_TIME_STEP,
+                )
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::L))
         }) {
-            self.edit_selected_notes(Some("note_duration_decrease"), |note| {
-                let mut note = note.clone();
-                note.duration = note
-                    .duration
-                    .checked_add(Stave::KEYBOARD_TIME_STEP)
-                    .unwrap_or(0);
-                Some(note)
+            self.history.update_track(|track| {
+                stretch_selected_notes(
+                    track,
+                    &self.note_selection.selected,
+                    &Stave::KEYBOARD_TIME_STEP,
+                )
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::U))
         }) {
-            self.edit_selected_notes(Some("note_pitch_up"), |note| {
-                let mut note = note.clone();
-                if PIANO_KEY_LINES.contains(&(note.pitch + 1)) {
-                    note.pitch += 1;
-                }
-                Some(note)
+            self.history.update_track(|track| {
+                transpose_selected_notes(track, &self.note_selection.selected, 1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::J))
         }) {
-            self.edit_selected_notes(Some("note_pitch_down"), |note| {
-                let mut note = note.clone();
-                if PIANO_KEY_LINES.contains(&(note.pitch - 1)) {
-                    note.pitch -= 1;
-                }
-                Some(note)
+            self.history.update_track(|track| {
+                transpose_selected_notes(track, &self.note_selection.selected, -1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::I))
         }) {
-            self.edit_selected_notes(Some("note_velocity_increase"), |note| {
-                let mut note = note.clone();
-                note.velocity = note.velocity.checked_add(1).unwrap_or(Level::MAX);
-                Some(note)
+            self.history.update_track(|track| {
+                accent_selected_notes(track, &self.note_selection.selected, 1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::K))
         }) {
-            self.edit_selected_notes(Some("note_velocity_decrease"), |note| {
-                let mut note = note.clone();
-                note.velocity = note.velocity.checked_sub(1).unwrap_or(Level::MIN);
-                Some(note)
+            self.history.update_track(|track| {
+                accent_selected_notes(track, &self.note_selection.selected, -1)
             });
         }
 
@@ -666,36 +636,6 @@ impl Stave {
         self.history.with_track(|track| track.max_time())
     }
 
-    pub fn edit_selected_notes<Action: Fn(&Note) -> Option<Note> + 'static>(
-        &mut self,
-        action_id: ActionId,
-        action: Action,
-    ) {
-        // Adapt note action as event action.
-        let event_action = move |ev: &TrackEvent| {
-            if let TrackEvent {
-                event: TrackEventType::Note(n),
-                ..
-            } = &ev
-            {
-                if let Some(n) = action(n) {
-                    let mut ev = ev.clone();
-                    ev.event = TrackEventType::Note(n);
-                    return Some(EventAction::Update(ev.clone(), ev));
-                }
-            }
-            None
-        };
-        self.history.update_track(action_id, |track, changeset| {
-            edit_events(
-                track,
-                changeset,
-                &|ev| self.note_selection.contains(ev),
-                &event_action,
-            );
-        });
-    }
-
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
@@ -747,20 +687,18 @@ impl Stave {
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.from, draw.time.to);
-                    self.history.update_track(
-                        None,
-                        |track: &mut Track, changeset: &mut Changeset| {
-                            if draw.pitch == PIANO_DAMPER_LINE {
-                                if modifiers.alt {
-                                    set_damper_to(track, changeset, time_range, false);
-                                } else {
-                                    set_damper_to(track, changeset, time_range, true);
-                                }
+                    let id_seq = &self.history.id_seq.clone();
+                    self.history.update_track(|track: &Track| {
+                        if draw.pitch == PIANO_DAMPER_LINE {
+                            if modifiers.alt {
+                                set_damper(id_seq, track, &time_range, false)
                             } else {
-                                add_note(track, changeset, time_range, draw.pitch, 64);
+                                set_damper(id_seq, track, &time_range, true)
                             }
-                        },
-                    );
+                        } else {
+                            add_new_note(id_seq, &time_range, &draw.pitch)
+                        }
+                    });
                 }
             }
             self.note_draw = None;

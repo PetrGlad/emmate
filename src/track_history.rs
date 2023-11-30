@@ -1,24 +1,24 @@
+use std::cell::RefCell;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use std::{fs, mem};
 
 use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, Patch, Snapshot};
+use crate::changeset::{Changeset, EventAction, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
-use crate::track::Track;
+use crate::edit_commands::{into_changeset, revert_diffs, CommandDiff, EditCommandId};
+use crate::track::{import_smf, Track};
 use crate::util;
 use crate::util::IdSeq;
-
-pub type ActionId = Option<&'static str>;
 
 #[derive(Debug)]
 struct ActionThrottle {
     timestamp: Instant,
-    action_id: ActionId,
+    // FIXME action_id: ActionId,
     changeset: Changeset,
 }
 
@@ -31,8 +31,8 @@ impl ActionThrottle {
 // Undo/redo history and snapshots.
 #[derive(Debug)]
 pub struct TrackHistory {
-    /// Normally should not be used from outside. Made it pub as double-borrow workaround.
     pub track: Arc<RwLock<Track>>,
+    pub id_seq: Arc<IdSeq>,
     pub version: VersionId,
     pub max_version: VersionId, // May be higher than self.version after an undo.
     pub directory: PathBuf,
@@ -61,24 +61,25 @@ impl TrackHistory {
         action(&track)
     }
 
-    pub fn update_track<Action: FnOnce(&mut Track, &mut Changeset)>(
+    pub fn update_track<Action: FnOnce(&Track) -> (EditCommandId, Vec<CommandDiff>)>(
         &mut self,
-        action_id: ActionId,
         action: Action,
     ) {
-        let changeset = {
+        let applied_command = {
             let mut track = self.track.write().expect("Write to track.");
+            let applied_command = action(&track);
             let mut changeset = Changeset::empty();
-            action(&mut track, &mut changeset);
+            into_changeset(&track, &applied_command.1, &mut changeset);
             track.patch(&changeset);
             track.commit();
-            changeset
+            applied_command
         };
 
-        // TODO Reimplement throttling (batch sequences of repeatable
-        //   heavy operations like tail_shift).
-        dbg!(action_id, changeset.changes.len());
-        self.update(changeset);
+        // TODO (tokio, throttle, diff history) Reimplement throttling (batch sequences of repeatable
+        //   heavy operations). Applying immediately for now.
+
+        self.update(applied_command);
+
         // let now = Instant::now();
         // if let Some(throttle) = &mut self.throttle {
         //     if action_id.is_some() && throttle.action_id == action_id && throttle.is_waiting(now) {
@@ -97,27 +98,46 @@ impl TrackHistory {
         // }
     }
 
-    pub fn do_pending(&mut self) {
-        // This is ugly, just making it work for now. History may need some scheduled events.
-        // To do this asynchronously one would need to put id behind an Arc<RwLock<>> or
-        // use Tokio here (and in the engine).
-        if let Some(throttle) = &self.throttle {
-            if !throttle.is_waiting(Instant::now()) {
-                let throttle = mem::replace(&mut self.throttle, None).unwrap();
-                self.update(throttle.changeset);
-                self.throttle = None;
-            }
-        }
-    }
+    // TODO (tokio, throttle, diff history) Update throttle implementation.
+    // pub fn do_pending(&mut self) {
+    //     // TODO (tokio) This is ugly (depending on rendering cycles is unpredictable),
+    //     //  just making it work for now. History may need some scheduled events.
+    //     //  To do this asynchronously one would need to put id behind an Arc<RwLock<>> or
+    //     //  use Tokio here (and in the engine).
+    //     if let Some(throttle) = &self.throttle {
+    //         if !throttle.is_waiting(Instant::now()) {
+    //             let throttle = mem::replace(&mut self.throttle, None).unwrap();
+    //             self.update(throttle.changeset);
+    //             self.throttle = None;
+    //         }
+    //     }
+    // }
 
-    /// Normally should not be used from outside. Made it pub as double-borrow workaround.
-    fn update(&mut self, changeset: Changeset) {
-        if changeset.changes.is_empty() {
+    fn update(&mut self, applied_command: (EditCommandId, Vec<CommandDiff>)) {
+        let (command_id, diff) = applied_command;
+        if diff.is_empty() {
+            dbg!("No changes.");
             return;
         }
         // The changeset should be already applied to track by now.
-        self.push(changeset);
+        let log_entry = HistoryLogEntry {
+            base_version: self.version,
+            version: self.version + 1,
+            command_id,
+            diff,
+        };
+        self.push(log_entry);
+        // TODO also store a new snapshot here if necessary
+        //   (avoid long timeouts and long diff-only runs between snapshots).
         self.discard_tail(self.max_version);
+    }
+
+    /// Save current version into history.
+    pub fn push(&mut self, log_entry: HistoryLogEntry) {
+        util::store(&log_entry, &self.diff_path(log_entry.version));
+        self.set_version(log_entry.version);
+        self.max_version = self.version;
+        self.write_meta();
     }
 
     pub fn is_valid_version_id(v: VersionId) -> bool {
@@ -144,43 +164,28 @@ impl TrackHistory {
             }
             // Replays
             while self.version < version_id {
-                let diff: Patch = util::load(&self.diff_path(self.version + 1));
-                assert_eq!(diff.base_version, self.version);
-                assert!(diff.version > self.version);
-                let mut cs = Changeset::empty();
-                cs.add_all(&diff.changes);
-                track.patch(&cs);
-                self.set_version(diff.version);
+                let entry: HistoryLogEntry = util::load(&self.diff_path(self.version + 1));
+                assert_eq!(entry.base_version, self.version);
+                assert!(entry.version > self.version);
+                let mut changeset = Changeset::empty();
+                into_changeset(&track, &entry.diff, &mut changeset);
+                track.patch(&changeset);
+                self.set_version(entry.version);
             }
             // Rollbacks
             while self.version > version_id {
-                let diff: Patch = util::load(&self.diff_path(self.version));
-                assert_eq!(diff.version, self.version);
-                assert!(diff.base_version < self.version);
-                let mut cs = Changeset::empty();
-                cs.add_all(&diff.changes);
-                track.revert(&cs);
-                self.set_version(diff.base_version);
+                let entry: HistoryLogEntry = util::load(&self.diff_path(self.version));
+                assert_eq!(entry.version, self.version);
+                assert!(entry.base_version < self.version);
+                let mut changeset = Changeset::empty();
+                revert_diffs(&track, &entry.diff, &mut changeset);
+                track.patch(&changeset);
+                self.set_version(entry.base_version);
             }
         }
         dbg!(self.version, version_id);
         self.write_meta();
         self.version == version_id
-    }
-
-    /// Save current version into history.
-    pub fn push(&mut self, changeset: Changeset) {
-        let diff = Patch {
-            base_version: self.version,
-            version: self.version + 1,
-            changes: changeset.changes.values().cloned().collect(),
-        };
-        util::store(&diff, &self.diff_path(diff.version));
-        // TODO also store a new snapshot here if necessary
-        //   (avoid long timeouts and long diff-only runs between snapshots).
-        self.set_version(diff.version);
-        self.max_version = self.version;
-        self.write_meta();
     }
 
     /// Maybe undo last edit action.
@@ -245,6 +250,7 @@ impl TrackHistory {
         dbg!("history directory", directory.to_string_lossy());
         Self {
             directory: directory.to_owned(),
+            id_seq: Arc::new(IdSeq::new(0)),
             version: 0,
             max_version: 0,
             track: Default::default(),
@@ -266,10 +272,18 @@ impl TrackHistory {
             );
         }
         let version = self.version;
-        self.update_track(None, |track, _changeset| {
-            track.import_smf(source_file);
-            util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
-        });
+
+        {
+            let id_seq = self.id_seq.clone();
+            self.update_track(|track| {
+                let mut patch = vec![];
+                for ev in import_smf(&id_seq, source_file) {
+                    patch.push(EventAction::Insert(ev));
+                }
+                util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
+                (EditCommandId::Load, vec![CommandDiff::Changeset { patch }])
+            });
+        }
         self.write_meta();
         self
     }
@@ -280,7 +294,7 @@ impl TrackHistory {
         let initial_version_id = 0;
         {
             let mut track = self.track.write().expect("Write to track.");
-            track.id_seq = IdSeq::new(meta.next_id);
+            self.id_seq = Arc::new(IdSeq::new(meta.next_id));
             track.reset(util::load(&self.snapshot_path(initial_version_id)));
         }
         self.set_version(initial_version_id);
@@ -298,7 +312,7 @@ impl TrackHistory {
 
     fn write_meta(&self) {
         let meta = Meta {
-            next_id: self.with_track(|t| t.id_seq.current()),
+            next_id: self.id_seq.current(),
             current_version: self.version,
             max_version: self.max_version,
         };

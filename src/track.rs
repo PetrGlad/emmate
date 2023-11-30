@@ -30,6 +30,11 @@ pub fn is_cc_switch_on(x: Level) -> bool {
     x >= 64
 }
 
+pub enum TrackLane {
+    Note(Pitch),
+    Controller(ControllerId),
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: Pitch,
@@ -45,6 +50,7 @@ pub struct ControllerSetValue {
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TrackEventType {
+    // TODO (cleanup) maybe move Note and ControllerSetValue here (use Note{...} without the extra type).
     Note(Note),
     Controller(ControllerSetValue),
 }
@@ -84,27 +90,9 @@ pub struct Track {
     /* Events should always be kept ordered by start time ascending.
     This is a requirement of TrackSource. */
     pub events: Vec<TrackEvent>,
-    pub id_seq: IdSeq,
 }
 
 impl Track {
-    pub fn import_smf(&mut self, file_path: &PathBuf) {
-        let data = std::fs::read(&file_path).unwrap();
-        let events = midi::load_smf(&data);
-        self.events = from_midi_events(&mut self.id_seq, events.0, events.1 as Time);
-        self.commit();
-    }
-
-    pub fn export_smf(&self, file_path: &PathBuf) {
-        let usec_per_tick = 26u32;
-        let midi_events = to_midi_events(&self.events, usec_per_tick);
-        let mut binary = Vec::new();
-        midi::serialize_smf(midi_events, usec_per_tick, &mut binary)
-            .expect("Cannot store SMF track.");
-        std::fs::write(&file_path, binary)
-            .expect(&*format!("Cannot save to {}", &file_path.display()));
-    }
-
     pub fn reset(&mut self, snapshot: Snapshot) {
         self.events = snapshot.events;
     }
@@ -123,7 +111,7 @@ impl Track {
     }
 
     pub fn patch(&mut self, changeset: &Changeset) {
-        // Can this be shorter? See also [revert]
+        // TODO (DRY) See also [revert]
         let mut track_map = self.index_events();
         for ea in changeset.changes.values() {
             match ea.after() {
@@ -184,7 +172,7 @@ impl Track {
 }
 
 pub fn from_midi_events(
-    id_seq: &mut IdSeq,
+    id_seq: &IdSeq,
     events: Vec<midly::TrackEvent<'static>>,
     tick_duration: Time,
 ) -> Vec<TrackEvent> {
@@ -233,6 +221,20 @@ pub fn from_midi_events(
     // Notes are collected after they complete, This mixes the ordering with immediate events.
     track_events.sort_by_key(|ev| ev.at);
     track_events
+}
+
+pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<TrackEvent> {
+    let data = std::fs::read(&file_path).unwrap();
+    let events = midi::load_smf(&data);
+    from_midi_events(&id_seq, events.0, events.1 as Time)
+}
+
+pub fn export_smf(events: &Vec<TrackEvent>, file_path: &PathBuf) {
+    let usec_per_tick = 26u32;
+    let midi_events = to_midi_events(&events, usec_per_tick);
+    let mut binary = Vec::new();
+    midi::serialize_smf(midi_events, usec_per_tick, &mut binary).expect("Cannot store SMF track.");
+    std::fs::write(&file_path, binary).expect(&*format!("Cannot save to {}", &file_path.display()));
 }
 
 /// Reverse of from_midi_events
@@ -299,24 +301,18 @@ mod tests {
 
     #[test]
     fn track_load() {
-        let mut track = Track::default();
-        assert!(track.events.is_empty());
-
-        let path = PathBuf::from("./target/test_track_load.mid");
-        track.export_smf(&path);
-        track.import_smf(&path);
-        assert!(track.events.is_empty());
-
-        let short = PathBuf::from("./test/files/short.mid");
-        track.import_smf(&short);
-        assert_eq!(track.events.len(), 10);
-        track.export_smf(&path);
+        let id_seq = IdSeq::new(0);
+        let path_short = PathBuf::from("./test/files/short.mid");
+        let events = import_smf(&id_seq, &path_short);
+        assert_eq!(events.len(), 10);
+        let path_exported = PathBuf::from("./target/test_track_load.mid");
+        export_smf(&events, &path_exported);
 
         // The recorded SMD may have some additional system/heartbeat events,
         // so comparing the sequence only after a save.
-        let mut track_loaded = Track::default();
-        track_loaded.import_smf(&path);
-        assert_eq!(track_loaded.events.len(), 10);
-        assert_eq!(track.events, track_loaded.events);
+        let id_seq = IdSeq::new(0);
+        let events2 = import_smf(&id_seq, &path_exported);
+        assert_eq!(events2.len(), 10);
+        assert_eq!(events, events2);
     }
 }

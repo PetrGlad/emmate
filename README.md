@@ -2,7 +2,7 @@
 
 Off grid MIDI editor with following goals:
 
-* Not a DAW (would like it to be but do not have enough time for that).
+* Not a DAW: MIDI is the input, MIDI is exported (would like it to be but do not have enough time for that).
 * Do not care (much) about measures. Primarily aimed at piano real recordings without strict tempo/bars.
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
   of MIDI recording as one can remove a time fragment from PCM recording. For some reason DAW authors insist on handling
@@ -12,9 +12,9 @@ Off grid MIDI editor with following goals:
 * Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
-* Blackbox recording (always-on MIDI recording).
+* Flight recorder (always-on MIDI recording).
 
-I'd love to see this in one of commercial or open-source DAWs and even pay money for that, but I do not see it
+I'd love this to be in one of commercial or open-source DAWs and even pay money for that, but I do not see it
 happening.
 
 ## Status
@@ -35,14 +35,17 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] Organize commands, reduce diff disk usage.
+- [ ] Highlight undo changes.
+- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Adjust tempo for selection.
 - [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change). 
 - [ ] Time marks on stave ("minute:second" from the beginning).
-- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
 - [ ] Show (scroll to) changing objects before undo/redo.
+- [ ] Reduce number of range types (preferring util::Range?) 
 - [ ] Zoom to fit whole composition.
 - [ ] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
   them are currently visible.

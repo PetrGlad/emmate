@@ -11,6 +11,7 @@ mod audio_setup;
 mod changeset;
 mod common;
 mod config;
+mod edit_commands;
 mod engine;
 mod midi;
 mod midi_vst;

@@ -8,15 +8,16 @@ use flate2::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+// Half-open range [a, b).
 pub type Range<T> = (T, T);
 
 // Could not find a simple library for this.
 #[allow(dead_code)]
-pub fn ranges_intersect<T: Ord>(a: Range<T>, b: Range<T>) -> bool {
+pub fn ranges_intersect<T: Ord>(a: &Range<T>, b: &Range<T>) -> bool {
     a.0 < b.1 && b.0 < a.1
 }
 
-pub fn range_contains<T: Ord>(r: Range<T>, x: T) -> bool {
+pub fn range_contains<T: Ord>(r: &Range<T>, x: T) -> bool {
     r.0 <= x && x < r.1
 }
 
@@ -37,7 +38,7 @@ impl IdSeq {
         IdSeq(atomic::AtomicU64::new(init))
     }
 
-    pub fn next(&mut self) -> u64 {
+    pub fn next(&self) -> u64 {
         self.0.fetch_add(1, atomic::Ordering::SeqCst)
     }
 
@@ -76,11 +77,11 @@ mod tests {
 
     #[test]
     fn check_range_contains() {
-        assert!(!range_contains((0, -1), 0));
-        assert!(!range_contains((0, 0), 0));
-        assert!(range_contains((0, 1), 0));
-        assert!(!range_contains((0, 1), 1));
-        assert!(!range_contains((0, 1), 2));
+        assert!(!range_contains(&(0, -1), 0));
+        assert!(!range_contains(&(0, 0), 0));
+        assert!(range_contains(&(0, 1), 0));
+        assert!(!range_contains(&(0, 1), 1));
+        assert!(!range_contains(&(0, 1), 2));
     }
 
     #[test]
