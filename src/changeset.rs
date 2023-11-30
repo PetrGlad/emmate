@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
-use crate::edit_commands::{CommandDiff, EditCommandId};
 use crate::track::{EventId, Note, Track, TrackEvent, TrackEventType};
+use crate::track_edit::{CommandDiff, EditCommandId};
 
 /// Simplest track edit operation. See [Changeset] for uses.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]

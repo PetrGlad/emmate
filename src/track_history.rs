@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventAction, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
-use crate::edit_commands::{apply_diffs, revert_diffs, CommandDiff, EditCommandId};
 use crate::track::{import_smf, Track};
+use crate::track_edit::{apply_diffs, revert_diffs, CommandDiff, EditCommandId};
 use crate::util;
 use crate::util::IdSeq;
 

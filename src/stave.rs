@@ -12,12 +12,12 @@ use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
 use crate::common::{Time, VersionId};
-use crate::edit_commands::{
-    accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
-    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes,
-};
 use crate::track::{
     export_smf, EventId, Level, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
+};
+use crate::track_edit::{
+    accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
+    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes,
 };
 use crate::track_history::TrackHistory;
 use crate::{util, Pix};
