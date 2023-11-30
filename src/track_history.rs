@@ -14,19 +14,6 @@ use crate::track::{import_smf, Track};
 use crate::util;
 use crate::util::IdSeq;
 
-#[derive(Debug)]
-struct ActionThrottle {
-    timestamp: Instant,
-    // FIXME action_id: ActionId,
-    changeset: Changeset,
-}
-
-impl ActionThrottle {
-    pub fn is_waiting(&self, now: Instant) -> bool {
-        now - self.timestamp < Duration::from_millis(400)
-    }
-}
-
 // Undo/redo history and snapshots.
 #[derive(Debug)]
 pub struct TrackHistory {
@@ -35,7 +22,6 @@ pub struct TrackHistory {
     pub version: VersionId,
     pub max_version: VersionId, // May be higher than self.version after an undo.
     pub directory: PathBuf,
-    throttle: Option<ActionThrottle>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -72,43 +58,8 @@ impl TrackHistory {
             applied_command
         };
 
-        // TODO (tokio, throttle, diff history) Reimplement throttling (batch sequences of repeatable
-        //   heavy operations). Applying immediately for now.
-
         self.update(applied_command);
-
-        // let now = Instant::now();
-        // if let Some(throttle) = &mut self.throttle {
-        //     if action_id.is_some() && throttle.action_id == action_id && throttle.is_waiting(now) {
-        //         throttle.changeset.merge(changeset);
-        //         return;
-        //     }
-        //     let throttle = mem::replace(&mut self.throttle, None).unwrap();
-        //     self.update(throttle.changeset);
-        //     self.throttle = None;
-        // } else {
-        //     self.throttle = Some(ActionThrottle {
-        //         timestamp: now,
-        //         action_id,
-        //         changeset,
-        //     });
-        // }
     }
-
-    // TODO (tokio, throttle, diff history) Update throttle implementation.
-    // pub fn do_pending(&mut self) {
-    //     // TODO (tokio) This is ugly (depending on rendering cycles is unpredictable),
-    //     //  just making it work for now. History may need some scheduled events.
-    //     //  To do this asynchronously one would need to put id behind an Arc<RwLock<>> or
-    //     //  use Tokio here (and in the engine).
-    //     if let Some(throttle) = &self.throttle {
-    //         if !throttle.is_waiting(Instant::now()) {
-    //             let throttle = mem::replace(&mut self.throttle, None).unwrap();
-    //             self.update(throttle.changeset);
-    //             self.throttle = None;
-    //         }
-    //     }
-    // }
 
     fn update(&mut self, applied_command: (EditCommandId, Vec<CommandDiff>)) {
         let (command_id, diff) = applied_command;
@@ -247,7 +198,6 @@ impl TrackHistory {
             version: 0,
             max_version: 0,
             track: Default::default(),
-            throttle: None,
         }
     }
 
