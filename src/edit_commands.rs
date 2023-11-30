@@ -30,20 +30,19 @@ pub enum EditCommandId {
 // Commands that do not usually generate large patches can use generic Changeset, this is the default.
 // Commands that cannot be stored efficiently should use custom diffs.
 // Note to support undo, the event updates must be reversible.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum CommandDiff {
     Changeset { patch: EventActionsList },
     TailShift { at: Time, delta: Time },
 }
 
-// TODO (cleanup) Use a constant, ctx field, or a setting for delta value (see KEYBOARD_TIME_STEP).
-const TIME_DELTA: Time = 10_000;
-
 pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
 
-pub fn into_changeset(track: &Track, diffs: &Vec<CommandDiff>, changeset: &mut Changeset) {
+pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>) {
     for d in diffs {
-        apply_diff(track, d, changeset);
+        let mut changeset = Changeset::empty();
+        apply_diff(track, d, &mut changeset);
+        track.patch(&changeset);
     }
 }
 
@@ -54,9 +53,11 @@ pub fn apply_diff(track: &Track, diff: &CommandDiff, changeset: &mut Changeset) 
     }
 }
 
-pub fn revert_diffs(track: &Track, diffs: &Vec<CommandDiff>, changeset: &mut Changeset) {
+pub fn revert_diffs(track: &mut Track, diffs: &Vec<CommandDiff>) {
     for d in diffs.iter().rev() {
-        revert_diff(track, d, changeset);
+        let mut changeset = Changeset::empty();
+        revert_diff(track, d, &mut changeset);
+        track.patch(&changeset);
     }
 }
 
@@ -87,13 +88,21 @@ fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changeset: &mut Changes
     let mut actions = vec![];
     for ev in &track.events {
         if *at < ev.at {
-            if (ev.at + delta) < *at {
-                /* The action should be replayable and undoable. If we allow events to move earlier
-                then 'at' time, then on undo we should somehow find them still while not confusing them
-                with unchanged events in (at - delta, at] range (when if delta > 0).
-                Track events are expected to be in sorted order, so this will likely trigger early. */
-                break;
-            }
+            /* The action should be replayable and undoable. If we allow events to move earlier
+            then 'at' time, then on undo we should somehow find them still while not confusing them
+            with unchanged events in (at - delta, at] range (when if delta > 0).
+            Track events are expected to be in sorted order, so this will likely trigger early.
+            TODO (implementation) This is a normal situation, should just not apply the command,
+              and maybe hint user that we hit the wall already. Need a way to interrupt this
+              gracefully, or do the check before applying the command diff.
+             */
+            assert!(
+                *at <= (ev.at + delta),
+                "the shift_tail is not undoable at={}, delta={}",
+                at,
+                delta
+            );
+
             actions.push(shift_event(&ev, delta));
         }
     }
@@ -117,14 +126,14 @@ pub fn tape_insert(range: &Range<Time>) -> AppliedCommand {
 }
 
 pub fn tape_delete(track: &Track, range: &Range<Time>) -> AppliedCommand {
+    let delta = range.1 - range.0;
+    assert!(delta >= 0);
     let mut patch = vec![];
     for ev in &track.events {
         if range_contains(range, ev.at) {
             patch.push(EventAction::Delete(ev.clone()));
         }
     }
-    let delta = range.1 - range.0;
-    assert!(delta >= 0);
     (
         EditCommandId::TapeInsert,
         vec![
@@ -397,10 +406,8 @@ mod tests {
     fn check_set_damper_to() {
         let mut track = make_test_track();
         let id_seq = IdSeq::new(0);
-        let applied_command = set_damper(&id_seq, &mut track, &(13, 17), true);
-        let mut changeset = Changeset::empty();
-        into_changeset(&track, &applied_command.1, &mut changeset);
-        track.patch(&changeset);
+        let applied_command = set_damper(&id_seq, &track, &(13, 17), true);
+        apply_diffs(&mut track, &applied_command.1);
 
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
         assert_eq!(

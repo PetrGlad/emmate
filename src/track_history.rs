@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -10,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventAction, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
-use crate::edit_commands::{into_changeset, revert_diffs, CommandDiff, EditCommandId};
+use crate::edit_commands::{apply_diffs, revert_diffs, CommandDiff, EditCommandId};
 use crate::track::{import_smf, Track};
 use crate::util;
 use crate::util::IdSeq;
@@ -68,9 +67,7 @@ impl TrackHistory {
         let applied_command = {
             let mut track = self.track.write().expect("Write to track.");
             let applied_command = action(&track);
-            let mut changeset = Changeset::empty();
-            into_changeset(&track, &applied_command.1, &mut changeset);
-            track.patch(&changeset);
+            apply_diffs(&mut track, &applied_command.1);
             track.commit();
             applied_command
         };
@@ -167,9 +164,7 @@ impl TrackHistory {
                 let entry: HistoryLogEntry = util::load(&self.diff_path(self.version + 1));
                 assert_eq!(entry.base_version, self.version);
                 assert!(entry.version > self.version);
-                let mut changeset = Changeset::empty();
-                into_changeset(&track, &entry.diff, &mut changeset);
-                track.patch(&changeset);
+                apply_diffs(&mut track, &entry.diff);
                 self.set_version(entry.version);
             }
             // Rollbacks
@@ -177,9 +172,7 @@ impl TrackHistory {
                 let entry: HistoryLogEntry = util::load(&self.diff_path(self.version));
                 assert_eq!(entry.version, self.version);
                 assert!(entry.base_version < self.version);
-                let mut changeset = Changeset::empty();
-                revert_diffs(&track, &entry.diff, &mut changeset);
-                track.patch(&changeset);
+                revert_diffs(&mut track, &entry.diff);
                 self.set_version(entry.base_version);
             }
         }

@@ -74,7 +74,19 @@ impl Changeset {
     }
 
     pub fn add(&mut self, action: EventAction) {
-        self.changes.insert(action.event_id(), action);
+        let id = action.event_id();
+        if let Some(prev) = self.changes.insert(id, action) {
+            // Check for consistency.
+            use EventAction::*;
+            match (&prev, &self.changes.get(&id).unwrap()) {
+                // In theory these are OK (the latter just takes precedence) but not expected.
+                (Insert(_), Insert(_)) => panic!("double insert patch, ev.id={}", id),
+                (Delete(_), Delete(_)) => panic!("double delete patch, ev.id={}", id),
+                // Likely CommandDiffs were not applied in the expected order.
+                (Delete(_), Update(_, _)) => panic!("update of a deleted event, ev.id={}", id),
+                (_, _) => (),
+            }
+        }
     }
 
     pub fn add_all(&mut self, actions: &EventActionsList) {
