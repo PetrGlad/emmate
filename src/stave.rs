@@ -19,7 +19,6 @@ use crate::edit_commands::{
 use crate::track::{
     export_smf, EventId, Level, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
-use crate::track_edit::TimeSelection;
 use crate::track_history::TrackHistory;
 use crate::{util, Pix};
 
@@ -45,7 +44,7 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
 
 #[derive(Debug)]
 pub struct NoteDraw {
-    time: TimeSelection,
+    time: Range<Time>,
     pitch: Pitch,
 }
 
@@ -142,7 +141,7 @@ pub struct Stave {
 
     pub cursor_position: Time,
     pub bookmarks: Bookmarks,
-    pub time_selection: Option<TimeSelection>,
+    pub time_selection: Option<Range<Time>>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
 }
@@ -220,10 +219,7 @@ impl Stave {
         );
     }
 
-    const NOTHING_ZONE: TimeSelection = TimeSelection {
-        from: Time::MIN,
-        to: 0,
-    };
+    const NOTHING_ZONE: Range<Time> = Time::MIN..0;
 
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
         Frame::none()
@@ -292,7 +288,7 @@ impl Stave {
                     self.draw_note(
                         &painter,
                         64,
-                        (new_note.time.from, new_note.time.to),
+                        (new_note.time.start, new_note.time.end),
                         *key_ys.get(&new_note.pitch).unwrap(),
                         half_tone_step,
                         true,
@@ -434,7 +430,7 @@ impl Stave {
         }) {
             if let Some(time_selection) = &self.time_selection {
                 self.history.update_track(|track| {
-                    tape_delete(track, &(time_selection.from, time_selection.to))
+                    tape_delete(track, &(time_selection.start, time_selection.end))
                 });
             }
             if !self.note_selection.selected.is_empty() {
@@ -451,8 +447,9 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection {
-                self.history
-                    .update_track(|_track| tape_insert(&(time_selection.from, time_selection.to)));
+                self.history.update_track(|_track| {
+                    tape_insert(&(time_selection.start, time_selection.end))
+                });
             }
         }
 
@@ -642,17 +639,14 @@ impl Stave {
             self.time_selection = None;
         } else if response.drag_started_by(drag_button) {
             if let Some(time) = time {
-                self.time_selection = Some(TimeSelection {
-                    from: *time,
-                    to: *time,
-                });
+                self.time_selection = Some(*time..*time);
             }
         } else if response.drag_released_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
                 if let Some(selection) = &mut self.time_selection {
-                    selection.to = *time;
+                    selection.end = *time;
                 }
             }
         }
@@ -674,10 +668,7 @@ impl Stave {
             if let Some(time) = time {
                 if let Some(pitch) = pitch {
                     self.note_draw = Some(NoteDraw {
-                        time: TimeSelection {
-                            from: *time,
-                            to: *time,
-                        },
+                        time: *time..*time,
                         pitch: *pitch,
                     });
                 }
@@ -686,7 +677,7 @@ impl Stave {
             dbg!("drag_released", &self.note_draw);
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
-                    let time_range = (draw.time.from, draw.time.to);
+                    let time_range = (draw.time.start, draw.time.end);
                     let id_seq = &self.history.id_seq.clone();
                     self.history.update_track(|track: &Track| {
                         if draw.pitch == PIANO_DAMPER_LINE {
@@ -705,7 +696,7 @@ impl Stave {
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
                 if let Some(draw) = &mut self.note_draw {
-                    draw.time.to = *time;
+                    draw.time.end = *time;
                 }
             }
         }
@@ -782,20 +773,15 @@ impl Stave {
         }
     }
 
-    pub fn draw_time_selection(
-        &self,
-        painter: &Painter,
-        selection: &TimeSelection,
-        color: &Color32,
-    ) {
+    pub fn draw_time_selection(&self, painter: &Painter, selection: &Range<Time>, color: &Color32) {
         let clip = painter.clip_rect();
         let area = Rect {
             min: Pos2 {
-                x: self.x_from_time(selection.from),
+                x: self.x_from_time(selection.start),
                 y: clip.min.y,
             },
             max: Pos2 {
-                x: self.x_from_time(selection.to),
+                x: self.x_from_time(selection.end),
                 y: clip.max.y,
             },
         };

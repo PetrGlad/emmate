@@ -199,10 +199,12 @@ impl eframe::App for EmApp {
                                     |sel| {
                                         format!(
                                             "[{}s,{}s)/{}s",
-                                            Duration::from_micros(sel.from as u64).as_secs(),
-                                            Duration::from_micros(sel.to as u64).as_secs(),
-                                            Duration::from_micros(sel.length().abs() as u64)
-                                                .as_secs()
+                                            Duration::from_micros(sel.start as u64).as_secs(),
+                                            Duration::from_micros(sel.end as u64).as_secs(),
+                                            Duration::from_micros(
+                                                (sel.end - sel.start).abs() as u64
+                                            )
+                                            .as_secs()
                                         )
                                     },
                                 ),
