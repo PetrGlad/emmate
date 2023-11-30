@@ -111,28 +111,9 @@ impl Track {
     }
 
     pub fn patch(&mut self, changeset: &Changeset) {
-        // TODO (DRY) See also [revert]
         let mut track_map = self.index_events();
         for ea in changeset.changes.values() {
             match ea.after() {
-                Some(ev) => {
-                    assert_eq!(
-                        track_map.insert(ev.id, ev.clone()).is_some(),
-                        matches!(ea, EventAction::Update(_, _))
-                    );
-                }
-                None => {
-                    assert!(track_map.remove(&ea.event_id()).is_some());
-                }
-            }
-        }
-        self.splat_events(&track_map);
-    }
-
-    pub fn revert(&mut self, changeset: &Changeset) {
-        let mut track_map = self.index_events();
-        for ea in changeset.changes.values() {
-            match ea.before() {
                 Some(ev) => {
                     assert_eq!(
                         track_map.insert(ev.id, ev.clone()).is_some(),

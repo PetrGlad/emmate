@@ -1,13 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
 use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction, HistoryLogEntry, Snapshot};
+use crate::changeset::{EventAction, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::track::{import_smf, Track};
 use crate::track_edit::{apply_diffs, revert_diffs, CommandDiff, EditCommandId};

@@ -109,14 +109,6 @@ fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changeset: &mut Changes
     changeset.add_all(&actions);
 }
 
-fn do_delete_events_range(track: &Track, range: &Range<Time>, changeset: &mut Changeset) {
-    for ev in &track.events {
-        if range_contains(range, ev.at) {
-            changeset.add(EventAction::Delete(ev.clone()));
-        }
-    }
-}
-
 pub fn tape_insert(range: &Range<Time>) -> AppliedCommand {
     let mut diffs = vec![];
     let delta = range.1 - range.0;

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
-use crate::track::{EventId, Note, Track, TrackEvent, TrackEventType};
+use crate::track::{EventId, Track, TrackEvent};
 use crate::track_edit::{CommandDiff, EditCommandId};
 
 /// Simplest track edit operation. See [Changeset] for uses.
@@ -94,10 +94,6 @@ impl Changeset {
             self.add(a);
         }
     }
-
-    pub fn merge(&mut self, other: Self) {
-        self.changes.extend(other.changes);
-    }
 }
 
 /// Serializable changeset, diff. Storing these to keep whole edit history persistent, help with
@@ -126,33 +122,4 @@ impl Snapshot {
             events: track.events.clone(),
         }
     }
-}
-
-pub type EventFn = dyn Fn(&TrackEvent) -> Option<EventAction> + 'static;
-
-/// Convenience wrapper
-pub fn to_event_action<NoteFn: Fn(&Note) -> Option<Note> + 'static>(
-    action: NoteFn,
-) -> Box<EventFn> {
-    Box::new(move |ev| {
-        if let TrackEvent {
-            event: TrackEventType::Note(n),
-            ..
-        } = &ev
-        {
-            match action(n) {
-                Some(note) => Some(EventAction::Update(
-                    ev.clone(),
-                    TrackEvent {
-                        id: ev.id,
-                        at: ev.at,
-                        event: TrackEventType::Note(note),
-                    },
-                )),
-                None => None,
-            }
-        } else {
-            None
-        }
-    })
 }
