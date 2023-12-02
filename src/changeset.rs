@@ -66,18 +66,39 @@ impl Changeset {
     }
 
     pub fn add(&mut self, action: EventAction) {
+        // Check for consistency, short circuit if possible.
         let id = action.event_id();
-        if let Some(prev) = self.changes.insert(id, action) {
-            // Check for consistency.
-            use EventAction::*;
-            match (&prev, &self.changes.get(&id).unwrap()) {
-                // In theory these are OK (the latter just takes precedence) but not expected.
-                (Insert(_), Insert(_)) => panic!("double insert patch, ev.id={}", id),
-                (Delete(_), Delete(_)) => panic!("double delete patch, ev.id={}", id),
-                // Likely CommandDiffs were not applied in the expected order.
-                (Delete(_), Update(_, _)) => panic!("update of a deleted event, ev.id={}", id),
-                (_, _) => (),
-            }
+        let new_action = if let Some(prev_action) = self.changes.get(&id) {
+            Self::merge_actions(id, &action, &prev_action)
+        } else {
+            Some(action)
+        };
+
+        if let Some(op) = new_action {
+            self.changes.insert(id, op);
+        }
+    }
+
+    fn merge_actions(
+        id: EventId,
+        action: &EventAction,
+        prev_action: &&EventAction,
+    ) -> Option<EventAction> {
+        // May not even need all the cases, no use-case for merging changesets ATM...
+        // Just covering everything, for now, to see how it goes...
+        use EventAction::*;
+        match (&prev_action, &action) {
+            (Insert(_), Insert(_)) => panic!("double insert, ev.id={}", id),
+            (Insert(_), Update(_, b)) => Some(Insert(b.clone())),
+            (Insert(_), Delete(_)) => None,
+
+            (Update(_, _), Insert(_)) => panic!("inserting existing event, ev.id={}", id),
+            (Update(a, _), Update(_, c)) => Some(Update(a.clone(), c.clone())),
+            (Update(a, _), Delete(_)) => Some(Delete(a.clone())),
+
+            (Delete(a), Insert(b)) => Some(Update(a.clone(), b.clone())),
+            (Delete(_), Update(_, _)) => panic!("update of a deleted event, ev.id={}", id),
+            (Delete(_), Delete(_)) => panic!("double delete, ev.id={}", id),
         }
     }
 

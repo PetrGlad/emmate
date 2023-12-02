@@ -73,15 +73,8 @@ pub fn revert_diff(track: &Track, diff: &CommandDiff, changeset: &mut Changeset)
 }
 
 pub fn shift_tail(track: &Track, at: &Time, delta: &Time) -> AppliedCommand {
-    checked_tail_shift(&track, &at, &at, &delta).map(|tail_shift| {
-        (
-            EditCommandId::ShiftTail,
-            vec![CommandDiff::TailShift {
-                at: *at,
-                delta: *delta,
-            }],
-        )
-    })
+    checked_tail_shift(&track, &at, &at, &delta)
+        .map(|tail_shift| (EditCommandId::ShiftTail, vec![tail_shift]))
 }
 
 // TODO (cleanup) Organize the naming? Functions updating changeset, vs functions producing CommandDiffs
