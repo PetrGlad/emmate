@@ -11,13 +11,14 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
+use crate::changeset::Changeset;
 use crate::common::{Time, VersionId};
 use crate::track::{
-    export_smf, EventId, Level, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
+    export_smf, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
     accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
-    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes,
+    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes, EditCommandId,
 };
 use crate::track_history::TrackHistory;
 use crate::{util, Pix};
@@ -144,6 +145,7 @@ pub struct Stave {
     pub time_selection: Option<Range<Time>>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
+    pub command_transition: Option<(u64, EditCommandId, Changeset)>,
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -175,6 +177,7 @@ impl Stave {
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
+            command_transition: None,
         }
     }
 
@@ -198,6 +201,7 @@ impl Stave {
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that position under mouse pointer stays put.
+        // TODO (cleanup) Consider using emath::remap
         let at = self.time_from_x(mouse_x);
         self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time;
         self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time;
@@ -235,6 +239,7 @@ impl Stave {
                 //         })
                 //     });
                 let bounds = ui.available_rect_before_wrap();
+                let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
                 self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
                 let mut pitch_hovered = None;
@@ -266,6 +271,7 @@ impl Stave {
                         &mut time_hovered,
                         &mut note_hovered,
                         &painter,
+                        &egui_response,
                         &track,
                     );
                 }
@@ -296,7 +302,7 @@ impl Stave {
                 }
 
                 InnerResponse {
-                    response: ui.allocate_response(bounds.size(), Sense::click_and_drag()),
+                    response: egui_response,
                     pitch_hovered,
                     time_hovered,
                     note_hovered,
@@ -314,6 +320,7 @@ impl Stave {
         time_hovered: &Option<Time>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
+        response: &egui::Response,
         track: &Track,
     ) {
         let mut last_damper_value: (Time, Level) = (0, 0);
@@ -321,21 +328,16 @@ impl Stave {
             let event = &track.events[i];
             match &event.event {
                 TrackEventType::Note(note) => {
-                    if let Some(y) = key_ys.get(&note.pitch) {
-                        let is_hovered =
-                            Self::event_hovered(&pitch_hovered, &time_hovered, event, &note.pitch);
-                        if is_hovered {
-                            note_hovered.replace(event.id);
-                        }
-                        self.draw_note(
-                            &painter,
-                            note.velocity,
-                            (event.at, event.at + note.duration),
-                            *y,
-                            *half_tone_step,
-                            self.note_selection.contains(&event),
-                        );
-                    }
+                    *note_hovered = self.draw_track_note(
+                        key_ys,
+                        half_tone_step,
+                        &pitch_hovered,
+                        &time_hovered,
+                        &painter,
+                        &response,
+                        &event,
+                        note,
+                    );
                 }
                 TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                     if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
@@ -357,6 +359,52 @@ impl Stave {
                          )*/
             }
         }
+    }
+
+    fn draw_track_note(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        pitch_hovered: &Option<Pitch>,
+        time_hovered: &Option<Time>,
+        painter: &Painter,
+        response: &egui::Response,
+        event: &TrackEvent,
+        note: &Note,
+    ) -> Option<EventId> {
+        if let Some((id, _command_id, changeset)) = &self.command_transition {
+            if changeset.changes.contains_key(&event.id) {
+                if let Some(y) = key_ys.get(&note.pitch) {
+                    let c_anim = painter.ctx().animate_bool(response.id, false);
+                    todo!("use c_anim to show  transitioning state");
+                    self.draw_note(
+                        &painter,
+                        note.velocity,
+                        (event.at, event.at + note.duration),
+                        *y,
+                        *half_tone_step,
+                        self.note_selection.contains(&event),
+                    );
+                }
+                return None;
+            };
+        }
+        let mut note_hovered = None;
+        if let Some(y) = key_ys.get(&note.pitch) {
+            let is_hovered = Self::event_hovered(&pitch_hovered, &time_hovered, event, &note.pitch);
+            if is_hovered {
+                note_hovered = Some(event.id);
+            }
+            self.draw_note(
+                &painter,
+                note.velocity,
+                (event.at, event.at + note.duration),
+                *y,
+                *half_tone_step,
+                self.note_selection.contains(&event),
+            );
+        }
+        note_hovered
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
@@ -409,9 +457,8 @@ impl Stave {
     const KEYBOARD_TIME_STEP: Time = 10_000;
 
     fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
-        // TODO
-        //   Need to see if duplication here can be reduced.
-        //   Likely the dispatch needs some hash map that for each input state defines a unique command.
+        // TODO Have to see if duplication here can be reduced. Likely the dispatch needs some
+        //   hash map that for each input state defines a unique command.
         //   Need to support focus somehow so the commands only active when stave is focused.
         //   Currently commands also affect other widgets (e.g. arrows change button focus).
 
@@ -482,13 +529,17 @@ impl Stave {
                 egui::Key::ArrowRight,
             )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
         }) {
-            self.history.update_track(|track| {
+            if let Some((command_id, changes)) = self.history.update_track(|track| {
                 shift_selected(
                     track,
                     &self.note_selection.selected,
                     &Stave::KEYBOARD_TIME_STEP,
                 )
-            });
+            }) {
+                let mut changeset = Changeset::empty();
+                changeset.add_all(&changes);
+                self.command_transition = Some((3333, command_id, changeset)); // FIXME (impl) animations
+            }
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -561,7 +612,7 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
         }) {
-            self.history.undo();
+            self.history.undo(&mut vec![]); // TODO (implement) changes highlighting
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
@@ -570,7 +621,7 @@ impl Stave {
                     egui::Key::Z,
                 ))
         }) {
-            self.history.redo();
+            self.history.redo(&mut vec![]); // TODO (implement) changes highlighting
         }
 
         // Bookmarks & time navigation

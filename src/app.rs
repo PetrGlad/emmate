@@ -182,10 +182,10 @@ impl eframe::App for EmApp {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave.history.undo();
+                                self.stave.history.undo(&mut vec![]); // TODO (implement) changes highlighting
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave.history.redo();
+                                self.stave.history.redo(&mut vec![]); // TODO (implement) changes highlighting
                             }
                         });
                         ui.horizontal(|ui| {

@@ -6,7 +6,7 @@ use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{EventAction, HistoryLogEntry, Snapshot};
+use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::track::{import_smf, Track};
 use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
@@ -45,22 +45,29 @@ impl TrackHistory {
         action(&track)
     }
 
-    pub fn update_track<Action: FnOnce(&Track) -> AppliedCommand>(&mut self, action: Action) {
+    pub fn update_track<Action: FnOnce(&Track) -> Option<AppliedCommand>>(
+        &mut self,
+        action: Action,
+    ) -> Option<(EditCommandId, EventActionsList)> {
         let applied_command = {
             let track = self.track.write().expect("read track");
             action(&track)
         };
-        if let Some(applied_command) = applied_command {
+        if let Some(applied_command) = &applied_command {
+            let mut changes = vec![];
             {
                 let mut track = self.track.write().expect("write to track");
-                apply_diffs(&mut track, &applied_command.1);
+                apply_diffs(&mut track, &applied_command.1, &mut changes);
                 track.commit();
             }
             self.update(applied_command);
+            Some((applied_command.0, changes))
+        } else {
+            None
         }
     }
 
-    fn update(&mut self, applied_command: (EditCommandId, Vec<CommandDiff>)) {
+    fn update(&mut self, applied_command: &(EditCommandId, Vec<CommandDiff>)) {
         let (command_id, diff) = applied_command;
         if diff.is_empty() {
             dbg!("No changes.");
@@ -70,8 +77,8 @@ impl TrackHistory {
         let log_entry = HistoryLogEntry {
             base_version: self.version,
             version: self.version + 1,
-            command_id,
-            diff,
+            command_id: *command_id,
+            diff: diff.iter().cloned().collect(), // XXX Maybe share the vector
         };
         self.push(log_entry);
         // TODO also store a new snapshot here if necessary
@@ -91,7 +98,7 @@ impl TrackHistory {
         v >= 0
     }
 
-    pub fn go_to_version(&mut self, version_id: VersionId) -> bool {
+    pub fn go_to_version(&mut self, version_id: VersionId, changes: &mut EventActionsList) -> bool {
         assert!(TrackHistory::is_valid_version_id(version_id));
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);
@@ -114,7 +121,7 @@ impl TrackHistory {
                 let entry: HistoryLogEntry = util::load(&self.diff_path(self.version + 1));
                 assert_eq!(entry.base_version, self.version);
                 assert!(entry.version > self.version);
-                apply_diffs(&mut track, &entry.diff);
+                apply_diffs(&mut track, &entry.diff, changes);
                 self.set_version(entry.version);
             }
             // Rollbacks
@@ -122,7 +129,7 @@ impl TrackHistory {
                 let entry: HistoryLogEntry = util::load(&self.diff_path(self.version));
                 assert_eq!(entry.version, self.version);
                 assert!(entry.base_version < self.version);
-                revert_diffs(&mut track, &entry.diff);
+                revert_diffs(&mut track, &entry.diff, changes);
                 self.set_version(entry.base_version);
             }
         }
@@ -132,16 +139,16 @@ impl TrackHistory {
     }
 
     /// Maybe undo last edit action.
-    pub fn undo(&mut self) {
+    pub fn undo(&mut self, changes: &mut EventActionsList) {
         let prev_version_id = self.version - 1;
         if TrackHistory::is_valid_version_id(prev_version_id) {
-            assert!(self.go_to_version(prev_version_id));
+            assert!(self.go_to_version(prev_version_id, changes));
         }
     }
 
     /// Maybe redo next edit action.
-    pub fn redo(&mut self) {
-        self.go_to_version(self.version + 1);
+    pub fn redo(&mut self, changes: &mut EventActionsList) {
+        self.go_to_version(self.version + 1, changes);
     }
 
     fn discard_tail(&mut self, max_version: VersionId) {
@@ -223,7 +230,7 @@ impl TrackHistory {
                     patch.push(EventAction::Insert(ev));
                 }
                 util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
-                Some((EditCommandId::Load, vec![CommandDiff::Changeset { patch }]))
+                Some((EditCommandId::Load, vec![CommandDiff::ChangeList { patch }]))
             });
         }
         self.write_meta();
@@ -240,7 +247,7 @@ impl TrackHistory {
             track.reset(util::load(&self.snapshot_path(initial_version_id)));
         }
         self.set_version(initial_version_id);
-        assert!(self.go_to_version(meta.current_version));
+        assert!(self.go_to_version(meta.current_version, &mut vec![])); // TODO (implement) changes highlighting
     }
 
     fn set_version(&mut self, version_id: VersionId) {

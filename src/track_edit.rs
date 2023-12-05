@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction, EventActionsList};
+use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
 use crate::stave::PIANO_KEY_LINES;
 use crate::track::{
@@ -11,7 +11,7 @@ use crate::track::{
 };
 use crate::util::{range_contains, IdSeq, Range};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
     ShiftTail,
     TapeInsert,
@@ -27,59 +27,69 @@ pub enum EditCommandId {
     Load,
 }
 
-// Commands that do not usually generate large patches can use generic Changeset, this is the default.
-// Commands that cannot be stored efficiently should use custom diffs.
-// Note to support undo, the event updates must be reversible.
-#[derive(Serialize, Deserialize)]
+/**
+ Want to track the changed events for each command to have visual feedback on undo/redo and
+ to minimize amount of data stored in the edit history. Change list allows to have this in
+ most cases. However there are commands that may generate very large changesets and can be
+ repeated by holding the hotkey combination, so in this struct we have a special case
+ supporting custom logic for these. This complicates the implementation a lot but I do
+ not see a better solution at the moment.
+
+ Commands that do not usually generate large patches can use generic Changeset,
+ this is the default. Commands that cannot be stored efficiently should use custom diffs.
+ Note to support undo/redo, custom event updates must be unambiguously reversible and replayable
+ (change lists always are).
+*/
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CommandDiff {
-    Changeset { patch: EventActionsList },
+    ChangeList { patch: EventActionsList },
     TailShift { at: Time, delta: Time },
 }
 
-pub type AppliedCommand = Option<(EditCommandId, Vec<CommandDiff>)>;
+pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
 
-pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>) {
+pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
     for d in diffs {
-        let mut changeset = Changeset::empty();
-        apply_diff(track, d, &mut changeset);
-        track.patch(&changeset);
+        let mut cs = vec![];
+        apply_diff(track, d, &mut cs);
+        track.patch(&cs);
+        changes.append(&mut cs);
     }
 }
 
-pub fn apply_diff(track: &Track, diff: &CommandDiff, changeset: &mut Changeset) {
+pub fn apply_diff(track: &Track, diff: &CommandDiff, changes: &mut EventActionsList) {
     match diff {
-        CommandDiff::Changeset { patch } => changeset.add_all(patch),
-        CommandDiff::TailShift { at, delta } => do_shift_tail(track, at, &delta, changeset),
+        CommandDiff::ChangeList { patch } => changes.extend(patch.iter().cloned()),
+        CommandDiff::TailShift { at, delta } => do_shift_tail(track, at, &delta, changes),
     }
 }
 
-pub fn revert_diffs(track: &mut Track, diffs: &Vec<CommandDiff>) {
+pub fn revert_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
     for d in diffs.iter().rev() {
-        let mut changeset = Changeset::empty();
-        revert_diff(track, d, &mut changeset);
-        track.patch(&changeset);
+        let mut cs = vec![];
+        revert_diff(track, d, &mut cs);
+        track.patch(&cs);
+        changes.append(&mut cs);
     }
 }
 
-pub fn revert_diff(track: &Track, diff: &CommandDiff, changeset: &mut Changeset) {
+pub fn revert_diff(track: &Track, diff: &CommandDiff, changes: &mut EventActionsList) {
     match diff {
-        CommandDiff::Changeset { patch } => {
+        CommandDiff::ChangeList { patch } => {
             for action in patch.iter().rev() {
-                changeset.add(action.revert())
+                changes.push(action.revert())
             }
         }
-        CommandDiff::TailShift { at, delta } => do_shift_tail(track, at, &-delta, changeset),
+        CommandDiff::TailShift { at, delta } => do_shift_tail(track, at, &-delta, changes),
     }
 }
 
-pub fn shift_tail(track: &Track, at: &Time, delta: &Time) -> AppliedCommand {
+pub fn shift_tail(track: &Track, at: &Time, delta: &Time) -> Option<AppliedCommand> {
     checked_tail_shift(&track, &at, &at, &delta)
         .map(|tail_shift| (EditCommandId::ShiftTail, vec![tail_shift]))
 }
 
-// TODO (cleanup) Organize the naming? Functions updating changeset, vs functions producing CommandDiffs
-fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changeset: &mut Changeset) {
-    let mut actions = vec![];
+fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changes: &mut EventActionsList) {
     for ev in &track.events {
         if *at < ev.at {
             assert!(
@@ -88,14 +98,12 @@ fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changeset: &mut Changes
                 at,
                 delta
             );
-
-            actions.push(shift_event(&ev, delta));
+            changes.push(shift_event(&ev, delta));
         }
     }
-    changeset.add_all(&actions);
 }
 
-pub fn tape_insert(range: &Range<Time>) -> AppliedCommand {
+pub fn tape_insert(range: &Range<Time>) -> Option<AppliedCommand> {
     let mut diffs = vec![];
     let delta = range.1 - range.0;
     assert!(delta >= 0);
@@ -103,7 +111,7 @@ pub fn tape_insert(range: &Range<Time>) -> AppliedCommand {
     Some((EditCommandId::TapeInsert, diffs))
 }
 
-pub fn tape_delete(track: &Track, range: &Range<Time>) -> AppliedCommand {
+pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand> {
     let delta = range.1 - range.0;
     assert!(delta >= 0);
     let mut patch = vec![];
@@ -115,7 +123,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> AppliedCommand {
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
             EditCommandId::TapeInsert,
-            vec![CommandDiff::Changeset { patch }, tail_shift],
+            vec![CommandDiff::ChangeList { patch }, tail_shift],
         )
     })
 }
@@ -132,7 +140,7 @@ fn checked_tail_shift(track: &Track, at: &Time, after: &Time, delta: &Time) -> O
             return None;
         }
     }
-    // TODO (improvement) When shifting earlier adjust last delta so the events will start exactly at 'at'.
+    // TODO (usability) When shifting earlier adjust last delta so the events will start exactly at 'at'.
     Some(CommandDiff::TailShift {
         at: *at,
         delta: *delta,
@@ -152,7 +160,7 @@ fn edit_selected(
             }
         }
     }
-    vec![CommandDiff::Changeset { patch }]
+    vec![CommandDiff::ChangeList { patch }]
 }
 
 fn edit_selected_notes<'a, Action: Fn(&Note) -> Option<Note>>(
@@ -178,7 +186,7 @@ fn edit_selected_notes<'a, Action: Fn(&Note) -> Option<Note>>(
     edit_selected(track, selection, &event_action)
 }
 
-pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> AppliedCommand {
+pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|ev| {
         Some(EventAction::Delete(ev.clone()))
     });
@@ -191,7 +199,11 @@ fn shift_event(ev: &TrackEvent, delta: &Time) -> EventAction {
     EventAction::Update(ev.clone(), nev)
 }
 
-pub fn shift_selected(track: &Track, selection: &HashSet<EventId>, delta: &Time) -> AppliedCommand {
+pub fn shift_selected(
+    track: &Track,
+    selection: &HashSet<EventId>,
+    delta: &Time,
+) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|ev| Some(shift_event(ev, delta)));
     Some((EditCommandId::EventsShift, diff))
 }
@@ -200,7 +212,7 @@ pub fn stretch_selected_notes(
     track: &Track,
     selection: &HashSet<EventId>,
     delta: &Time,
-) -> AppliedCommand {
+) -> Option<AppliedCommand> {
     let diff = edit_selected_notes(track, selection, &|note: &Note| {
         let mut note = note.clone();
         note.duration += delta;
@@ -213,7 +225,7 @@ pub fn transpose_selected_notes(
     track: &Track,
     selection: &HashSet<EventId>,
     delta: i8,
-) -> AppliedCommand {
+) -> Option<AppliedCommand> {
     let diff = edit_selected_notes(track, selection, &|note: &Note| {
         let mut note = note.clone();
         if let Some(x) = note.pitch.checked_add_signed(delta) {
@@ -231,7 +243,7 @@ pub fn accent_selected_notes(
     track: &Track,
     selection: &HashSet<EventId>,
     delta: i8,
-) -> AppliedCommand {
+) -> Option<AppliedCommand> {
     let diff = edit_selected_notes(track, selection, &|note: &Note| {
         if let Some(pitch) = note.velocity.checked_add_signed(delta) {
             let mut note = note.clone();
@@ -244,10 +256,10 @@ pub fn accent_selected_notes(
     Some((EditCommandId::NotesAccent, diff))
 }
 
-pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> AppliedCommand {
+pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Option<AppliedCommand> {
     let mut diff = vec![];
     assert!(range.1 - range.0 > 0);
-    diff.push(CommandDiff::Changeset {
+    diff.push(CommandDiff::ChangeList {
         patch: vec![EventAction::Insert(TrackEvent {
             id: id_seq.next(),
             at: range.0,
@@ -272,7 +284,12 @@ fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
     }
 }
 
-pub fn set_damper(id_seq: &IdSeq, track: &Track, range: &Range<Time>, on: bool) -> AppliedCommand {
+pub fn set_damper(
+    id_seq: &IdSeq,
+    track: &Track,
+    range: &Range<Time>,
+    on: bool,
+) -> Option<AppliedCommand> {
     let mut patch = vec![];
     let on_before = is_cc_switch_on(cc_value_at(&track.events, &range.0, &MIDI_CC_SUSTAIN_ID));
     let on_after = is_cc_switch_on(cc_value_at(
@@ -304,7 +321,7 @@ pub fn set_damper(id_seq: &IdSeq, track: &Track, range: &Range<Time>, on: bool) 
 
     Some((
         EditCommandId::SetDamper,
-        vec![CommandDiff::Changeset { patch }],
+        vec![CommandDiff::ChangeList { patch }],
     ))
 }
 
@@ -400,7 +417,10 @@ mod tests {
         let mut track = make_test_track();
         let id_seq = IdSeq::new(0);
         let applied_command = set_damper(&id_seq, &track, &(13, 17), true).unwrap();
-        apply_diffs(&mut track, &applied_command.1);
+        let mut cs = vec![];
+        apply_diffs(&mut track, &applied_command.1, &mut cs);
+
+        // FIXME (test) Check cs contents also.
 
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
         assert_eq!(

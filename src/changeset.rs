@@ -82,7 +82,7 @@ impl Changeset {
     fn merge_actions(
         id: EventId,
         action: &EventAction,
-        prev_action: &&EventAction,
+        prev_action: &EventAction,
     ) -> Option<EventAction> {
         // May not even need all the cases, no use-case for merging changesets ATM...
         // Just covering everything, for now, to see how it goes...
@@ -104,6 +104,12 @@ impl Changeset {
 
     pub fn add_all(&mut self, actions: &EventActionsList) {
         for a in actions.iter().cloned() {
+            self.add(a);
+        }
+    }
+
+    pub fn merge(&mut self, actions: &Changeset) {
+        for a in actions.changes.values().cloned() {
             self.add(a);
         }
     }

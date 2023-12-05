@@ -7,7 +7,7 @@ use midly::num::u4;
 use midly::{MidiMessage, TrackEventKind};
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction, Snapshot};
+use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::midi;
 use crate::util::{is_ordered, IdSeq};
@@ -110,9 +110,9 @@ impl Track {
         self.events.sort();
     }
 
-    pub fn patch(&mut self, changeset: &Changeset) {
+    pub fn patch(&mut self, changes: &EventActionsList) {
         let mut track_map = self.index_events();
-        for ea in changeset.changes.values() {
+        for ea in changes {
             match ea.after() {
                 Some(ev) => {
                     assert_eq!(
