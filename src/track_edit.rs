@@ -176,9 +176,9 @@ fn edit_selected_notes<'a, Action: Fn(&Note) -> Option<Note>>(
         } = &ev
         {
             if let Some(n) = action(n) {
-                let mut ev = ev.clone();
-                ev.event = TrackEventType::Note(n);
-                return Some(EventAction::Update(ev.clone(), ev));
+                let mut ev2 = ev.clone();
+                ev2.event = TrackEventType::Note(n);
+                return Some(EventAction::Update(ev.clone(), ev2));
             }
         }
         None
@@ -420,7 +420,27 @@ mod tests {
         let mut cs = vec![];
         apply_diffs(&mut track, &applied_command.1, &mut cs);
 
-        // FIXME (test) Check cs contents also.
+        assert_eq!(
+            &vec![
+                EventAction::Insert(TrackEvent {
+                    id: 0,
+                    at: 13,
+                    event: TrackEventType::Controller(ControllerSetValue {
+                        controller_id: 64,
+                        value: 127,
+                    }),
+                }),
+                EventAction::Insert(TrackEvent {
+                    id: 1,
+                    at: 17,
+                    event: TrackEventType::Controller(ControllerSetValue {
+                        controller_id: 64,
+                        value: 0,
+                    }),
+                }),
+            ],
+            &cs
+        );
 
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
         assert_eq!(

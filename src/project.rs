@@ -1,10 +1,11 @@
+use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 
 use crate::track_history::TrackHistory;
 
 pub struct Project {
-    pub history: TrackHistory,
+    pub history: RefCell<TrackHistory>,
     pub home_path: PathBuf,
 }
 
@@ -37,7 +38,7 @@ impl Project {
         history.open();
         Project {
             home_path: directory,
-            history,
+            history: RefCell::new(history),
         }
     }
 }

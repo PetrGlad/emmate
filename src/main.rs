@@ -65,7 +65,7 @@ pub fn main() {
     }
 
     {
-        let track_midi_source = TrackSource::new(project.history.track.clone());
+        let track_midi_source = TrackSource::new(project.history.borrow().track.clone());
         engine_command_sender
             .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
             .unwrap();

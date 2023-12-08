@@ -29,6 +29,14 @@ impl EventAction {
         }
     }
 
+    pub fn before(&self) -> Option<&TrackEvent> {
+        match self {
+            EventAction::Delete(ev) => Some(ev),
+            EventAction::Update(ev, _) => Some(ev),
+            EventAction::Insert(_) => None,
+        }
+    }
+
     pub fn after(&self) -> Option<&TrackEvent> {
         match self {
             EventAction::Delete(_) => None,

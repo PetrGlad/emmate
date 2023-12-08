@@ -1,24 +1,27 @@
+use std::cell::RefCell;
 use std::collections::btree_set::Iter;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
 use eframe::egui::{
-    self, Color32, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect, Rounding,
-    Sense, Stroke, Ui,
+    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
+    Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
 use crate::changeset::Changeset;
-use crate::common::{Time, VersionId};
+use crate::common::Time;
 use crate::track::{
-    export_smf, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MIDI_CC_SUSTAIN_ID,
+    export_smf, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MAX_LEVEL,
+    MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
     accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
-    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes, EditCommandId,
+    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes, AppliedCommand,
+    EditCommandId,
 };
 use crate::track_history::TrackHistory;
 use crate::{util, Pix};
@@ -132,9 +135,46 @@ impl Bookmarks {
 }
 
 #[derive(Debug)]
+pub struct EditTransition {
+    pub animation_id: egui::Id,
+    pub command_id: EditCommandId,
+    pub changeset: Changeset,
+    pub coeff: f32,
+}
+
+impl EditTransition {
+    pub fn start(
+        ctx: &Context,
+        animation_id: egui::Id,
+        command_id: EditCommandId,
+        changeset: Changeset,
+    ) -> Self {
+        let coeff = ctx.animate_bool(animation_id, false);
+        EditTransition {
+            animation_id,
+            command_id,
+            coeff,
+            changeset,
+        }
+    }
+
+    pub fn update(mut self, ctx: &Context) -> Self {
+        self.coeff = ctx.animate_bool(self.animation_id, true);
+        self
+    }
+
+    pub fn value(&self) -> Option<f32> {
+        if self.coeff >= 1.0 {
+            None
+        } else {
+            Some(self.coeff)
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Stave {
-    pub history: TrackHistory,
-    pub track_version: VersionId,
+    pub history: RefCell<TrackHistory>,
 
     pub time_left: Time,
     pub time_right: Time,
@@ -145,7 +185,7 @@ pub struct Stave {
     pub time_selection: Option<Range<Time>>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
-    pub command_transition: Option<(u64, EditCommandId, Changeset)>,
+    pub transition: Option<EditTransition>,
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -165,10 +205,9 @@ pub struct StaveResponse {
 }
 
 impl Stave {
-    pub fn new(history: TrackHistory, bookmarks: Bookmarks) -> Stave {
+    pub fn new(history: RefCell<TrackHistory>, bookmarks: Bookmarks) -> Stave {
         Stave {
             history,
-            track_version: 0,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
@@ -177,12 +216,13 @@ impl Stave {
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
-            command_transition: None,
+            transition: None,
         }
     }
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
         self.history
+            .borrow()
             .with_track(|track| export_smf(&track.events, file_path));
     }
 
@@ -263,7 +303,8 @@ impl Stave {
                 );
                 let mut note_hovered = None;
                 {
-                    let track = self.history.track.read().expect("Read track.");
+                    let history = self.history.borrow();
+                    let track = history.track.read().expect("Read track.");
                     self.draw_track(
                         &key_ys,
                         &half_tone_step,
@@ -271,7 +312,6 @@ impl Stave {
                         &mut time_hovered,
                         &mut note_hovered,
                         &painter,
-                        &egui_response,
                         &track,
                     );
                 }
@@ -291,7 +331,7 @@ impl Stave {
                 }
 
                 if let Some(new_note) = &self.note_draw {
-                    self.draw_note(
+                    self.default_draw_note(
                         &painter,
                         64,
                         (new_note.time.start, new_note.time.end),
@@ -305,7 +345,7 @@ impl Stave {
                     response: egui_response,
                     pitch_hovered,
                     time_hovered,
-                    note_hovered,
+                    note_hovered: note_hovered,
                     modifiers: ui.input(|i| i.modifiers),
                 }
             })
@@ -320,7 +360,6 @@ impl Stave {
         time_hovered: &Option<Time>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
-        response: &egui::Response,
         track: &Track,
     ) {
         let mut last_damper_value: (Time, Level) = (0, 0);
@@ -328,16 +367,12 @@ impl Stave {
             let event = &track.events[i];
             match &event.event {
                 TrackEventType::Note(note) => {
-                    *note_hovered = self.draw_track_note(
-                        key_ys,
-                        half_tone_step,
-                        &pitch_hovered,
-                        &time_hovered,
-                        &painter,
-                        &response,
-                        &event,
-                        note,
-                    );
+                    let is_hovered =
+                        Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch);
+                    if is_hovered {
+                        *note_hovered = Some(event.id);
+                    }
+                    self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
                 }
                 TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                     if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
@@ -361,58 +396,76 @@ impl Stave {
         }
     }
 
+    fn animation_note_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
+        ev.and_then(|ev| {
+            if let TrackEventType::Note(n) = &ev.event {
+                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
+            } else {
+                None // Not animating CC for now.
+            }
+        })
+    }
+
     fn draw_track_note(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<Time>,
         painter: &Painter,
-        response: &egui::Response,
         event: &TrackEvent,
         note: &Note,
-    ) -> Option<EventId> {
-        if let Some((id, _command_id, changeset)) = &self.command_transition {
-            if changeset.changes.contains_key(&event.id) {
-                if let Some(y) = key_ys.get(&note.pitch) {
-                    let c_anim = painter.ctx().animate_bool(response.id, false);
-                    todo!("use c_anim to show  transitioning state");
-                    self.draw_note(
-                        &painter,
-                        note.velocity,
-                        (event.at, event.at + note.duration),
-                        *y,
-                        *half_tone_step,
-                        self.note_selection.contains(&event),
-                    );
-                }
-                return None;
-            };
-        }
-        let mut note_hovered = None;
+    ) {
         if let Some(y) = key_ys.get(&note.pitch) {
-            let is_hovered = Self::event_hovered(&pitch_hovered, &time_hovered, event, &note.pitch);
-            if is_hovered {
-                note_hovered = Some(event.id);
+            let is_selected = self.note_selection.contains(&event);
+            let mut color = note_color(&note.velocity, is_selected);
+            let mut t1 = event.at;
+            let mut t2 = event.at + note.duration;
+            let mut y = *y;
+            if let Some(trans) = &self.transition {
+                if let Some(change) = trans.changeset.changes.get(&event.id) {
+                    let coeff = trans.value().unwrap();
+                    let a = Stave::animation_note_params(change.before());
+                    let b = Stave::animation_note_params(change.after());
+
+                    let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
+                    let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
+
+                    // May want to handle gracefully when note gets in/out of visible pitch range.
+                    // Just patching with existing y for now.
+                    let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap_or(&y);
+                    let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap_or(&y);
+                    y = egui::lerp(*y_a..=*y_b, coeff);
+
+                    t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
+                    t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
+
+                    let c_a = note_color(&v_a, is_selected);
+                    let c_b = note_color(&v_b, is_selected);
+                    // color a -> red -> color b
+                    color = if coeff < 0.5 {
+                        egui::lerp(Rgba::from(c_a)..=Rgba::from(Color32::RED), 2.0 * coeff).into()
+                    } else {
+                        egui::lerp(
+                            Rgba::from(Color32::RED)..=Rgba::from(c_b),
+                            2.0 * f32::abs(coeff - 0.5),
+                        )
+                        .into()
+                    };
+                };
             }
-            self.draw_note(
-                &painter,
-                note.velocity,
-                (event.at, event.at + note.duration),
-                *y,
-                *half_tone_step,
-                self.note_selection.contains(&event),
-            );
+            self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
         }
-        note_hovered
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
+        self.transition = self
+            .transition
+            .take()
+            .map(|tr| tr.update(&ui.ctx()))
+            .filter(|tr| tr.value().is_some());
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
-            let clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
-            if clicked {
+            if stave_response.response.clicked() {
                 self.note_selection.toggle(&note_id);
             }
         }
@@ -476,14 +529,14 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection {
-                self.history.update_track(|track| {
+                self.history.borrow_mut().update_track(|track| {
                     tape_delete(track, &(time_selection.start, time_selection.end))
                 });
             }
             if !self.note_selection.selected.is_empty() {
-                self.history.update_track(|track| {
+                self.do_edit_command(&response.ctx, response.id, |stave, track| {
                     // Deleting both time and event selection in one command for convenience, these can be separate.
-                    delete_selected(track, &self.note_selection.selected)
+                    delete_selected(track, &stave.note_selection.selected)
                 });
             }
         }
@@ -494,7 +547,7 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection {
-                self.history.update_track(|_track| {
+                self.history.borrow_mut().update_track(|_track| {
                     tape_insert(&(time_selection.start, time_selection.end))
                 });
             }
@@ -507,8 +560,8 @@ impl Stave {
                 egui::Key::ArrowRight,
             ))
         }) {
-            self.history.update_track(|track| {
-                shift_tail(track, &(self.cursor_position), &Stave::KEYBOARD_TIME_STEP)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                shift_tail(track, &(stave.cursor_position), &Stave::KEYBOARD_TIME_STEP)
             });
         }
         if response.ctx.input_mut(|i| {
@@ -517,8 +570,8 @@ impl Stave {
                 egui::Key::ArrowLeft,
             ))
         }) {
-            self.history.update_track(|track| {
-                shift_tail(track, &(self.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                shift_tail(track, &(stave.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
             });
         }
 
@@ -529,17 +582,13 @@ impl Stave {
                 egui::Key::ArrowRight,
             )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
         }) {
-            if let Some((command_id, changes)) = self.history.update_track(|track| {
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
                 shift_selected(
                     track,
-                    &self.note_selection.selected,
+                    &stave.note_selection.selected,
                     &Stave::KEYBOARD_TIME_STEP,
                 )
-            }) {
-                let mut changeset = Changeset::empty();
-                changeset.add_all(&changes);
-                self.command_transition = Some((3333, command_id, changeset)); // FIXME (impl) animations
-            }
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -547,10 +596,10 @@ impl Stave {
                 egui::Key::ArrowLeft,
             )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
         }) {
-            self.history.update_track(|track| {
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
                 shift_selected(
                     track,
-                    &self.note_selection.selected,
+                    &stave.note_selection.selected,
                     &-Stave::KEYBOARD_TIME_STEP,
                 )
             });
@@ -560,10 +609,10 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::H))
         }) {
-            self.history.update_track(|track| {
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
                 stretch_selected_notes(
                     track,
-                    &self.note_selection.selected,
+                    &stave.note_selection.selected,
                     &-Stave::KEYBOARD_TIME_STEP,
                 )
             });
@@ -571,10 +620,10 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::L))
         }) {
-            self.history.update_track(|track| {
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
                 stretch_selected_notes(
                     track,
-                    &self.note_selection.selected,
+                    &stave.note_selection.selected,
                     &Stave::KEYBOARD_TIME_STEP,
                 )
             });
@@ -582,29 +631,29 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::U))
         }) {
-            self.history.update_track(|track| {
-                transpose_selected_notes(track, &self.note_selection.selected, 1)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                transpose_selected_notes(track, &stave.note_selection.selected, 1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::J))
         }) {
-            self.history.update_track(|track| {
-                transpose_selected_notes(track, &self.note_selection.selected, -1)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                transpose_selected_notes(track, &stave.note_selection.selected, -1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::I))
         }) {
-            self.history.update_track(|track| {
-                accent_selected_notes(track, &self.note_selection.selected, 1)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                accent_selected_notes(track, &stave.note_selection.selected, 1)
             });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::K))
         }) {
-            self.history.update_track(|track| {
-                accent_selected_notes(track, &self.note_selection.selected, -1)
+            self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                accent_selected_notes(track, &stave.note_selection.selected, -1)
             });
         }
 
@@ -612,7 +661,7 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
         }) {
-            self.history.undo(&mut vec![]); // TODO (implement) changes highlighting
+            self.history.borrow_mut().undo(&mut vec![]); // TODO (implement) changes highlighting
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
@@ -621,7 +670,7 @@ impl Stave {
                     egui::Key::Z,
                 ))
         }) {
-            self.history.redo(&mut vec![]); // TODO (implement) changes highlighting
+            self.history.borrow_mut().redo(&mut vec![]); // TODO (implement) changes highlighting
         }
 
         // Bookmarks & time navigation
@@ -680,8 +729,32 @@ impl Stave {
         None
     }
 
+    fn do_edit_command<Action: FnOnce(&Stave, &Track) -> Option<AppliedCommand>>(
+        &mut self,
+        context: &Context,
+        transition_id: egui::Id,
+        action: Action,
+    ) {
+        if let Some((command_id, changes)) = self
+            .history
+            .borrow_mut()
+            .update_track(|track| action(&self, track))
+        {
+            let mut changeset = Changeset::empty();
+            changeset.add_all(&changes);
+            self.transition = Some(EditTransition::start(
+                context,
+                transition_id,
+                command_id,
+                changeset,
+            ));
+        } else {
+            self.transition = None;
+        }
+    }
+
     fn max_time(&self) -> Time {
-        self.history.with_track(|track| track.max_time())
+        self.history.borrow().with_track(|track| track.max_time())
     }
 
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
@@ -729,8 +802,8 @@ impl Stave {
             if let Some(draw) = &mut self.note_draw {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.start, draw.time.end);
-                    let id_seq = &self.history.id_seq.clone();
-                    self.history.update_track(|track: &Track| {
+                    let id_seq = &self.history.borrow().id_seq.clone();
+                    self.history.borrow_mut().update_track(&|track: &Track| {
                         if draw.pitch == PIANO_DAMPER_LINE {
                             if modifiers.alt {
                                 set_damper(id_seq, track, &time_range, false)
@@ -764,11 +837,10 @@ impl Stave {
     fn draw_note(
         &self,
         painter: &Painter,
-        velocity: Level,
         x_range: (Time, Time),
         y: Pix,
         height: Pix,
-        selected: bool,
+        color: Color32,
     ) {
         let paint_rect = Rect {
             min: Pos2 {
@@ -780,8 +852,19 @@ impl Stave {
                 y: y + height * 0.45,
             },
         };
-        let stroke_color = note_color(&velocity, selected);
-        painter.rect_filled(paint_rect, Rounding::ZERO, stroke_color);
+        painter.rect_filled(paint_rect, Rounding::ZERO, color);
+    }
+
+    fn default_draw_note(
+        &self,
+        painter: &Painter,
+        velocity: Level,
+        x_range: (Time, Time),
+        y: Pix,
+        height: Pix,
+        selected: bool,
+    ) {
+        self.draw_note(painter, x_range, y, height, note_color(&velocity, selected));
     }
 
     fn draw_cc(
@@ -793,7 +876,7 @@ impl Stave {
         y: Pix,
         height: Pix,
     ) {
-        self.draw_note(painter, value, (last_time, at), y, height, false)
+        self.default_draw_note(painter, value, (last_time, at), y, height, false)
     }
 
     fn draw_grid(
@@ -886,7 +969,7 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
     } else {
         egui::lerp(
             Rgba::from_rgb(0.6, 0.7, 0.7)..=Rgba::from_rgb(0.0, 0.0, 0.0),
-            *velocity as f32 / 128.0,
+            *velocity as f32 / MAX_LEVEL as f32,
         )
         .into()
     }

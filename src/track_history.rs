@@ -99,6 +99,9 @@ impl TrackHistory {
     }
 
     pub fn go_to_version(&mut self, version_id: VersionId, changes: &mut EventActionsList) -> bool {
+        // TODO (optimization) A streak of multiple actions may temporarily accumulate many events
+        //   in `changes`. This will likely happen at startup. It is possible compact them into
+        //   a changeset immediately, but want to profile both options before deciding.
         assert!(TrackHistory::is_valid_version_id(version_id));
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);

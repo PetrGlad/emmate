@@ -117,13 +117,10 @@ impl eframe::App for EmApp {
             if ui.input(|i| i.key_pressed(egui::Key::Space)) {
                 self.toggle_pause();
             }
-            ui.heading(format!(
-                "🌲 {} [{} / {}]",
-                self.stave.history.directory.display(),
-                self.stave.history.version(),
-                self.stave.track_version.to_string()
-            ));
-
+            {
+                let h = self.stave.history.borrow();
+                ui.heading(format!("🌲 {} [{}]", h.directory.display(), h.version()));
+            }
             StripBuilder::new(ui)
                 .size(Size::remainder())
                 .size(Size::exact(20.0))
@@ -182,17 +179,19 @@ impl eframe::App for EmApp {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave.history.undo(&mut vec![]); // TODO (implement) changes highlighting
+                                self.stave.history.borrow_mut().undo(&mut vec![]);
+                                // TODO (implement) changes highlighting
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave.history.redo(&mut vec![]); // TODO (implement) changes highlighting
+                                self.stave.history.borrow_mut().redo(&mut vec![]);
+                                // TODO (implement) changes highlighting
                             }
                         });
                         ui.horizontal(|ui| {
                             // Status line
                             ui.label(format!(
                                 "track_len={}  n_sel={}  t_sel={}  at={}s ",
-                                self.stave.history.with_track(|t| t.events.len()),
+                                self.stave.history.borrow().with_track(|t| t.events.len()),
                                 self.stave.note_selection.count(),
                                 self.stave.time_selection.as_ref().map_or(
                                     "()".to_string(),
