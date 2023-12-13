@@ -24,6 +24,8 @@ pub enum EditCommandId {
     NotesStretch,
     NotesTranspose,
     NotesAccent,
+    Undo,
+    Redo,
     Load,
 }
 

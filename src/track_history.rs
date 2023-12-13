@@ -142,16 +142,19 @@ impl TrackHistory {
     }
 
     /// Maybe undo last edit action.
-    pub fn undo(&mut self, changes: &mut EventActionsList) {
+    pub fn undo(&mut self, changes: &mut EventActionsList) -> bool {
         let prev_version_id = self.version - 1;
         if TrackHistory::is_valid_version_id(prev_version_id) {
             assert!(self.go_to_version(prev_version_id, changes));
+            true
+        } else {
+            false
         }
     }
 
     /// Maybe redo next edit action.
-    pub fn redo(&mut self, changes: &mut EventActionsList) {
-        self.go_to_version(self.version + 1, changes);
+    pub fn redo(&mut self, changes: &mut EventActionsList) -> bool {
+        self.go_to_version(self.version + 1, changes)
     }
 
     fn discard_tail(&mut self, max_version: VersionId) {

@@ -35,24 +35,27 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Organize commands, reduce diff disk usage.
-- [ ] Highlight undo changes.
+- [ ] Highlight undo/redo changes. Should scroll some changes into view before animation on an undo/redo command if none
+  are currently visible.
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Adjust tempo for selection.
-- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change). 
+- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
 - [ ] Show (scroll to) changing objects before undo/redo.
-- [ ] Reduce number of range types (preferring util::Range?) 
+- [ ] Reduce number of range types (preferring util::Range?)
 - [ ] Zoom to fit whole composition.
 - [ ] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
   them are currently visible.
+- [ ] Organize commands (keep hotkeys/actions in a collection). This should make the handle_commands easier to read and
+  enable to have a generated cheatsheet/help UI.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
 - [ ] Copy/cut/paste.
 - [ ] Optimize undo history 2: save only minimal diff instead of the whole track.
-- [x] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back. 
+- [x] Reduce diff disk usage.
+- [x] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [x] Persist bookmarks in project.
 - [x] Have a separate edit-position and play-start cursors (time bookmarks), so it is easier to jump back and listen to
   the modified version.

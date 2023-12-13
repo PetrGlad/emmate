@@ -12,7 +12,7 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::Changeset;
+use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::track::{
     export_smf, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MAX_LEVEL,
@@ -661,7 +661,13 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
         }) {
-            self.history.borrow_mut().undo(&mut vec![]); // TODO (implement) changes highlighting
+            let mut changes = vec![];
+            let edit_state = if self.history.borrow_mut().undo(&mut changes) {
+                Some((EditCommandId::Undo, changes))
+            } else {
+                None
+            };
+            self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
@@ -670,7 +676,13 @@ impl Stave {
                     egui::Key::Z,
                 ))
         }) {
-            self.history.borrow_mut().redo(&mut vec![]); // TODO (implement) changes highlighting
+            let mut changes = vec![];
+            let edit_state = if self.history.borrow_mut().redo(&mut changes) {
+                Some((EditCommandId::Redo, changes))
+            } else {
+                None
+            };
+            self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
         }
 
         // Bookmarks & time navigation
@@ -729,28 +741,38 @@ impl Stave {
         None
     }
 
+    fn animate_edit(
+        context: &Context,
+        transition_id: egui::Id,
+        edit_state: Option<(EditCommandId, EventActionsList)>,
+    ) -> Option<EditTransition> {
+        if let Some((command_id, changes)) = edit_state {
+            let mut changeset = Changeset::empty();
+            changeset.add_all(&changes);
+            Some(EditTransition::start(
+                context,
+                transition_id,
+                command_id,
+                changeset,
+            ))
+        } else {
+            None
+        }
+    }
+
     fn do_edit_command<Action: FnOnce(&Stave, &Track) -> Option<AppliedCommand>>(
         &mut self,
         context: &Context,
         transition_id: egui::Id,
         action: Action,
     ) {
-        if let Some((command_id, changes)) = self
-            .history
-            .borrow_mut()
-            .update_track(|track| action(&self, track))
-        {
-            let mut changeset = Changeset::empty();
-            changeset.add_all(&changes);
-            self.transition = Some(EditTransition::start(
-                context,
-                transition_id,
-                command_id,
-                changeset,
-            ));
-        } else {
-            self.transition = None;
-        }
+        self.transition = Self::animate_edit(
+            context,
+            transition_id,
+            self.history
+                .borrow_mut()
+                .update_track(|track| action(&self, track)),
+        )
     }
 
     fn max_time(&self) -> Time {
