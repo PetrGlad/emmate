@@ -271,14 +271,6 @@ impl Stave {
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
-                // StripBuilder::new(ui)
-                //     .size(Size::exact(20.0))
-                //     // .size(Size::remainder())
-                //     .vertical(|mut strip| {
-                //         strip.cell(|ui| {
-                //             ui.label("Here!");
-                //         })
-                //     });
                 let bounds = ui.available_rect_before_wrap();
                 let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
                 self.view_rect = bounds;
