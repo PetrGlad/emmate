@@ -24,6 +24,7 @@ use crate::track_edit::{
     EditCommandId,
 };
 use crate::track_history::TrackHistory;
+use crate::util::ranges_intersect;
 use crate::{util, Pix};
 
 // Tone 60 is C3, tones start at C-2 (21).
@@ -363,14 +364,24 @@ impl Stave {
         track: &Track,
     ) {
         let mut last_damper_value: (Time, Level) = (0, 0);
+        let x_range = painter.clip_rect().x_range();
+        let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
+        let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         for i in 0..track.events.len() {
             let event = &track.events[i];
             match &event.event {
                 TrackEventType::Note(note) => {
-                    let is_hovered =
-                        Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch);
-                    if is_hovered {
+                    if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
                         *note_hovered = Some(event.id);
+                    }
+                    if self.note_selection.contains(&event) {
+                        if x_range.max < self.x_from_time(event.at) {
+                            selection_hints_right.insert(note.pitch);
+                            continue;
+                        } else if self.x_from_time(event.at + note.duration) < x_range.min {
+                            selection_hints_left.insert(note.pitch);
+                            continue;
+                        }
                     }
                     self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
                 }
@@ -394,9 +405,23 @@ impl Stave {
                          )*/
             }
         }
+        draw_selection_hints(
+            &painter,
+            &key_ys,
+            &half_tone_step,
+            x_range.min,
+            &selection_hints_left,
+        );
+        draw_selection_hints(
+            &painter,
+            &key_ys,
+            &half_tone_step,
+            x_range.max,
+            &selection_hints_right,
+        );
     }
 
-    fn animation_note_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
+    fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
         ev.and_then(|ev| {
             if let TrackEventType::Note(n) = &ev.event {
                 Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
@@ -422,9 +447,11 @@ impl Stave {
             let mut y = *y;
             if let Some(trans) = &self.transition {
                 if let Some(change) = trans.changeset.changes.get(&event.id) {
+                    // Interpolate the note states.
+
                     let coeff = trans.value().unwrap();
-                    let a = Stave::animation_note_params(change.before());
-                    let b = Stave::animation_note_params(change.after());
+                    let a = Stave::note_animation_params(change.before());
+                    let b = Stave::note_animation_params(change.after());
 
                     let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
                     let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
@@ -471,7 +498,7 @@ impl Stave {
         }
 
         let inner = &stave_response.response;
-        self.update_note_draw(
+        self.update_new_note_draw(
             inner,
             &stave_response.modifiers,
             &stave_response.time_hovered,
@@ -798,7 +825,7 @@ impl Stave {
         }
     }
 
-    fn update_note_draw(
+    fn update_new_note_draw(
         &mut self,
         response: &egui::Response,
         modifiers: &Modifiers,
@@ -965,10 +992,24 @@ impl Stave {
         let x = self.x_from_time(at);
         if !x_range.contains(x) {
             if x_range.max < x {
-                self.scroll_to(at, 0.8);
+                self.scroll_to(at, 0.7);
             } else {
-                self.scroll_to(at, 0.2);
+                self.scroll_to(at, 0.3);
             }
+        }
+    }
+}
+
+fn draw_selection_hints(
+    painter: &Painter,
+    key_ys: &BTreeMap<Pitch, Pix>,
+    half_tone_step: &Pix,
+    x: f32,
+    pitches: &HashSet<Pitch>,
+) {
+    for p in pitches {
+        if let Some(y) = key_ys.get(p) {
+            painter.circle_filled(Pos2::new(x, *y), *half_tone_step, COLOR_SELECTED);
         }
     }
 }
