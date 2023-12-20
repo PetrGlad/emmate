@@ -303,10 +303,11 @@ impl Stave {
                     &Color32::from_black_alpha(15),
                 );
                 let mut note_hovered = None;
+                let mut should_be_visible = None;
                 {
                     let history = self.history.borrow();
                     let track = history.track.read().expect("Read track.");
-                    self.draw_track(
+                    should_be_visible = self.draw_track(
                         &key_ys,
                         &half_tone_step,
                         &mut pitch_hovered,
@@ -316,7 +317,6 @@ impl Stave {
                         &track,
                     );
                 }
-
                 self.draw_cursor(
                     &painter,
                     self.x_from_time(self.cursor_position),
@@ -342,6 +342,12 @@ impl Stave {
                     );
                 }
 
+                if let Some(range) = should_be_visible {
+                    if !self.is_visible(range.0) && !self.is_visible(range.1) {
+                        self.ensure_visible(range.0);
+                    }
+                }
+
                 InnerResponse {
                     response: egui_response,
                     pitch_hovered,
@@ -362,11 +368,12 @@ impl Stave {
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
         track: &Track,
-    ) {
+    ) -> Option<util::Range<Time>> {
         let mut last_damper_value: (Time, Level) = (0, 0);
         let x_range = painter.clip_rect().x_range();
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
+        let mut should_be_visible = None;
         for i in 0..track.events.len() {
             let event = &track.events[i];
             match &event.event {
@@ -383,7 +390,14 @@ impl Stave {
                             continue;
                         }
                     }
-                    self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
+                    self.draw_track_note(
+                        key_ys,
+                        half_tone_step,
+                        &painter,
+                        &mut should_be_visible,
+                        &event,
+                        &note,
+                    );
                 }
                 TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
                     if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
@@ -419,6 +433,7 @@ impl Stave {
             x_range.max,
             &selection_hints_right,
         );
+        should_be_visible
     }
 
     fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
@@ -436,6 +451,7 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
+        should_be_visible: &mut Option<util::Range<Time>>,
         event: &TrackEvent,
         note: &Note,
     ) {
@@ -455,6 +471,10 @@ impl Stave {
 
                     let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
                     let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
+
+                    *should_be_visible = should_be_visible
+                        .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+                        .or(Some((t1_a, t2_a)));
 
                     // May want to handle gracefully when note gets in/out of visible pitch range.
                     // Just patching with existing y for now.
@@ -997,6 +1017,10 @@ impl Stave {
                 self.scroll_to(at, 0.3);
             }
         }
+    }
+
+    fn is_visible(&self, at: Time) -> bool {
+        self.view_rect.x_range().contains(self.x_from_time(at))
     }
 }
 
