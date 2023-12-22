@@ -49,7 +49,7 @@ pub trait EventSource {
     /** Reset current source's time to this moment. */
     fn seek(&mut self, at: &Time);
     /** The next event to be played at the instant. On subsequent
-    calls instants must not decrease unless a reset call sets another time. */
+    calls instants must not decrease unless a reset call sets back the time. */
     fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>);
 }
 

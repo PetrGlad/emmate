@@ -36,6 +36,7 @@ I use Pianoteq, but that is a commercial product.
 ## TODO
 
 - [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
+- [ ] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Adjust tempo for selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
@@ -48,12 +49,12 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Organize commands (keep hotkeys/actions in a collection). This should make the handle_commands easier to read and
   enable to have a generated cheatsheet/help UI.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
+- [ ] Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
 - [ ] Copy/cut/paste.
 - [x] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
 - [x] Optimize undo history 2: save only minimal diff instead of the whole track.
 - [x] Show (scroll to) changing objects before undo/redo. Should scroll some changes into view before animation on an
   undo/redo command if none are currently visible.
-- [x] Highlight undo/redo changes.
 - [x] Reduce diff disk usage.
 - [x] Consider TransportTime to be signed (see also StaveTime). There are too many conversions forth and back.
 - [x] Persist bookmarks in project.

@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::track::{
-    export_smf, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, MAX_LEVEL,
-    MIDI_CC_SUSTAIN_ID,
+    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
+    MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
     accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
@@ -24,7 +24,6 @@ use crate::track_edit::{
     EditCommandId,
 };
 use crate::track_history::TrackHistory;
-use crate::util::ranges_intersect;
 use crate::{util, Pix};
 
 // Tone 60 is C3, tones start at C-2 (21).
@@ -47,7 +46,7 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
     (lines, step)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoteDraw {
     time: Range<Time>,
     pitch: Pitch,
@@ -160,7 +159,8 @@ impl EditTransition {
     }
 
     pub fn update(mut self, ctx: &Context) -> Self {
-        self.coeff = ctx.animate_bool(self.animation_id, true);
+        // DEBUG self.coeff = ctx.animate_bool(self.animation_id, true);
+        self.coeff = ctx.animate_bool_with_time(self.animation_id, true, 1.0); // DEBUG
         self
     }
 
@@ -374,6 +374,9 @@ impl Stave {
                         *note_hovered = Some(event.id);
                     }
                     if self.note_selection.contains(&event) {
+                        // TODO If the affected notes are currently selected, they stay out-of-view after
+                        //   the command. They should be made visible (or at least the selection hints should
+                        //   be highlighted).
                         if x_range.max < self.x_from_time(event.at) {
                             selection_hints_right.insert(note.pitch);
                             continue;
@@ -391,24 +394,19 @@ impl Stave {
                         &note,
                     );
                 }
-                TrackEventType::Controller(v) if v.controller_id == MIDI_CC_SUSTAIN_ID => {
-                    if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                        let at = event.at;
-                        self.draw_cc(
-                            &painter,
-                            last_damper_value.0,
-                            at,
-                            last_damper_value.1,
-                            *y,
-                            *half_tone_step,
-                        );
-                        last_damper_value = (at, v.value);
-                    }
-                }
-                _ => (), /*println!(
-                             "Not displaying event {:?}, the event type is not supported yet.",
-                             event
-                         )*/
+                TrackEventType::Controller(cc) => self.draw_track_cc(
+                    &key_ys,
+                    half_tone_step,
+                    &painter,
+                    &mut should_be_visible,
+                    &mut last_damper_value,
+                    &event,
+                    &cc,
+                ),
+                _ => println!(
+                    "Not displaying event {:?}, the event type is not supported yet.",
+                    event
+                ),
             }
         }
         draw_selection_hints(
@@ -433,7 +431,7 @@ impl Stave {
             if let TrackEventType::Note(n) = &ev.event {
                 Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
             } else {
-                None // Not animating CC for now.
+                None // CC is animated separately.
             }
         })
     }
@@ -479,16 +477,7 @@ impl Stave {
 
                     let c_a = note_color(&v_a, is_selected);
                     let c_b = note_color(&v_b, is_selected);
-                    // color a -> red -> color b
-                    color = if coeff < 0.5 {
-                        egui::lerp(Rgba::from(c_a)..=Rgba::from(Color32::RED), 2.0 * coeff).into()
-                    } else {
-                        egui::lerp(
-                            Rgba::from(Color32::RED)..=Rgba::from(c_b),
-                            2.0 * f32::abs(coeff - 0.5),
-                        )
-                        .into()
-                    };
+                    color = Self::transition_color(c_a, c_b, coeff);
                 };
             }
             self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
@@ -567,8 +556,8 @@ impl Stave {
                 egui::Key::Delete,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection {
-                self.history.borrow_mut().update_track(|track| {
+            if let Some(time_selection) = &self.time_selection.clone() {
+                self.do_edit_command(&response.ctx, response.id, |stave, track| {
                     tape_delete(track, &(time_selection.start, time_selection.end))
                 });
             }
@@ -585,8 +574,8 @@ impl Stave {
                 egui::Key::Insert,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection {
-                self.history.borrow_mut().update_track(|_track| {
+            if let Some(time_selection) = &self.time_selection.clone() {
+                self.do_edit_command(&response.ctx, response.id, |stave, track| {
                     tape_insert(&(time_selection.start, time_selection.end))
                 });
             }
@@ -859,12 +848,11 @@ impl Stave {
                 }
             }
         } else if response.drag_released_by(drag_button) {
-            dbg!("drag_released", &self.note_draw);
-            if let Some(draw) = &mut self.note_draw {
+            if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.start, draw.time.end);
                     let id_seq = &self.history.borrow().id_seq.clone();
-                    self.history.borrow_mut().update_track(&|track: &Track| {
+                    self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                         if draw.pitch == PIANO_DAMPER_LINE {
                             if modifiers.alt {
                                 set_damper(id_seq, track, &time_range, false)
@@ -898,18 +886,18 @@ impl Stave {
     fn draw_note(
         &self,
         painter: &Painter,
-        x_range: (Time, Time),
+        time_range: (Time, Time),
         y: Pix,
         height: Pix,
         color: Color32,
     ) {
         let paint_rect = Rect {
             min: Pos2 {
-                x: self.x_from_time(x_range.0),
+                x: self.x_from_time(time_range.0),
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: self.x_from_time(x_range.1),
+                x: self.x_from_time(time_range.1),
                 y: y + height * 0.45,
             },
         };
@@ -928,16 +916,75 @@ impl Stave {
         self.draw_note(painter, x_range, y, height, note_color(&velocity, selected));
     }
 
-    fn draw_cc(
+    fn transition_color(color_a: Color32, color_b: Color32, coeff: f32) -> Color32 {
+        // color a -> red -> color b
+        if coeff < 0.5 {
+            egui::lerp(Rgba::from(color_a)..=Rgba::from(Color32::RED), 2.0 * coeff).into()
+        } else {
+            egui::lerp(
+                Rgba::from(Color32::RED)..=Rgba::from(color_b),
+                2.0 * f32::abs(coeff - 0.5),
+            )
+            .into()
+        }
+    }
+
+    fn cc_animation_params(ev: Option<&TrackEvent>) -> Option<(Time, Level)> {
+        ev.and_then(|ev| {
+            if let TrackEventType::Controller(cc) = &ev.event {
+                debug_assert_eq!(cc.controller_id, MIDI_CC_SUSTAIN_ID);
+                Some((ev.at, cc.value))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn draw_track_cc(
         &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
         painter: &Painter,
-        last_time: Time,
-        at: Time,
-        value: Level,
-        y: Pix,
-        height: Pix,
+        should_be_visible: &mut Option<util::Range<Time>>,
+        last_damper_value: &mut (Time, Level),
+        event: &TrackEvent,
+        cc: &ControllerSetValue,
     ) {
-        self.default_draw_note(painter, value, (last_time, at), y, height, false)
+        if cc.controller_id == MIDI_CC_SUSTAIN_ID {
+            if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+                let mut color = note_color(&cc.value, false);
+                let mut t = event.at;
+                if let Some(trans) = &self.transition {
+                    let coeff = trans.value().unwrap();
+                    if let Some(change) = trans.changeset.changes.get(&event.id) {
+                        let (t1, v1) =
+                            Self::cc_animation_params(change.before()).unwrap_or((event.at, 0));
+                        let (t2, v2) =
+                            Self::cc_animation_params(change.after()).unwrap_or((event.at, 0));
+
+                        t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
+
+                        let c_a = note_color(&v1, false);
+                        let c_b = note_color(&v2, false);
+                        color = Self::transition_color(c_a, c_b, coeff);
+                        *should_be_visible = should_be_visible
+                            .map(|r| (r.0.min(last_damper_value.0), r.1.max(t2)))
+                            .or(Some((last_damper_value.0, t2)));
+                        debug_assert!(should_be_visible.is_some());
+                    }
+                }
+                // TODO (improvement) The time range here is not right: is shown up to the event,
+                //   should be from event to the next one instead.
+                self.draw_note(
+                    painter,
+                    (last_damper_value.0, t),
+                    *y,
+                    *half_tone_step,
+                    color,
+                );
+                *last_damper_value = (event.at, cc.value);
+            }
+        }
     }
 
     fn draw_grid(
