@@ -12,7 +12,7 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventAction, EventActionsList};
+use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::track::{
     export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
@@ -159,8 +159,7 @@ impl EditTransition {
     }
 
     pub fn update(mut self, ctx: &Context) -> Self {
-        // DEBUG self.coeff = ctx.animate_bool(self.animation_id, true);
-        self.coeff = ctx.animate_bool_with_time(self.animation_id, true, 1.0); // DEBUG
+        self.coeff = ctx.animate_bool(self.animation_id, true);
         self
     }
 
@@ -460,6 +459,9 @@ impl Stave {
             .take()
             .map(|tr| tr.update(&ui.ctx()))
             .filter(|tr| tr.value().is_some());
+        if self.transition.is_none() {
+            ui.ctx().clear_animations();
+        }
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
