@@ -12,7 +12,7 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
-use crate::changeset::{Changeset, EventActionsList};
+use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::Time;
 use crate::track::{
     export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
@@ -368,21 +368,22 @@ impl Stave {
         let mut should_be_visible = None;
         for i in 0..track.events.len() {
             let event = &track.events[i];
+            if let Some(trans) = &self.transition {
+                if trans.changeset.changes.contains_key(&event.id) {
+                    continue;
+                }
+            }
             match &event.event {
                 TrackEventType::Note(note) => {
                     if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
+                        // Alternatively, can return known rect from draw_track_note and check that.
                         *note_hovered = Some(event.id);
                     }
                     if self.note_selection.contains(&event) {
-                        // TODO If the affected notes are currently selected, they stay out-of-view after
-                        //   the command. They should be made visible (or at least the selection hints should
-                        //   be highlighted).
                         if x_range.max < self.x_from_time(event.at) {
                             selection_hints_right.insert(note.pitch);
-                            continue;
                         } else if self.x_from_time(event.at + note.duration) < x_range.min {
                             selection_hints_left.insert(note.pitch);
-                            continue;
                         }
                     }
                     self.draw_track_note(
@@ -407,6 +408,20 @@ impl Stave {
                     "Not displaying event {:?}, the event type is not supported yet.",
                     event
                 ),
+            }
+        }
+        if let Some(trans) = &self.transition {
+            for (_ev_id, action) in &trans.changeset.changes {
+                // TODO visualize CC here also.
+                self.draw_note_transition(
+                    key_ys,
+                    half_tone_step,
+                    painter,
+                    &mut should_be_visible,
+                    trans.coeff,
+                    false,
+                    action,
+                );
             }
         }
         draw_selection_hints(
@@ -446,42 +461,54 @@ impl Stave {
         note: &Note,
     ) {
         if let Some(y) = key_ys.get(&note.pitch) {
-            let is_selected = self.note_selection.contains(&event);
-            let mut color = note_color(&note.velocity, is_selected);
-            let mut t1 = event.at;
-            let mut t2 = event.at + note.duration;
-            let mut y = *y;
-            if let Some(trans) = &self.transition {
-                if let Some(change) = trans.changeset.changes.get(&event.id) {
-                    // Interpolate the note states.
-
-                    let coeff = trans.value().unwrap();
-                    let a = Stave::note_animation_params(change.before());
-                    let b = Stave::note_animation_params(change.after());
-
-                    let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
-                    let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
-
-                    *should_be_visible = should_be_visible
-                        .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
-                        .or(Some((t1_a, t2_a)));
-
-                    // May want to handle gracefully when note gets in/out of visible pitch range.
-                    // Just patching with existing y for now.
-                    let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap_or(&y);
-                    let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap_or(&y);
-                    y = egui::lerp(*y_a..=*y_b, coeff);
-
-                    t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
-                    t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
-
-                    let c_a = note_color(&v_a, is_selected);
-                    let c_b = note_color(&v_b, is_selected);
-                    color = Self::transition_color(c_a, c_b, coeff);
-                };
-            }
-            self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
+            self.draw_note(
+                &painter,
+                (event.at, event.at + note.duration),
+                *y,
+                *half_tone_step,
+                note_color(&note.velocity, self.note_selection.contains(&event)),
+            );
         }
+    }
+
+    fn draw_note_transition(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        painter: &Painter,
+        should_be_visible: &mut Option<util::Range<Time>>,
+        coeff: f32,
+        is_selected: bool,
+        change: &EventAction,
+    ) {
+        // Interpolate the note states.
+        let a = Stave::note_animation_params(change.before());
+        let b = Stave::note_animation_params(change.after());
+        if a.is_none() && b.is_none() {
+            return; // CC change
+        }
+
+        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
+        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
+
+        *should_be_visible = should_be_visible
+            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+            .or(Some((t1_a, t2_a)));
+
+        // May want to handle gracefully when note gets in/out of visible pitch range.
+        // Just patching with existing y for now.
+        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
+        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
+        let y = egui::lerp(*y_a..=*y_b, coeff);
+
+        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
+        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
+
+        let c_a = note_color(&v_a, is_selected);
+        let c_b = note_color(&v_b, is_selected);
+        let color = Self::transition_color(c_a, c_b, coeff);
+
+        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
