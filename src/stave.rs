@@ -386,20 +386,12 @@ impl Stave {
                             selection_hints_left.insert(note.pitch);
                         }
                     }
-                    self.draw_track_note(
-                        key_ys,
-                        half_tone_step,
-                        &painter,
-                        &mut should_be_visible,
-                        &event,
-                        &note,
-                    );
+                    self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
                 }
                 TrackEventType::Controller(cc) => self.draw_track_cc(
                     &key_ys,
                     half_tone_step,
                     &painter,
-                    &mut should_be_visible,
                     &mut last_damper_value,
                     &event,
                     &cc,
@@ -412,16 +404,37 @@ impl Stave {
         }
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
-                // TODO visualize CC here also.
-                self.draw_note_transition(
-                    key_ys,
-                    half_tone_step,
-                    painter,
-                    &mut should_be_visible,
-                    trans.coeff,
-                    false,
-                    action,
-                );
+                let note_a = Stave::note_animation_params(action.before());
+                let note_b = Stave::note_animation_params(action.after());
+                if note_a.is_some() || note_b.is_some() {
+                    self.draw_note_transition(
+                        key_ys,
+                        half_tone_step,
+                        painter,
+                        &mut should_be_visible,
+                        trans.coeff,
+                        false,
+                        note_a,
+                        note_b,
+                    );
+                }
+                let cc_a = Stave::cc_animation_params(action.before());
+                let cc_b = Stave::cc_animation_params(action.after());
+                if cc_a.is_some() || cc_b.is_some() {
+                    self.draw_cc_transition(
+                        key_ys,
+                        half_tone_step,
+                        painter,
+                        &mut should_be_visible,
+                        trans.coeff,
+                        cc_a,
+                        cc_b,
+                    );
+                }
+                // TODO Maybe restrict actions to not change event types, this should reduce number of cases to consider.
+                debug_assert!(
+                    note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()
+                )
             }
         }
         draw_selection_hints(
@@ -855,7 +868,6 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
-        should_be_visible: &mut Option<util::Range<Time>>,
         event: &TrackEvent,
         note: &Note,
     ) {
@@ -878,15 +890,11 @@ impl Stave {
         should_be_visible: &mut Option<util::Range<Time>>,
         coeff: f32,
         is_selected: bool,
-        change: &EventAction,
+        a: Option<((Time, Time), Pitch, Level)>,
+        b: Option<((Time, Time), Pitch, Level)>,
     ) {
         // Interpolate the note states.
-        let a = Stave::note_animation_params(change.before());
-        let b = Stave::note_animation_params(change.after());
-        if a.is_none() && b.is_none() {
-            return; // CC change
-        }
-
+        assert!(a.is_some() || b.is_some());
         let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
         let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
 
@@ -931,6 +939,24 @@ impl Stave {
         painter.rect_filled(paint_rect, Rounding::ZERO, color);
     }
 
+    fn draw_point_accent(
+        &self,
+        painter: &Painter,
+        time: Time,
+        y: Pix,
+        height: Pix,
+        color: Color32,
+    ) {
+        painter.circle_filled(
+            Pos2 {
+                x: self.x_from_time(time),
+                y,
+            },
+            height / 2.2,
+            color,
+        );
+    }
+
     fn default_draw_note(
         &self,
         painter: &Painter,
@@ -967,47 +993,54 @@ impl Stave {
         })
     }
 
-    fn draw_track_cc(
+    fn draw_cc_transition(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
         should_be_visible: &mut Option<util::Range<Time>>,
+        coeff: f32,
+        a: Option<(Time, Level)>,
+        b: Option<(Time, Level)>,
+    ) {
+        assert!(a.is_some() || b.is_some());
+        if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+            let (t1, v1) = a.or(b).unwrap();
+            let (t2, v2) = b.or(a).unwrap();
+
+            let t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
+
+            let c_a = note_color(&v1, false);
+            let c_b = note_color(&v2, false);
+            let color = Self::transition_color(c_a, c_b, coeff);
+            *should_be_visible = should_be_visible
+                .map(|r| (r.0.min(t2), r.1.max(t2)))
+                .or(Some((t2, t2)));
+            debug_assert!(should_be_visible.is_some());
+            // Previous CC value is not available here, so just showing an accent here for now.
+            self.draw_point_accent(painter, t, *y, *half_tone_step, color);
+        }
+    }
+
+    fn draw_track_cc(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        painter: &Painter,
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
     ) {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
             if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                let mut color = note_color(&cc.value, false);
-                let mut t = event.at;
-                if let Some(trans) = &self.transition {
-                    let coeff = trans.value().unwrap();
-                    if let Some(change) = trans.changeset.changes.get(&event.id) {
-                        let (t1, v1) =
-                            Self::cc_animation_params(change.before()).unwrap_or((event.at, 0));
-                        let (t2, v2) =
-                            Self::cc_animation_params(change.after()).unwrap_or((event.at, 0));
-
-                        t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
-
-                        let c_a = note_color(&v1, false);
-                        let c_b = note_color(&v2, false);
-                        color = Self::transition_color(c_a, c_b, coeff);
-                        *should_be_visible = should_be_visible
-                            .map(|r| (r.0.min(last_damper_value.0), r.1.max(t2)))
-                            .or(Some((last_damper_value.0, t2)));
-                        debug_assert!(should_be_visible.is_some());
-                    }
-                }
-                // TODO (improvement) The time range here is not right: is shown up to the event,
-                //   should be from event to the next one instead.
+                // TODO (visuals, improvement) The time range here is not right: is shown up to the event,
+                //   should be from the event to the next one instead.
                 self.draw_note(
                     painter,
-                    (last_damper_value.0, t),
+                    (last_damper_value.0, event.at),
                     *y,
                     *half_tone_step,
-                    color,
+                    note_color(&cc.value, false),
                 );
                 *last_damper_value = (event.at, cc.value);
             }
