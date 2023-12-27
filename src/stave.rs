@@ -441,76 +441,6 @@ impl Stave {
         should_be_visible
     }
 
-    fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
-        ev.and_then(|ev| {
-            if let TrackEventType::Note(n) = &ev.event {
-                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
-            } else {
-                None // CC is animated separately.
-            }
-        })
-    }
-
-    fn draw_track_note(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        should_be_visible: &mut Option<util::Range<Time>>,
-        event: &TrackEvent,
-        note: &Note,
-    ) {
-        if let Some(y) = key_ys.get(&note.pitch) {
-            self.draw_note(
-                &painter,
-                (event.at, event.at + note.duration),
-                *y,
-                *half_tone_step,
-                note_color(&note.velocity, self.note_selection.contains(&event)),
-            );
-        }
-    }
-
-    fn draw_note_transition(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        should_be_visible: &mut Option<util::Range<Time>>,
-        coeff: f32,
-        is_selected: bool,
-        change: &EventAction,
-    ) {
-        // Interpolate the note states.
-        let a = Stave::note_animation_params(change.before());
-        let b = Stave::note_animation_params(change.after());
-        if a.is_none() && b.is_none() {
-            return; // CC change
-        }
-
-        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
-        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
-
-        *should_be_visible = should_be_visible
-            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
-            .or(Some((t1_a, t2_a)));
-
-        // May want to handle gracefully when note gets in/out of visible pitch range.
-        // Just patching with existing y for now.
-        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
-        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
-        let y = egui::lerp(*y_a..=*y_b, coeff);
-
-        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
-        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
-
-        let c_a = note_color(&v_a, is_selected);
-        let c_b = note_color(&v_b, is_selected);
-        let color = Self::transition_color(c_a, c_b, coeff);
-
-        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
-    }
-
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
         self.transition = self
             .transition
@@ -908,6 +838,76 @@ impl Stave {
             painter.clip_rect().y_range(),
             Stroke { width: 2.0, color },
         )
+    }
+
+    fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
+        ev.and_then(|ev| {
+            if let TrackEventType::Note(n) = &ev.event {
+                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
+            } else {
+                None // CC is animated separately.
+            }
+        })
+    }
+
+    fn draw_track_note(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        painter: &Painter,
+        should_be_visible: &mut Option<util::Range<Time>>,
+        event: &TrackEvent,
+        note: &Note,
+    ) {
+        if let Some(y) = key_ys.get(&note.pitch) {
+            self.draw_note(
+                &painter,
+                (event.at, event.at + note.duration),
+                *y,
+                *half_tone_step,
+                note_color(&note.velocity, self.note_selection.contains(&event)),
+            );
+        }
+    }
+
+    fn draw_note_transition(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        painter: &Painter,
+        should_be_visible: &mut Option<util::Range<Time>>,
+        coeff: f32,
+        is_selected: bool,
+        change: &EventAction,
+    ) {
+        // Interpolate the note states.
+        let a = Stave::note_animation_params(change.before());
+        let b = Stave::note_animation_params(change.after());
+        if a.is_none() && b.is_none() {
+            return; // CC change
+        }
+
+        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
+        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
+
+        *should_be_visible = should_be_visible
+            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+            .or(Some((t1_a, t2_a)));
+
+        // May want to handle gracefully when note gets in/out of visible pitch range.
+        // Just patching with existing y for now.
+        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
+        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
+        let y = egui::lerp(*y_a..=*y_b, coeff);
+
+        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
+        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
+
+        let c_a = note_color(&v_a, is_selected);
+        let c_b = note_color(&v_b, is_selected);
+        let color = Self::transition_color(c_a, c_b, coeff);
+
+        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
     }
 
     fn draw_note(
