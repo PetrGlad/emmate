@@ -2,20 +2,19 @@
 
 Off grid MIDI editor with following goals:
 
-* Not a DAW: MIDI is the input, MIDI is exported (would like it to be but do not have enough time for that).
-* Do not care (much) about measures. Primarily aimed at piano real recordings without strict tempo/bars.
+* Not a DAW: MIDI is the input, MIDI is exported (I would like it to be but will not have enough time for that).
+* Do not care (much) about measures. Primarily aimed at piano real time recordings without explicit tempo/bars.
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
-  of MIDI recording as one can remove a time fragment from PCM recording. For some reason DAW authors insist on handling
-  MIDI recordings differently from PCM sound recordings. In some editors this is actually doable but cumbersome at best.
-* Playing/editing very long (up to about 20K of events) files.
-  Those files are usually recordings of real performances (e.g. from MIDI keyboard).
+  of MIDI recording as one can remove a time fragment from PCM recording. For some odd reason DAW authors insist on
+  handling MIDI recordings differently from PCM sound recordings. In some editors this is doable but cumbersome at best.
+* Playing/editing very long (up to about 25K of events) files. Those files are usually recordings of real performances
+  (e.g. from a MIDI keyboard).
 * Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
 * Flight recorder (always-on MIDI recording).
 
-I'd love this to be in one of commercial or open-source DAWs and even pay money for that, but I do not see it
-happening.
+I'd love this to be in one of commercial or open-source DAWs and pay money for that, but I do not see it happening.
 
 ## Status
 
@@ -31,27 +30,30 @@ ALSA wrapper dependency
 `apt install libasound2-dev`.
 
 As an VST synth plugin you can use `amsynth`, for example.
-I use Pianoteq, but that is a commercial product.
+I personally use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] When start playing send current CC values (will help damper to take effect immediately, not on next change).
-- [ ] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
+- [ ] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
+  change).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
-- [ ] Adjust tempo for selection.
+- [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
-- [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave.
+- [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave. Maybe can
+  do this with async or sending update commands to the engine thread (e.g. can just swap to new track copy in the
+  engine's events source after edits).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
-- [ ] Reduce number of range types (preferring util::Range?)
+- [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
+- [ ] (refactoring) Reduce number of range types (preferring util::Range?)
 - [ ] Zoom to fit whole composition.
-  them are currently visible.
-- [ ] Organize commands (keep hotkeys/actions in a collection). This should make the handle_commands easier to read and
-  enable to have a generated cheatsheet/help UI.
-- [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file).
-- [ ] Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
-- [ ] Copy/cut/paste.
+- [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection). This should make the handle_commands
+  easier to read and enable to have a generated cheatsheet/help UI.
+- [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
+- [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [x] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
 - [x] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
+  them are currently visible.
 - [x] Optimize undo history 2: save only minimal diff instead of the whole track.
 - [x] Show (scroll to) changing objects before undo/redo. Should scroll some changes into view before animation on an
   undo/redo command if none are currently visible.

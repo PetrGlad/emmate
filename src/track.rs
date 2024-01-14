@@ -30,11 +30,6 @@ pub fn is_cc_switch_on(x: Level) -> bool {
     x >= 64
 }
 
-pub enum TrackLane {
-    Note(Pitch),
-    Controller(ControllerId),
-}
-
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: Pitch,

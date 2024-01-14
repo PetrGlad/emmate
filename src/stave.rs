@@ -294,7 +294,7 @@ impl Stave {
                     &Color32::from_black_alpha(15),
                 );
                 let mut note_hovered = None;
-                let mut should_be_visible = None;
+                let should_be_visible;
                 {
                     let history = self.history.borrow();
                     let track = history.track.read().expect("Read track.");
@@ -394,10 +394,6 @@ impl Stave {
                     &mut last_damper_value,
                     &event,
                     &cc,
-                ),
-                _ => println!(
-                    "Not displaying event {:?}, the event type is not supported yet.",
-                    event
                 ),
             }
         }
@@ -529,7 +525,7 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     tape_delete(track, &(time_selection.start, time_selection.end))
                 });
             }
@@ -547,7 +543,7 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
                     tape_insert(&(time_selection.start, time_selection.end))
                 });
             }
