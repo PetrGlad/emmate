@@ -99,7 +99,6 @@ impl EmApp {
 
 impl eframe::App for EmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // TODO (tokio, diff history) self.stave.history.do_pending();
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
                 Message::UpdateTime(t) => {
@@ -114,9 +113,37 @@ impl eframe::App for EmApp {
 
         ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
-            if ui.input(|i| i.key_pressed(egui::Key::Space)) {
+            if ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    Modifiers::NONE,
+                    egui::Key::Space,
+                ))
+            }) {
                 self.toggle_pause();
+            } else if ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::S))
+            }) {
+                self.export();
+            } else if ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::F))
+            }) {
+                self.follow_playback = !self.follow_playback;
+            } else if ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    Modifiers::NONE,
+                    egui::Key::PageUp,
+                ))
+            }) {
+                self.stave.scroll_by(ctx.available_rect().width() / -4.0);
+            } else if ui.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    Modifiers::NONE,
+                    egui::Key::PageDown,
+                ))
+            }) {
+                self.stave.scroll_by(ctx.available_rect().width() / 4.0);
             }
+
             {
                 let h = self.stave.history.borrow();
                 ui.heading(format!("🌲 {} [{}]", h.directory.display(), h.version()));
@@ -167,24 +194,14 @@ impl eframe::App for EmApp {
                                     .send(Box::new(Engine::reset))
                                     .unwrap();
                             }
-                            if ui.input_mut(|i| {
-                                i.consume_shortcut(&egui::KeyboardShortcut::new(
-                                    Modifiers::CTRL,
-                                    egui::Key::S,
-                                ))
-                            }) {
-                                self.export();
-                            }
                             if ui.button("🚩Export").clicked() {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
                                 self.stave.history.borrow_mut().undo(&mut vec![]);
-                                // TODO (implement) changes highlighting
                             }
                             if ui.button("⤴ Redo").clicked() {
                                 self.stave.history.borrow_mut().redo(&mut vec![]);
-                                // TODO (implement) changes highlighting
                             }
                         });
                         ui.horizontal(|ui| {
