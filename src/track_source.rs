@@ -1,7 +1,7 @@
-use std::collections::BinaryHeap;
 use std::sync::{Arc, RwLock};
 
 use crate::common::Time;
+use crate::engine;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::{Track, TrackEventType};
@@ -59,36 +59,42 @@ impl EventSource for TrackSource {
         self.running_at = *at;
     }
 
-    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>) {
+    fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
         let track = self.track.read().expect("Cannot read track.");
+        let mut events = vec![];
         while self.current_idx < track.events.len() {
             let notes = &track.events;
             let event = &notes[self.current_idx];
             let running_at = event.at;
             if running_at > *at {
-                return;
+                return events;
             }
             self.running_at = running_at;
             match &event.event {
                 TrackEventType::Note(note) => {
-                    queue.push(EngineEvent {
+                    events.push(EngineEvent {
                         at: running_at,
-                        event: note_on(1, note.pitch, note.velocity),
+                        event: note_on(engine::MIDI_CHANNEL, note.pitch, note.velocity),
                     });
-                    queue.push(EngineEvent {
+                    events.push(EngineEvent {
                         at: running_at + note.duration,
-                        event: note_off(1, note.pitch, note.velocity),
+                        event: note_off(engine::MIDI_CHANNEL, note.pitch, note.velocity),
                     });
                 }
                 TrackEventType::Controller(set_val) => {
-                    queue.push(EngineEvent {
+                    events.push(EngineEvent {
                         at: running_at,
-                        event: controller_set(1, set_val.controller_id, set_val.value),
+                        event: controller_set(
+                            engine::MIDI_CHANNEL,
+                            set_val.controller_id,
+                            set_val.value,
+                        ),
                     });
                 }
             }
             self.current_idx += 1;
         }
+        events
     }
 }
 

@@ -10,7 +10,7 @@ pub fn setup_audio_engine(
     midi_output: MidiOutputConnection,
 ) -> (Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
     let (command_sender, command_receiver) = mpsc::channel();
-    let engine = Engine::new(midi_output, command_receiver);
+    let engine = Engine::new(midi_output, command_sender.clone(), command_receiver);
     (engine.start(), command_sender)
 }
 

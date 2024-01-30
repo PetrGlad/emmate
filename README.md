@@ -34,8 +34,6 @@ I personally use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
-  change).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
@@ -47,10 +45,12 @@ I personally use Pianoteq, but that is a commercial product.
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
 - [ ] (refactoring) Reduce number of range types (preferring util::Range?)
 - [ ] Zoom to fit whole composition.
-- [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection). This should make the handle_commands
-  easier to read and enable to have a generated cheatsheet/help UI.
+- [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
+  handle_commands easier to read and enable to have a generated cheatsheet/help UI.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [x] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
+  change).
 - [x] Remove VST2 dependency. Using MIDI sequencer port instead.
 - [x] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
 - [x] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of

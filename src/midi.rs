@@ -1,4 +1,3 @@
-use std::collections::BinaryHeap;
 use std::time::Duration;
 
 use midly::io::WriteResult;
@@ -112,24 +111,26 @@ impl EventSource for SmfSource {
         self.running_at = *at;
     }
 
-    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>) {
+    fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
         let track = &self.events;
+        let mut events = vec![];
         while self.is_running() {
             let event = track[self.current_idx];
             let running_at =
                 self.running_at + self.tick.as_micros() as Time * event.delta.as_int() as Time;
             if running_at > *at {
-                return;
+                return events;
             }
             self.running_at = running_at;
             self.current_idx += 1;
             if let Some(lev) = event.kind.as_live_event() {
-                queue.push(EngineEvent {
+                events.push(EngineEvent {
                     at: *at,
                     event: lev,
                 });
             }
         }
+        events
     }
 }
 

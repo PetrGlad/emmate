@@ -1,15 +1,19 @@
-use midir::MidiOutputConnection;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use midir::MidiOutputConnection;
 use midly::live::LiveEvent;
 use midly::MidiMessage;
+use midly::MidiMessage::NoteOff;
 
 use crate::common::Time;
-use crate::track::MIDI_CC_SUSTAIN_ID;
+use crate::stave::PIANO_KEY_LINES;
+use crate::track::{ChannelId, MIDI_CC_SUSTAIN_ID};
+
+pub const MIDI_CHANNEL: ChannelId = 1;
 
 /** Event that is produced by engine. */
 #[derive(Clone, Debug)]
@@ -48,7 +52,7 @@ pub trait EventSource {
     fn seek(&mut self, at: &Time);
     /** The next event to be played at the instant. On subsequent
     calls instants must not decrease unless a reset call sets back the time. */
-    fn next(&mut self, at: &Time, queue: &mut BinaryHeap<EngineEvent>);
+    fn next(&mut self, at: &Time) -> Vec<EngineEvent>;
 }
 
 type EventSourceHandle = dyn EventSource + Send;
@@ -62,13 +66,17 @@ pub struct Engine {
     reset_at: Instant,
     paused: bool,
     status_receiver: Option<Box<StatusEventReceiver>>,
-    commands: mpsc::Receiver<Box<EngineCommand>>,
+    command_receiver: mpsc::Receiver<Box<EngineCommand>>,
+    command_sender: mpsc::Sender<Box<EngineCommand>>,
+    current_sustain: Option<LiveEvent<'static>>,
+    queue: BinaryHeap<EngineEvent>,
 }
 
 impl Engine {
     pub fn new(
         midi_output: MidiOutputConnection,
-        commands: mpsc::Receiver<Box<EngineCommand>>,
+        command_sender: mpsc::Sender<Box<EngineCommand>>,
+        command_receiver: mpsc::Receiver<Box<EngineCommand>>,
     ) -> Engine {
         Engine {
             midi_output,
@@ -77,7 +85,10 @@ impl Engine {
             reset_at: Instant::now(),
             paused: false,
             status_receiver: None,
-            commands,
+            current_sustain: None,
+            command_receiver,
+            command_sender,
+            queue: BinaryHeap::new(),
         }
     }
 
@@ -85,69 +96,59 @@ impl Engine {
         let engine = Arc::new(Mutex::new(self));
         let engine2 = engine.clone();
         thread::spawn(move || {
-            // Use async instead?
             engine2.lock().unwrap().seek(0);
-            let mut queue: BinaryHeap<EngineEvent> = BinaryHeap::new();
             loop {
-                thread::sleep(Duration::from_micros(3_000));
+                thread::sleep(Duration::from_micros(3_000)); // TODO (improvement) Use async instead
                 let lock = engine2.lock();
                 if let Err(_) = lock {
                     continue;
                 }
                 let mut locked = lock.unwrap();
                 let pending_commands: Vec<Box<EngineCommand>> =
-                    locked.commands.try_iter().collect();
+                    locked.command_receiver.try_iter().collect();
                 for command in pending_commands {
                     command(&mut locked);
                 }
                 if locked.paused {
-                    // Mute ongoing notes before clearing.
-                    // TODO Avoid doing this at every iteration?
-                    for ev in queue.iter() {
-                        if let LiveEvent::Midi {
-                            message,
-                            channel: _,
-                        } = ev.event
-                        {
-                            if let MidiMessage::NoteOff { .. } = message {
-                                locked.process(ev.event);
-                            }
-                        }
-                    }
-                    locked.close_damper();
-                    queue.clear();
                     continue;
                 };
                 locked.sources.retain(|s| s.is_running());
                 Self::update_track_time(&mut locked);
                 let transport_time = locked.running_at;
-                for s in locked.sources.iter_mut() {
-                    s.next(&transport_time, &mut queue);
+                for ev in locked
+                    .sources
+                    .iter_mut()
+                    .map(|s| s.next(&transport_time))
+                    .flatten()
+                    .collect::<Vec<EngineEvent>>()
+                {
+                    locked.queue.push(ev);
                 }
                 let mut batch = vec![];
-                while let Some(ev) = queue.peek() {
+                while let Some(ev) = locked.queue.peek() {
                     if ev.at > transport_time {
                         break;
                     }
-                    batch.push(queue.pop().unwrap().event);
+                    batch.push(locked.queue.pop().unwrap().event);
                 }
                 for ev in batch {
+                    // Keeping actual value to resume playback with sustain enabled if necessary.
+                    // Otherwise, it will only be active after next explicit change.
+                    if let LiveEvent::Midi {
+                        message: MidiMessage::Controller { controller, .. },
+                        ..
+                    } = ev
+                    {
+                        if controller == MIDI_CC_SUSTAIN_ID {
+                            locked.current_sustain = Some(ev.to_static());
+                        }
+                    }
+
                     locked.process(ev);
                 }
             }
         });
         engine
-    }
-
-    fn close_damper(&mut self) {
-        let ev = LiveEvent::Midi {
-            channel: 0.into(),
-            message: MidiMessage::Controller {
-                controller: MIDI_CC_SUSTAIN_ID.into(),
-                value: 0.into(),
-            },
-        };
-        self.process(ev);
     }
 
     fn update_track_time(&mut self) {
@@ -171,6 +172,35 @@ impl Engine {
         if !self.paused {
             self.update_realtime();
         }
+        self.command_sender
+            .send(Box::new(|engine| {
+                if engine.paused {
+                    // Mute ongoing notes before clearing.
+                    engine.queue.clear();
+                    for key in PIANO_KEY_LINES {
+                        engine.process(LiveEvent::Midi {
+                            channel: MIDI_CHANNEL.into(),
+                            message: NoteOff {
+                                key: key.into(),
+                                vel: 64.into(),
+                            },
+                        });
+                    }
+                    engine.process(LiveEvent::Midi {
+                        channel: MIDI_CHANNEL.into(),
+                        message: MidiMessage::Controller {
+                            controller: MIDI_CC_SUSTAIN_ID.into(),
+                            value: 0.into(),
+                        },
+                    });
+                } else if let Some(sustain) = engine.current_sustain {
+                    engine.queue.push(EngineEvent {
+                        at: engine.running_at,
+                        event: sustain,
+                    });
+                }
+            }))
+            .unwrap();
     }
 
     /// Stop all sounds.
@@ -190,7 +220,9 @@ impl Engine {
     pub fn process(&mut self, event: LiveEvent) {
         let mut midi_buf = vec![];
         event.write(&mut midi_buf).unwrap();
-        self.midi_output.send(&midi_buf).unwrap();
+        self.midi_output
+            .send(&midi_buf)
+            .expect("send output MIDI event");
     }
 
     pub fn set_status_receiver(&mut self, receiver: Option<Box<StatusEventReceiver>>) {
