@@ -132,6 +132,7 @@ impl OutputSource {
     }
 }
 
+// Produces audio output PCM samples from VST.
 impl Iterator for OutputSource {
     type Item = f32;
 
