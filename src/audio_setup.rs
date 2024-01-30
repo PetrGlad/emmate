@@ -49,6 +49,8 @@ pub fn setup_audio_engine(
     (stream, engine.start(), command_sender)
 }
 
+// TODO (refactoring) Convert this into event source? Note: on pause engine stops all sources,
+//      may want this to be active when not playing the track (e.g. to make edits audible).
 pub fn midi_keyboard_input(
     name_prefix: &str,
     engine: &mut Arc<Mutex<Engine>>,

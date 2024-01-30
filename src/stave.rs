@@ -825,11 +825,7 @@ impl Stave {
                     let id_seq = &self.history.borrow().id_seq.clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                         if draw.pitch == PIANO_DAMPER_LINE {
-                            if modifiers.alt {
-                                set_damper(id_seq, track, &time_range, false)
-                            } else {
-                                set_damper(id_seq, track, &time_range, true)
-                            }
+                            set_damper(id_seq, track, &time_range, !modifiers.alt)
                         } else {
                             add_new_note(id_seq, &time_range, &draw.pitch)
                         }
