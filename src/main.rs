@@ -1,4 +1,6 @@
 use eframe::{egui, Theme};
+use midir::os::unix::VirtualOutput;
+use midir::MidiOutput;
 
 use crate::app::EmApp;
 use crate::config::Config;
@@ -13,7 +15,6 @@ mod common;
 mod config;
 mod engine;
 mod midi;
-mod midi_vst;
 mod project;
 mod stave;
 mod track;
@@ -43,6 +44,7 @@ pub fn main() {
                 .default_value("yellow.mid"),
         )
         .get_matches();
+    // TODO (implementation) Do not need the config after VST is removed, keeping it here just in case.
     let config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
 
     let midi_file_path = arg_matches
@@ -51,9 +53,13 @@ pub fn main() {
     println!("MIDI file name {:?}", midi_file_path);
     let project = Project::open_file(midi_file_path);
 
+    let midi_output = MidiOutput::new("emmate")
+        .expect("MIDI sequencer client")
+        .create_virtual("emmate")
+        .expect("MIDI sequencer out");
+
     // Stream and engine references keep them open.
-    let (_stream, mut engine, engine_command_sender) =
-        audio_setup::setup_audio_engine(&config.vst_plugin_path, &config.vst_preset_id);
+    let (mut engine, engine_command_sender) = audio_setup::setup_audio_engine(midi_output);
     if false {
         // Want the section to still be compilable.
         // Play MIDI from an SMD file.

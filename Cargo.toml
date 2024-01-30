@@ -15,9 +15,6 @@ ordered-float = "4.1.0"
 eframe = { version = "0.23.0" }
 egui_extras = { version = "0.23.0" }
 
-# https://github.com/RustAudio/vst-rs
-vst = "0.3.0"
-
 # https://github.com/negamartin/midly
 midly = { version = "0.5.3", features = ["alloc"] }
 

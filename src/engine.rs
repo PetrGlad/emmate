@@ -1,3 +1,4 @@
+use midir::MidiOutputConnection;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::{mpsc, Arc, Mutex};
@@ -6,11 +7,8 @@ use std::time::{Duration, Instant};
 
 use midly::live::LiveEvent;
 use midly::MidiMessage;
-use vst::event::Event;
-use vst::plugin::Plugin;
 
 use crate::common::Time;
-use crate::midi_vst::Vst;
 use crate::track::MIDI_CC_SUSTAIN_ID;
 
 /** Event that is produced by engine. */
@@ -58,7 +56,7 @@ type EventSourceHandle = dyn EventSource + Send;
 pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
 
 pub struct Engine {
-    vst: Vst,
+    midi_output: MidiOutputConnection,
     sources: Vec<Box<EventSourceHandle>>,
     running_at: Time,
     reset_at: Instant,
@@ -68,9 +66,12 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(vst: Vst, commands: mpsc::Receiver<Box<EngineCommand>>) -> Engine {
+    pub fn new(
+        midi_output: MidiOutputConnection,
+        commands: mpsc::Receiver<Box<EngineCommand>>,
+    ) -> Engine {
         Engine {
-            vst,
+            midi_output,
             sources: Vec::new(),
             running_at: 0,
             reset_at: Instant::now(),
@@ -84,6 +85,7 @@ impl Engine {
         let engine = Arc::new(Mutex::new(self));
         let engine2 = engine.clone();
         thread::spawn(move || {
+            // Use async instead?
             engine2.lock().unwrap().seek(0);
             let mut queue: BinaryHeap<EngineEvent> = BinaryHeap::new();
             loop {
@@ -108,7 +110,7 @@ impl Engine {
                         } = ev.event
                         {
                             if let MidiMessage::NoteOff { .. } = message {
-                                locked.process(smf_to_vst(ev.event));
+                                locked.process(ev.event);
                             }
                         }
                     }
@@ -130,14 +132,14 @@ impl Engine {
                     batch.push(queue.pop().unwrap().event);
                 }
                 for ev in batch {
-                    locked.process(smf_to_vst(ev));
+                    locked.process(ev);
                 }
             }
         });
         engine
     }
 
-    fn close_damper(&self) {
+    fn close_damper(&mut self) {
         let ev = LiveEvent::Midi {
             channel: 0.into(),
             message: MidiMessage::Controller {
@@ -145,7 +147,7 @@ impl Engine {
                 value: 0.into(),
             },
         };
-        self.process(smf_to_vst(ev));
+        self.process(ev);
     }
 
     fn update_track_time(&mut self) {
@@ -174,9 +176,6 @@ impl Engine {
     /// Stop all sounds.
     pub fn reset(&mut self) {
         self.paused = true;
-        // TODO These SIGSEV. Use other API instead (LV2)? See also https://github.com/RustAudio/vst-rs/issues/193
-        // self.vst.host.lock().unwrap().idle();
-        // self.vst.plugin.lock().unwrap().suspend();
     }
 
     pub fn update_realtime(&mut self) {
@@ -188,31 +187,13 @@ impl Engine {
     }
 
     /// Process the event immediately.
-    pub fn process(&self, event: Event) {
-        let events_list = [event];
-        let mut events_buffer = vst::buffer::SendEventBuffer::new(events_list.len());
-        events_buffer.store_events(events_list);
-        let mut plugin = self.vst.plugin.lock().unwrap();
-        plugin.process_events(events_buffer.events());
+    pub fn process(&mut self, event: LiveEvent) {
+        let mut midi_buf = vec![];
+        event.write(&mut midi_buf).unwrap();
+        self.midi_output.send(&midi_buf).unwrap();
     }
 
     pub fn set_status_receiver(&mut self, receiver: Option<Box<StatusEventReceiver>>) {
         self.status_receiver = receiver;
     }
-}
-
-fn smf_to_vst(event: LiveEvent<'static>) -> Event<'static> {
-    let mut ev_buf = Vec::new();
-    event
-        .write(&mut ev_buf)
-        .expect("The live event should be writable.");
-    Event::Midi(vst::event::MidiEvent {
-        data: ev_buf.try_into().unwrap(),
-        delta_frames: 0,
-        live: true,
-        note_length: None,
-        note_offset: None,
-        detune: 0,
-        note_off_velocity: 0,
-    })
 }

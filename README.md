@@ -51,6 +51,7 @@ I personally use Pianoteq, but that is a commercial product.
   easier to read and enable to have a generated cheatsheet/help UI.
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [x] Remove VST2 dependency. Using MIDI sequencer port instead.
 - [x] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
 - [x] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
   them are currently visible.
@@ -88,11 +89,6 @@ I personally use Pianoteq, but that is a commercial product.
 
 Also, some big scary problems
 
-* Should eventually migrate away from VST2. The bindings are unsupported anymore, and there are SIGSEGVs that I have not
-  managed to resolve so far. Also, there are licensing issues with the VST2 API itself. VST3 is GPL - I would like to
-  keep the project more accessible to various uses. LV2 seem like a decent choice. Here seem to be an LV2 host
-  implementation in Rust https://github.com/wmedrano/livi-rs. Can also implement one from scratch, or use JACK API and
-  register `emmate` as a MIDI sequencer. Pipewire seems to SUPPORT JACK API as well (see `pw-jack`).
 * May need to use midi events directly (instead of intermediate internal representation). E.g. `track::from_midi_events`
   may not be necessary. In particular tail shifts will become simpler. This will require
     * To handle ignored/unused events along with notes and sustain.
