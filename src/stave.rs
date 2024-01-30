@@ -462,6 +462,9 @@ impl Stave {
 
         if let Some(note_id) = stave_response.note_hovered {
             if stave_response.response.clicked() {
+                if !ui.input(|i| i.modifiers.ctrl) {
+                    self.note_selection.clear()
+                }
                 self.note_selection.toggle(&note_id);
             }
         }

@@ -102,7 +102,7 @@ pub fn midi_keyboard_input(
                         detune: 0,
                         note_off_velocity: 0,
                     });
-                    // TODO (?) Sustain events seem to be ignored by the VST plugin.
+                    // TODO (bug) Sustain events seem to be ignored by the VST plugin.
                     engine.lock().unwrap().process(event);
                 },
                 (),

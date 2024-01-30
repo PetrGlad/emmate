@@ -7,8 +7,8 @@ Off grid MIDI editor with following goals:
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
   of MIDI recording as one can remove a time fragment from PCM recording. For some odd reason DAW authors insist on
   handling MIDI recordings differently from PCM sound recordings. In some editors this is doable but cumbersome at best.
-* Playing/editing very long (up to about 25K of events) files. Those files are usually recordings of real performances
-  (e.g. from a MIDI keyboard).
+* Playing/editing very long (up to about 25K of playable events) files. Those files are usually recordings of real
+  performances (e.g. from a MIDI keyboard).
 * Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
@@ -18,8 +18,8 @@ I'd love this to be in one of commercial or open-source DAWs and pay money for t
 
 ## Status
 
-Prototype, still figuring things out. I am learning Rust, MIDI, sound processing, and UI library all at once
-so the code is not an example of a good style.
+Somewhat usable, no documentation yet (e.g. hot-keys, launching need to be described). The code still needs major
+revamps.
 
 ## Build
 
@@ -86,7 +86,7 @@ I personally use Pianoteq, but that is a commercial product.
 - [x] Piano roll.
 - [x] Paint notes.
 
-Big scary problems
+Also, some big scary problems
 
 * Should eventually migrate away from VST2. The bindings are unsupported anymore, and there are SIGSEGVs that I have not
   managed to resolve so far. Also, there are licensing issues with the VST2 API itself. VST3 is GPL - I would like to
@@ -101,7 +101,7 @@ Big scary problems
       allows overlapping notes index should be able to handle that.
 * Optimize rendering drawing only visible items, may also need some index. In the simplest casevisible notes can be
   determined when zoom changes, and then re-use the visible set.
-* Optimize engine to reduce CPU usage - may need to swith to some async framework (`tokio`).
+* Optimize engine to reduce CPU usage - may need to switch to some async framework (`tokio`).
 
 Have to explore following options for the further development
 
