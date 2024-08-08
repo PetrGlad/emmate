@@ -34,7 +34,7 @@ I personally use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
+- [ ] Shift markers on time deletion to follow the marked timestamps.
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave. Maybe can
@@ -45,8 +45,11 @@ I personally use Pianoteq, but that is a commercial product.
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
 - [ ] (refactoring) Reduce number of range types (preferring util::Range?)
 - [ ] Zoom to fit whole composition.
+- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
+- [ ] Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
+  now).
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
 - [x] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next

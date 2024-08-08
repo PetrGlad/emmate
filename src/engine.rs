@@ -5,7 +5,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use midir::MidiOutputConnection;
-use midly::live::LiveEvent;
+use midly::live::SystemRealtime::Reset;
+use midly::live::{LiveEvent, SystemRealtime};
+use midly::num::u7;
 use midly::MidiMessage;
 use midly::MidiMessage::NoteOff;
 
@@ -177,7 +179,7 @@ impl Engine {
                 if engine.paused {
                     // Mute ongoing notes before clearing.
                     engine.queue.clear();
-                    for key in PIANO_KEY_LINES {
+                    for key in 0..u7::max_value().into() {
                         engine.process(LiveEvent::Midi {
                             channel: MIDI_CHANNEL.into(),
                             message: NoteOff {
