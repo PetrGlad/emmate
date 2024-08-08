@@ -1,11 +1,3 @@
 # Emmate configuration file
 
-# Path to the VST's shared library.
-vst_plugin_path = "/home/petr/opt/Pianoteq 8/x86-64bit/Pianoteq 8.so"
-# vst_plugin_path="/home/petr/opt/Pianoteq 7/x86-64bit/Pianoteq 8.lv2/Pianoteq_8.so"
-# vst_plugin_path="/usr/lib/x86_64-linux-gnu/vst/amsynth_vst.so"
-
-# A preset to use in the VST plugin.
-vst_preset_id = 4 # For Pianoteq
-# vst_preset_id = 1096 # A choice for amsynth
-
+# Add config defaults here (see src/config.rs)

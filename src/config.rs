@@ -6,8 +6,7 @@ pub const DEFAULT_CONFIG_TOML: &str = include_str!("default-config.toml");
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub vst_plugin_path: String,
-    pub vst_preset_id: i32,
+    // Add configurable values as pub fields here.
 }
 
 impl Config {

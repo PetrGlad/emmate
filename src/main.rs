@@ -44,8 +44,8 @@ pub fn main() {
                 .default_value("yellow.mid"),
         )
         .get_matches();
-    // TODO (implementation) Do not need the config after VST is removed, keeping it here just in case.
-    let config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
+    // No configurable values at the moment, keeping it here to keep config loader compilable.
+    let _config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
 
     let midi_file_path = arg_matches
         .get_one::<std::path::PathBuf>("midi-file")

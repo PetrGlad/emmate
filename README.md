@@ -34,17 +34,20 @@ I personally use Pianoteq, but that is a commercial product.
 
 ## TODO
 
+- [ ] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
+  of note ranges.
+- [ ] (refactoring) Reduce number of range types (preferring util::Range?)
 - [ ] Shift markers on time deletion to follow the marked timestamps.
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
-- [ ] Minimize use of unwrap. The biggest contention currently is event data shared between engine and stave. Maybe can
-  do this with async or sending update commands to the engine thread (e.g. can just swap to new track copy in the
-  engine's events source after edits).
+- [ ] (refactoring, a big one) Minimize use of unwrap. The biggest contention currently is event data shared between
+  engine and stave. Maybe can do this with async or sending update commands to the engine thread (e.g. can just swap to
+  new track copy in the engine's events source after edits).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
-- [ ] (refactoring) Reduce number of range types (preferring util::Range?)
 - [ ] Zoom to fit whole composition.
+- [ ] The sustain lane is left in an inconsistent state sometines (needs investigation).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
@@ -54,7 +57,7 @@ I personally use Pianoteq, but that is a commercial product.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
 - [x] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
   change).
-- [x] Remove VST2 dependency. Using MIDI sequencer port instead.
+- [x] Remove VST2 dependency. Use MIDI sequencer port instead.
 - [x] Highlight undo/redo changes (implemented for notes, need also to emphasise CC values).
 - [x] Visual hint for out-of-view selected notes. Scroll to the earliest of the selected notes on an action, if none of
   them are currently visible.

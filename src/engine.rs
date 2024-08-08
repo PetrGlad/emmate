@@ -5,14 +5,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use midir::MidiOutputConnection;
-use midly::live::SystemRealtime::Reset;
-use midly::live::{LiveEvent, SystemRealtime};
+use midly::live::LiveEvent;
 use midly::num::u7;
 use midly::MidiMessage;
 use midly::MidiMessage::NoteOff;
 
 use crate::common::Time;
-use crate::stave::PIANO_KEY_LINES;
 use crate::track::{ChannelId, MIDI_CC_SUSTAIN_ID};
 
 pub const MIDI_CHANNEL: ChannelId = 1;
