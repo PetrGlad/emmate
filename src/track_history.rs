@@ -30,6 +30,8 @@ struct Version {
     diff_path: Option<PathBuf>,
 }
 
+pub type CommandApplication = Option<(AppliedCommand, EventActionsList)>;
+
 impl Version {
     pub fn is_empty(&self) -> bool {
         self.snapshot_path.is_none() && self.diff_path.is_none()
@@ -48,20 +50,20 @@ impl TrackHistory {
     pub fn update_track<Action: FnOnce(&Track) -> Option<AppliedCommand>>(
         &mut self,
         action: Action,
-    ) -> Option<(EditCommandId, EventActionsList)> {
+    ) -> CommandApplication {
         let applied_command = {
             let track = self.track.write().expect("read track");
             action(&track)
         };
-        if let Some(applied_command) = &applied_command {
+        if let Some(applied_command) = applied_command {
             let mut changes = vec![];
             {
                 let mut track = self.track.write().expect("write to track");
                 apply_diffs(&mut track, &applied_command.1, &mut changes);
                 track.commit();
             }
-            self.update(applied_command);
-            Some((applied_command.0, changes))
+            self.update(&applied_command);
+            Some((applied_command, changes))
         } else {
             None
         }

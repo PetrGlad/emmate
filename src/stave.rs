@@ -1,9 +1,3 @@
-use std::cell::RefCell;
-use std::collections::btree_set::Iter;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::ops::Range;
-use std::path::PathBuf;
-
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Rounding, Sense, Stroke, Ui,
@@ -11,6 +5,11 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+use std::ops::Range;
+use std::path::PathBuf;
+use std::slice::Iter;
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
@@ -23,7 +22,7 @@ use crate::track_edit::{
     stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes, AppliedCommand,
     EditCommandId,
 };
-use crate::track_history::TrackHistory;
+use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{util, Pix};
 
 // Tone 60 is C3, tones start at C-2 (21).
@@ -86,27 +85,43 @@ pub struct Bookmark {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Bookmarks {
-    // Maybe bookmarks should also be events in the track.
-    pub list: BTreeSet<Bookmark>,
+    // (refactoring) Maybe bookmarks should also be events in the track. The logic is about the same.
+    pub list: Vec<Bookmark>,
     file_path: PathBuf,
 }
 
 impl Bookmarks {
     pub fn new(file_path: &PathBuf) -> Bookmarks {
         Bookmarks {
-            list: BTreeSet::default(),
+            list: vec![],
             file_path: file_path.to_owned(),
         }
     }
 
     pub fn set(&mut self, at: Time) {
-        self.list.insert(Bookmark { at });
-        self.store_to(&self.file_path);
+        let bm = Bookmark { at };
+        let idx = self.list.binary_search(&bm);
+        if let Err(idx) = idx {
+            self.list.insert(idx, bm);
+            self.store_to(&self.file_path);
+        }
     }
 
     pub fn remove(&mut self, at: &Time) {
-        self.list.remove(&Bookmark { at: *at });
-        self.store_to(&self.file_path);
+        let bm = Bookmark { at: at.clone() };
+        let idx = self.list.binary_search(&bm);
+        if let Ok(idx) = idx {
+            self.list.remove(idx);
+            self.store_to(&self.file_path);
+        }
+    }
+
+    pub fn shift(&mut self, after: Time, delta: Time) {
+        for m in self.list.iter_mut() {
+            if m.at >= after {
+                m.at += delta;
+            }
+        }
     }
 
     pub fn previous(&self, here: &Time) -> Option<Time> {
@@ -508,6 +523,9 @@ impl Stave {
 
     const KEYBOARD_TIME_STEP: Time = 10_000;
 
+    /**
+     * Applies the command and returns time to move the stave cursor to.
+     */
     fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
         // TODO Have to see if duplication here can be reduced. Likely the dispatch needs some
         //   hash map that for each input state defines a unique command.
@@ -528,9 +546,23 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    tape_delete(track, &(time_selection.start, time_selection.end))
-                });
+                if self
+                    .do_edit_command(&response.ctx, response.id, |stave, track| {
+                        tape_delete(track, &(time_selection.start, time_selection.end))
+                    })
+                    .is_some()
+                {
+                    // TODO (refactoring) If bookmarks were represented as events they could
+                    //      be handled uniformly along with notes and CC changes. In that case the
+                    //      following will not need to be handled as a special case.
+                    //      See also tape_insert.
+                    // TODO (implementation) Ideally should also delete bookmarks in the selection.
+                    //      But there is no way to undo this.
+                    self.bookmarks.shift(
+                        time_selection.end,
+                        -(time_selection.end - time_selection.start),
+                    );
+                }
             }
             if !self.note_selection.selected.is_empty() {
                 self.do_edit_command(&response.ctx, response.id, |stave, track| {
@@ -546,9 +578,18 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
-                    tape_insert(&(time_selection.start, time_selection.end))
-                });
+                if self
+                    .do_edit_command(&response.ctx, response.id, |_stave, _track| {
+                        tape_insert(&(time_selection.start, time_selection.end))
+                    })
+                    .is_some()
+                {
+                    // TODO (refactoring) See comment in tape_delete case.
+                    self.bookmarks.shift(
+                        time_selection.start,
+                        time_selection.end - time_selection.start,
+                    );
+                }
             }
         }
 
@@ -743,9 +784,9 @@ impl Stave {
     fn animate_edit(
         context: &Context,
         transition_id: egui::Id,
-        edit_state: Option<(EditCommandId, EventActionsList)>,
+        diff: Option<(EditCommandId, EventActionsList)>,
     ) -> Option<EditTransition> {
-        if let Some((command_id, changes)) = edit_state {
+        if let Some((command_id, changes)) = diff {
             let mut changeset = Changeset::empty();
             changeset.add_all(&changes);
             Some(EditTransition::start(
@@ -764,14 +805,17 @@ impl Stave {
         context: &Context,
         transition_id: egui::Id,
         action: Action,
-    ) {
+    ) -> CommandApplication {
+        let diff = self
+            .history
+            .borrow_mut()
+            .update_track(|track| action(&self, track));
         self.transition = Self::animate_edit(
             context,
             transition_id,
-            self.history
-                .borrow_mut()
-                .update_track(|track| action(&self, track)),
-        )
+            diff.clone().map(|diff| (diff.0 .0, diff.1)),
+        );
+        diff
     }
 
     fn max_time(&self) -> Time {

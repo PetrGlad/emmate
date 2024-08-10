@@ -48,6 +48,7 @@ pub enum CommandDiff {
     TailShift { at: Time, delta: Time },
 }
 
+// TODO (refactoring) make this a struct toi have named fields.
 pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
 
 pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
@@ -106,9 +107,9 @@ fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changes: &mut EventActi
 }
 
 pub fn tape_insert(range: &Range<Time>) -> Option<AppliedCommand> {
-    let mut diffs = vec![];
     let delta = range.1 - range.0;
     assert!(delta >= 0);
+    let mut diffs = vec![];
     diffs.push(CommandDiff::TailShift { at: range.0, delta });
     Some((EditCommandId::TapeInsert, diffs))
 }
