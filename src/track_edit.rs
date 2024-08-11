@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
-use crate::stave::PIANO_KEY_LINES;
+use crate::stave::{Bookmark, PIANO_KEY_LINES};
 use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
+use crate::track_edit::CommandDiff::ChangeList;
 use crate::util::{range_contains, IdSeq, Range};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -27,6 +28,9 @@ pub enum EditCommandId {
     Undo,
     Redo,
     Load,
+    // Workspace-related changes that are tied to the stave.
+    SetBookmark,
+    ClearBookmark,
 }
 
 /**
@@ -48,7 +52,7 @@ pub enum CommandDiff {
     TailShift { at: Time, delta: Time },
 }
 
-// TODO (refactoring) make this a struct toi have named fields.
+// TODO (refactoring) make this a struct in order to have named fields.
 pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
 
 pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
@@ -358,6 +362,43 @@ fn cc_value_at(events: &Vec<TrackEvent>, at: &Time, cc_id: &ControllerId) -> Lev
         }
     }
     return 0; // default
+}
+
+pub fn bookmark_at(track: &Track, at: &Time) -> Option<TrackEvent> {
+    track
+        .events
+        .iter()
+        .find(|ev| ev.at == *at && ev.event == TrackEventType::Bookmark)
+        .cloned()
+}
+
+pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedCommand> {
+    if bookmark_at(track, at).is_some() {
+        return None;
+    }
+    Some((
+        EditCommandId::SetBookmark,
+        vec![ChangeList {
+            patch: vec![EventAction::Insert(TrackEvent {
+                id: id_seq.next(),
+                at: *at,
+                event: TrackEventType::Bookmark,
+            })],
+        }],
+    ))
+}
+
+pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
+    if let Some(bm) = bookmark_at(track, at) {
+        Some((
+            EditCommandId::ClearBookmark,
+            vec![ChangeList {
+                patch: vec![EventAction::Delete(bm.clone())],
+            }],
+        ))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -1,3 +1,9 @@
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+use std::ops::Range;
+use std::path::PathBuf;
+use std::slice::Iter;
+
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Rounding, Sense, Stroke, Ui,
@@ -5,11 +11,6 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
-use std::ops::Range;
-use std::path::PathBuf;
-use std::slice::Iter;
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
@@ -18,9 +19,9 @@ use crate::track::{
     MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, delete_selected, set_damper, shift_selected, shift_tail,
-    stretch_selected_notes, tape_delete, tape_insert, transpose_selected_notes, AppliedCommand,
-    EditCommandId,
+    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
+    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{util, Pix};
@@ -83,6 +84,7 @@ pub struct Bookmark {
     at: Time,
 }
 
+/// FIXME (cleanup) Remove bookmarks collection code after new bookmarks impl is good.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Bookmarks {
     // (refactoring) Maybe bookmarks should also be events in the track. The logic is about the same.
@@ -329,13 +331,14 @@ impl Stave {
                     Rgba::from_rgba_unmultiplied(0.1, 0.9, 0.1, 0.8).into(),
                 );
 
-                for &bm in &self.bookmarks.list {
-                    self.draw_cursor(
-                        &painter,
-                        self.x_from_time(bm.at),
-                        Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                    );
-                }
+                // FIXME (cleanup) Remove after new bookmarks are tested.
+                // for &bm in &self.bookmarks.list {
+                //     self.draw_cursor(
+                //         &painter,
+                //         self.x_from_time(bm.at),
+                //         Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                //     );
+                // }
 
                 if let Some(new_note) = &self.note_draw {
                     self.default_draw_note(
@@ -410,6 +413,11 @@ impl Stave {
                     &event,
                     &cc,
                 ),
+                TrackEventType::Bookmark => self.draw_cursor(
+                    &painter,
+                    self.x_from_time(event.at),
+                    Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                ),
             }
         }
         if let Some(trans) = &self.transition {
@@ -428,6 +436,7 @@ impl Stave {
                         note_b,
                     );
                 }
+
                 let cc_a = Stave::cc_animation_params(action.before());
                 let cc_b = Stave::cc_animation_params(action.after());
                 if cc_a.is_some() || cc_b.is_some() {
@@ -441,10 +450,10 @@ impl Stave {
                         cc_b,
                     );
                 }
-                // TODO Maybe restrict actions to not change event types, this should reduce number of cases to consider.
-                debug_assert!(
-                    note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()
-                )
+                // TODO (cleanup) Maybe restrict actions to not change event types, this should reduce number of cases to consider.
+                if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
+                    dbg!("No animation params, bookmark action?");
+                }
             }
         }
         draw_selection_hints(
@@ -546,27 +555,13 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                if self
-                    .do_edit_command(&response.ctx, response.id, |stave, track| {
-                        tape_delete(track, &(time_selection.start, time_selection.end))
-                    })
-                    .is_some()
-                {
-                    // TODO (refactoring) If bookmarks were represented as events they could
-                    //      be handled uniformly along with notes and CC changes. In that case the
-                    //      following will not need to be handled as a special case.
-                    //      See also tape_insert.
-                    // TODO (implementation) Ideally should also delete bookmarks in the selection.
-                    //      But there is no way to undo this.
-                    self.bookmarks.shift(
-                        time_selection.end,
-                        -(time_selection.end - time_selection.start),
-                    );
-                }
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                    tape_delete(track, &(time_selection.start, time_selection.end))
+                });
             }
             if !self.note_selection.selected.is_empty() {
                 self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                    // Deleting both time and event selection in one command for convenience, these can be separate.
+                    // Deleting both time and event selection in one command for convenience, these can be separate commands.
                     delete_selected(track, &stave.note_selection.selected)
                 });
             }
@@ -578,18 +573,9 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                if self
-                    .do_edit_command(&response.ctx, response.id, |_stave, _track| {
-                        tape_insert(&(time_selection.start, time_selection.end))
-                    })
-                    .is_some()
-                {
-                    // TODO (refactoring) See comment in tape_delete case.
-                    self.bookmarks.shift(
-                        time_selection.start,
-                        time_selection.end - time_selection.start,
-                    );
-                }
+                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
+                    tape_insert(&(time_selection.start, time_selection.end))
+                });
             }
         }
 
@@ -729,30 +715,90 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
         }) {
-            self.bookmarks.set(self.cursor_position);
+            let at = self.cursor_position;
+            let id_seq = &self.history.borrow().id_seq.clone();
+            self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                set_bookmark(track, id_seq, &at)
+            });
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::N))
         }) {
-            self.bookmarks.remove(&self.cursor_position);
+            let at = self.cursor_position;
+            self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                clear_bookmark(track, &at)
+            });
         }
+        // Previous bookmark
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
                 Modifiers::CTRL,
                 egui::Key::ArrowLeft,
             ))
         }) {
-            return self.bookmarks.previous(&self.cursor_position).or(Some(0));
+            let at = self.cursor_position;
+            return self
+                .history
+                .borrow()
+                .with_track(|track| {
+                    track
+                        .events
+                        .iter()
+                        .rfind(|ev| ev.at < at && ev.event == TrackEventType::Bookmark)
+                        .cloned()
+                })
+                .map(|ev| ev.at)
+                .or(Some(0));
         }
+        // Next bookmark
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
                 Modifiers::CTRL,
                 egui::Key::ArrowRight,
             ))
         }) {
+            let at = self.cursor_position;
             return self
-                .bookmarks
-                .next(&self.cursor_position)
+                .history
+                .borrow()
+                .with_track(move |track| {
+                    track
+                        .events
+                        .iter()
+                        .find(|ev| ev.at > at && ev.event == TrackEventType::Bookmark)
+                        .cloned()
+                })
+                .map(|ev| ev.at)
+                .or(Some(self.max_time()));
+        }
+        // Previous note/event
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::ALT,
+                egui::Key::ArrowLeft,
+            ))
+        }) {
+            let at = self.cursor_position;
+            return self
+                .history
+                .borrow()
+                .with_track(|track| track.events.iter().rfind(|ev| ev.at < at).cloned())
+                .map(|ev| ev.at)
+                .or(Some(0));
+        }
+        // Next note/event
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::ALT,
+                egui::Key::ArrowRight,
+            ))
+        }) {
+            let at = self.cursor_position;
+            return self
+                .history
+                .borrow()
+                .with_track(move |track| track.events.iter().find(|ev| ev.at > at).cloned())
+                .map(|ev| ev.at)
                 .or(Some(self.max_time()));
         }
         if response.ctx.input_mut(|i| {

@@ -45,9 +45,9 @@ pub struct ControllerSetValue {
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TrackEventType {
-    // TODO (cleanup) maybe move Note and ControllerSetValue here (use Note{...} without the extra type).
     Note(Note),
     Controller(ControllerSetValue),
+    Bookmark,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -140,6 +140,7 @@ impl Track {
             let end_time = match &ev.event {
                 TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
                 TrackEventType::Controller(_) => ev.at,
+                TrackEventType::Bookmark => ev.at,
             };
             result = Time::max(result, end_time);
         }
@@ -256,6 +257,7 @@ pub fn to_midi_events(
                     },
                 ));
             }
+            TrackEventType::Bookmark => (), // Not a MIDI event.
         }
     }
     buffer.sort_by_key(|(at, _)| at.to_owned());
