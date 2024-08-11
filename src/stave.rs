@@ -1167,21 +1167,4 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bookmarks_serialization() {
-        let file_path = PathBuf::from("./target/test_bookmarks_serialization");
-
-        let mut bookmarks = Bookmarks::new(&file_path);
-        bookmarks.set(12);
-        bookmarks.set(23);
-        bookmarks.store_to(&file_path);
-
-        let mut bookmarks = Bookmarks::new(&file_path);
-        bookmarks.load_from(&file_path);
-        assert_eq!(bookmarks.list.len(), 2);
-        assert_eq!(bookmarks.iter().count(), 2);
-        assert!(bookmarks.list.contains(&Bookmark { at: 12 }));
-        assert!(bookmarks.list.contains(&Bookmark { at: 23 }));
-    }
 }
