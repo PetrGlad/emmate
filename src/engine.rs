@@ -101,7 +101,7 @@ impl Engine {
                 thread::sleep(Duration::from_micros(3_000)); // TODO (improvement) Use async instead
                 let lock = engine2.lock();
                 if let Err(_) = lock {
-                    continue;
+                    continue; // Will try next time.
                 }
                 let mut locked = lock.unwrap();
                 let pending_commands: Vec<Box<EngineCommand>> =

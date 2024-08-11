@@ -34,7 +34,6 @@ I use Pianoteq, but that is a commercial product.
 - [ ] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
   of note ranges.
 - [ ] (refactoring) Reduce number of range types (preferring util::Range?)
-- [ ] Shift markers on time deletion to follow the marked timestamps.
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] (refactoring, a big one) Minimize use of unwrap. The biggest contention currently is event data shared between
@@ -52,6 +51,7 @@ I use Pianoteq, but that is a commercial product.
   now).
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [x] Shift markers on time deletion to follow the marked timestamps.
 - [x] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
   change).
 - [x] Remove VST2 dependency. Use MIDI sequencer port instead.
