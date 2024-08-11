@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
-use std::slice::Iter;
 
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
@@ -10,7 +9,6 @@ use eframe::egui::{
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
@@ -79,78 +77,6 @@ impl NotesSelection {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Bookmark {
-    at: Time,
-}
-
-/// FIXME (cleanup) Remove bookmarks collection code after new bookmarks impl is good.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Bookmarks {
-    // (refactoring) Maybe bookmarks should also be events in the track. The logic is about the same.
-    pub list: Vec<Bookmark>,
-    file_path: PathBuf,
-}
-
-impl Bookmarks {
-    pub fn new(file_path: &PathBuf) -> Bookmarks {
-        Bookmarks {
-            list: vec![],
-            file_path: file_path.to_owned(),
-        }
-    }
-
-    pub fn set(&mut self, at: Time) {
-        let bm = Bookmark { at };
-        let idx = self.list.binary_search(&bm);
-        if let Err(idx) = idx {
-            self.list.insert(idx, bm);
-            self.store_to(&self.file_path);
-        }
-    }
-
-    pub fn remove(&mut self, at: &Time) {
-        let bm = Bookmark { at: at.clone() };
-        let idx = self.list.binary_search(&bm);
-        if let Ok(idx) = idx {
-            self.list.remove(idx);
-            self.store_to(&self.file_path);
-        }
-    }
-
-    pub fn shift(&mut self, after: Time, delta: Time) {
-        for m in self.list.iter_mut() {
-            if m.at >= after {
-                m.at += delta;
-            }
-        }
-    }
-
-    pub fn previous(&self, here: &Time) -> Option<Time> {
-        self.list
-            .iter()
-            .rev()
-            .find(|&bm| bm.at < *here)
-            .map(|bm| bm.at)
-    }
-
-    pub fn next(&self, here: &Time) -> Option<Time> {
-        self.list.iter().find(|&bm| bm.at > *here).map(|bm| bm.at)
-    }
-
-    pub fn iter(&self) -> Iter<Bookmark> {
-        self.list.iter()
-    }
-
-    pub fn load_from(&mut self, file_path: &PathBuf) {
-        self.list = util::load(file_path);
-    }
-
-    pub fn store_to(&self, file_path: &PathBuf) {
-        util::store(&self.list, file_path);
-    }
-}
-
 #[derive(Debug)]
 pub struct EditTransition {
     pub animation_id: egui::Id,
@@ -198,7 +124,6 @@ pub struct Stave {
     pub view_rect: Rect,
 
     pub cursor_position: Time,
-    pub bookmarks: Bookmarks,
     pub time_selection: Option<Range<Time>>,
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
@@ -222,14 +147,13 @@ pub struct StaveResponse {
 }
 
 impl Stave {
-    pub fn new(history: RefCell<TrackHistory>, bookmarks: Bookmarks) -> Stave {
+    pub fn new(history: RefCell<TrackHistory>) -> Stave {
         Stave {
             history,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
             cursor_position: 0,
-            bookmarks,
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
@@ -330,15 +254,6 @@ impl Stave {
                     self.x_from_time(self.cursor_position),
                     Rgba::from_rgba_unmultiplied(0.1, 0.9, 0.1, 0.8).into(),
                 );
-
-                // FIXME (cleanup) Remove after new bookmarks are tested.
-                // for &bm in &self.bookmarks.list {
-                //     self.draw_cursor(
-                //         &painter,
-                //         self.x_from_time(bm.at),
-                //         Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                //     );
-                // }
 
                 if let Some(new_note) = &self.note_draw {
                     self.default_draw_note(
@@ -450,7 +365,8 @@ impl Stave {
                         cc_b,
                     );
                 }
-                // TODO (cleanup) Maybe restrict actions to not change event types, this should reduce number of cases to consider.
+                // TODO (cleanup) Maybe restrict actions to not change event types,
+                //      this should reduce number of cases to consider.
                 if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
                     dbg!("No animation params, bookmark action?");
                 }

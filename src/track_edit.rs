@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
-use crate::stave::{Bookmark, PIANO_KEY_LINES};
+use crate::stave::PIANO_KEY_LINES;
 use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
