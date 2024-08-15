@@ -1067,6 +1067,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "stderrlog",
+ "sync_cow",
  "toml",
  "wmidi",
 ]
@@ -2632,6 +2633,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "sync_cow"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "507edb5fb2023bc8067b4c2b02a177c579f046f4e8e518daafb654fb64876d4c"
 
 [[package]]
 name = "tempfile"

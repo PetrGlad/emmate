@@ -26,6 +26,9 @@ revamps.
 In case you get "No package 'freetype2' found" on Linux
 `apt install libxft-dev`.
 
+ALSA wrapper dependency
+`apt install libasound2-dev`.
+
 As an VST synth plugin you can use `amsynth`, for example.
 I use Pianoteq, but that is a commercial product.
 

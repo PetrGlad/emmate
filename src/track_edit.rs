@@ -36,9 +36,9 @@ pub enum EditCommandId {
 /**
  Want to track the changed events for each command to have visual feedback on undo/redo and
  to minimize amount of data stored in the edit history. Change list allows to have this in
- most cases. However there are commands that may generate very large changesets and can be
+ most cases. However, there are commands that may generate very large changesets and can be
  repeated by holding the hotkey combination, so in this struct we have a special case
- supporting custom logic for these. This complicates the implementation a lot but I do
+ supporting custom logic for these. This complicates the implementation a lot, but I do
  not see a better solution at the moment.
 
  Commands that do not usually generate large patches can use generic Changeset,

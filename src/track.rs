@@ -53,7 +53,7 @@ pub enum TrackEventType {
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct TrackEvent {
     pub id: EventId,
-    pub at: Time, // Since the track beginning.
+    pub at: Time, // Since the track's beginning.
     pub event: TrackEventType,
 }
 
@@ -80,9 +80,9 @@ impl Ord for TrackEvent {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Track {
-    /* Events should always be kept ordered by start time ascending.
+    /* Events must always be kept ordered by start time ascending.
     This is a requirement of TrackSource. */
     pub events: Vec<TrackEvent>,
 }

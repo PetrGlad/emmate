@@ -2,21 +2,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use glob::glob;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::track::{import_smf, Track};
 use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
 use crate::util;
 use crate::util::IdSeq;
+use glob::glob;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use sync_cow::SyncCow;
 
 // Undo/redo history and snapshots.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct TrackHistory {
-    pub track: Arc<RwLock<Track>>,
+    pub track: Arc<SyncCow<Track>>,
     pub id_seq: Arc<IdSeq>,
     pub version: VersionId,
     pub max_version: VersionId, // May be higher than self.version after an undo.
@@ -43,7 +43,7 @@ impl TrackHistory {
     const DIFF_NAME_EXT: &'static str = "changeset";
 
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
-        let track = self.track.read().expect("Read track.");
+        let track = self.track.read();
         action(&track)
     }
 
@@ -52,16 +52,15 @@ impl TrackHistory {
         action: Action,
     ) -> CommandApplication {
         let applied_command = {
-            let track = self.track.write().expect("read track");
+            let track = self.track.read();
             action(&track)
         };
         if let Some(applied_command) = applied_command {
             let mut changes = vec![];
-            {
-                let mut track = self.track.write().expect("write to track");
-                apply_diffs(&mut track, &applied_command.1, &mut changes);
+            self.track.edit(|track: &mut Track| {
+                apply_diffs(track, &applied_command.1, &mut changes);
                 track.commit();
-            }
+            });
             self.update(&applied_command);
             Some((applied_command, changes))
         } else {
@@ -80,7 +79,7 @@ impl TrackHistory {
             base_version: self.version,
             version: self.version + 1,
             command_id: *command_id,
-            diff: diff.iter().cloned().collect(), // XXX Maybe share the vector
+            diff: diff.iter().cloned().collect(), // XXX Maybe share the vector?
         };
         self.push(log_entry);
         // TODO also store a new snapshot here if necessary
@@ -100,6 +99,8 @@ impl TrackHistory {
         v >= 0
     }
 
+    /// Returns true if the required version's state was restored successfully.
+    /// If the exact version number is not found, apply as many patches as possible to get close to it.
     pub fn go_to_version(&mut self, version_id: VersionId, changes: &mut EventActionsList) -> bool {
         // TODO (optimization) A streak of multiple actions may temporarily accumulate many events
         //   in `changes`. This will likely happen at startup. It is possible compact them into
@@ -108,39 +109,49 @@ impl TrackHistory {
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);
         if version.is_empty() {
+            println!("No track history found.");
             return false;
         }
         {
             let track = self.track.clone();
-            let mut track = track.write().expect("Read track.");
-            // TODO Support multiple snapshots. Now expecting only a starting one with id 0.
-            //   Should use snapshot if it is found but diff is missing.
-            //   Maybe prefer snapshots when both diff and snapshot are present.
-            if let Some(snapshot_path) = version.snapshot_path {
-                track.reset(util::load(&snapshot_path));
-                self.set_version(version.id);
-                return true;
-            }
-            // Replays
-            while self.version < version_id {
-                let entry: HistoryLogEntry = util::load(&self.diff_path(self.version + 1));
-                assert_eq!(entry.base_version, self.version);
-                assert!(entry.version > self.version);
-                apply_diffs(&mut track, &entry.diff, changes);
-                self.set_version(entry.version);
-            }
-            // Rollbacks
-            while self.version > version_id {
-                let entry: HistoryLogEntry = util::load(&self.diff_path(self.version));
-                assert_eq!(entry.version, self.version);
-                assert!(entry.base_version < self.version);
-                revert_diffs(&mut track, &entry.diff, changes);
-                self.set_version(entry.base_version);
-            }
+            track.edit(|track| self.apply_patches(changes, version, track));
         }
         dbg!(self.version, version_id);
         self.write_meta();
         self.version == version_id
+    }
+
+    /// Return true if exact snapshot is found.
+    fn apply_patches(
+        &mut self,
+        changes: &mut EventActionsList,
+        version: Version,
+        mut track: &mut Track,
+    ) {
+        // TODO (feature, persistence) Support multiple snapshots. Now expecting only the starting one with id 0.
+        //   Should use snapshot if it is found but diff is missing.
+        //   Maybe prefer snapshots when both diff and snapshot are present.
+        if let Some(snapshot_path) = version.snapshot_path {
+            track.reset(util::load(&snapshot_path));
+            self.set_version(version.id);
+            println!("Found a snapshot for revision {}.", version.id);
+        }
+        // Replays
+        while self.version < version.id {
+            let entry: HistoryLogEntry = util::load(&self.diff_path(self.version + 1));
+            assert_eq!(entry.base_version, self.version);
+            assert!(entry.version > self.version);
+            apply_diffs(&mut track, &entry.diff, changes);
+            self.set_version(entry.version);
+        }
+        // Rollbacks
+        while self.version > version.id {
+            let entry: HistoryLogEntry = util::load(&self.diff_path(self.version));
+            assert_eq!(entry.version, self.version);
+            assert!(entry.base_version < self.version);
+            revert_diffs(&mut track, &entry.diff, changes);
+            self.set_version(entry.base_version);
+        }
     }
 
     /// Maybe undo last edit action.
@@ -211,7 +222,7 @@ impl TrackHistory {
             id_seq: Arc::new(IdSeq::new(0)),
             version: 0,
             max_version: 0,
-            track: Default::default(),
+            track: Arc::new(SyncCow::new(Track::default())),
         }
     }
 
@@ -250,12 +261,13 @@ impl TrackHistory {
         let meta = self.load_meta();
         let initial_version_id = 0;
         {
-            let mut track = self.track.write().expect("Write to track.");
             self.id_seq = Arc::new(IdSeq::new(meta.next_id));
-            track.reset(util::load(&self.snapshot_path(initial_version_id)));
+            let mut track = self
+                .track
+                .edit(|track| track.reset(util::load(&self.snapshot_path(initial_version_id))));
         }
         self.set_version(initial_version_id);
-        assert!(self.go_to_version(meta.current_version, &mut vec![])); // TODO (implement) changes highlighting
+        assert!(self.go_to_version(meta.current_version, &mut vec![]));
     }
 
     fn set_version(&mut self, version_id: VersionId) {

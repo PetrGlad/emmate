@@ -1,19 +1,32 @@
-use std::sync::{Arc, RwLock};
-
 use crate::common::Time;
 use crate::engine;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::{Track, TrackEventType};
+use std::fmt::{Debug, Formatter, Write};
+use std::sync::{Arc, RwLock};
+use sync_cow::SyncCow;
 
 pub struct TrackSource {
-    track: Arc<RwLock<Track>>,
+    track: Arc<SyncCow<Track>>,
     current_idx: usize,
     running_at: Time,
 }
 
+impl Debug for TrackSource {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "TrackSource{{i={}, t={}, len={}}}",
+            self.current_idx,
+            self.running_at,
+            self.track.read().events.len()
+        ))?;
+        Ok(())
+    }
+}
+
 impl TrackSource {
-    pub fn new(track: Arc<RwLock<Track>>) -> TrackSource {
+    pub fn new(track: Arc<SyncCow<Track>>) -> TrackSource {
         TrackSource {
             track,
             current_idx: 0,
@@ -28,7 +41,7 @@ impl EventSource for TrackSource {
     }
 
     fn seek(&mut self, at: &Time) {
-        let track = self.track.read().expect("Cannot read track.");
+        let track = self.track.read();
         let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. That is, looking for sup of {ev | ev.t <= at}. Should work if the
@@ -60,7 +73,7 @@ impl EventSource for TrackSource {
     }
 
     fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
-        let track = self.track.read().expect("Cannot read track.");
+        let track = self.track.read();
         let mut events = vec![];
         while self.current_idx < track.events.len() {
             let notes = &track.events;

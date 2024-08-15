@@ -115,7 +115,7 @@ impl EditTransition {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Stave {
     pub history: RefCell<TrackHistory>,
 
@@ -238,7 +238,7 @@ impl Stave {
                 let should_be_visible;
                 {
                     let history = self.history.borrow();
-                    let track = history.track.read().expect("Read track.");
+                    let track = history.track.read();
                     should_be_visible = self.draw_track(
                         &key_ys,
                         &half_tone_step,
@@ -252,7 +252,7 @@ impl Stave {
                 self.draw_cursor(
                     &painter,
                     self.x_from_time(self.cursor_position),
-                    Rgba::from_rgba_unmultiplied(0.1, 0.9, 0.1, 0.8).into(),
+                    Rgba::from_rgba_unmultiplied(0.0, 0.5, 0.0, 0.7).into(),
                 );
 
                 if let Some(new_note) = &self.note_draw {
