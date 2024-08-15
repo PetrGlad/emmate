@@ -36,12 +36,9 @@ I use Pianoteq, but that is a commercial product.
 
 - [ ] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
   of note ranges.
-- [ ] (refactoring) Reduce number of range types (preferring util::Range?)
+- [ ] (refactoring) Reduce number of range types (prefer util::Range?)
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
-- [ ] (refactoring, a big one) Minimize use of unwrap. The biggest contention currently is event data shared between
-  engine and stave. Maybe can do this with async or sending update commands to the engine thread (e.g. can just swap to
-  new track copy in the engine's events source after edits).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
@@ -54,6 +51,9 @@ I use Pianoteq, but that is a commercial product.
   now).
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [x] (refactoring) Minimize use of unwrap. The biggest contention currently is event data shared between
+  engine and stave. Maybe can do this with async or sending update commands to the engine thread (e.g. can just swap to
+  new track copy in the engine's events source after edits).
 - [x] Shift markers on time deletion to follow the marked timestamps.
 - [x] (improvement) When start playing send current CC values (will help damper to take effect immediately, not on next
   change).
