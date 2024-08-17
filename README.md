@@ -6,9 +6,10 @@ Grid-less MIDI editor with following goals:
 * Do not care (much) about measures. Primarily aimed at piano real time recordings without explicit tempo/bars.
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
   of MIDI recording as one can remove a time fragment from PCM recording. For some odd reason DAW authors insist on
-  handling MIDI recordings differently from PCM sound recordings. In some editors this is doable but cumbersome at best.
-* Playing/editing very long (up to about 25K of playable events) files. Those files are usually recordings of real
-  performances (e.g. from a MIDI keyboard).
+  handling time in MIDI editors differently from PCM sound recordings. In some editors this is doable but cumbersome at
+  best.
+* Playing/editing very long (at elast up to about 25K of playable events) files. Those files are usually recordings of
+  real performances (e.g. from a MIDI keyboard).
 * Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.

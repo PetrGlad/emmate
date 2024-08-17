@@ -1,11 +1,13 @@
+use std::fmt::{Debug, Formatter, Write};
+use std::sync::Arc;
+
+use sync_cow::SyncCow;
+
 use crate::common::Time;
 use crate::engine;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::{Track, TrackEventType};
-use std::fmt::{Debug, Formatter, Write};
-use std::sync::{Arc, RwLock};
-use sync_cow::SyncCow;
 
 pub struct TrackSource {
     track: Arc<SyncCow<Track>>,
@@ -121,7 +123,7 @@ mod tests {
 
     #[test]
     fn empty_track() {
-        let track = Arc::new(RwLock::new(Track::default()));
+        let track = Arc::new(SyncCow::new(Track::default()));
         let mut source = TrackSource::new(track);
         source.seek(&100_000i64);
         assert_eq!(source.running_at, 100_000);
@@ -142,7 +144,7 @@ mod tests {
                 duration: 12,
             }),
         });
-        let track = Arc::new(RwLock::new(track));
+        let track = Arc::new(SyncCow::new(track));
 
         let mut source = TrackSource::new(track);
         source.seek(&0);
