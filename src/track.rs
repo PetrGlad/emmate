@@ -80,6 +80,34 @@ impl Ord for TrackEvent {
     }
 }
 
+/*
+ TODO (refactoring, a big one, ???) Use MIDI-like events directly in the track.
+  Currently notes have duration and correspond to 2 MIDI events ("on" and "off").
+  New implementation would:
+    0. Keep events separated by lanes (one for each pitch, CC control, or UI marker type).
+       Events in each lane should  be ordered by time ascending.
+    1. Instead of notes hold MIDI events of structs that directly correspond to a MIDI events.
+    2. Treat track-time or note related markers (like bookmarks) as another event type.
+    3. (optimally) Keep unsupported types of MIDI on the track also.
+    4. (???) How selection and diff patches will refer to events then? Should we still have
+       project-unique event ids? Or event id should be "lane_id:event_id"?
+    5. Map events to some internal convenient structs or provide some view functions directly
+       into SMD events? Dealing with 7 bit integers is cumbersome, I'd rather avoid that.
+  Expected result:
+    1. Export/import and playback would be more complex. In particular export procedure and
+       track source for playback engine will have to scan all (non UI) lanes to see which event
+       comes next. Import/load procedure will have to take single MIDI stream and group events by lane.
+       On the other hand mapping to notes and back will be unnecessary.
+    2. Have ability to keep unsupported events. More fidelity to input MIDI file in the exported data.
+       Although this looks odd but it is possible to have two "on" events in a row for the same note.
+       Not sure what "off" velocity affects, but adjusting it will also be possible.
+       The new implementation may have a dedicated lane for events that are unsupported or ignored.
+    3. CC events can be used as is without handling them as special case.
+    4. Zoomed display optimization: only visible events can be selected for painting.
+    5. Simplify some time operations at expense of note selection which will be trickier.
+       For example playback resuming may need to look up previous or next note. At the moment
+       this may require to scan whole track to the beginning or to the end.
+*/
 #[derive(Debug, Default, Clone)]
 pub struct Track {
     /* Events must always be kept ordered by start time ascending.

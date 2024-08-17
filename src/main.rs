@@ -31,7 +31,7 @@ pub fn main() {
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
     let arg_matches = clap::Command::new("emmate")
-        .version("0.3")
+        .version("0.3.1")
         .author("Petr <petrglad@gmail.com>")
         .about("MIDI editor")
         .arg(

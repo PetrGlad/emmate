@@ -85,7 +85,7 @@ I use Pianoteq, but that is a commercial product.
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
 - [ ] Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
   now).
-- [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
+- [ ] "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
 - [x] (refactoring) Minimize use of unwrap. The biggest contention currently is event data shared between
