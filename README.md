@@ -1,6 +1,6 @@
 # emmate
 
-Off grid MIDI editor with following goals:
+Grid-less MIDI editor with following goals:
 
 * Not a DAW: MIDI is the input, MIDI is exported (I would like it to be but will not have enough time for that).
 * Do not care (much) about measures. Primarily aimed at piano real time recordings without explicit tempo/bars.
@@ -15,18 +15,53 @@ Off grid MIDI editor with following goals:
 * Flight recorder (always-on MIDI recording).
 
 I'd love this to be in one of commercial or open-source DAWs and pay money for that, but I do not see it happening.
+Ardour DAW can more or less do the trick, however inconveniently, but losing hours of work in a crash was not a good UX.
 
-## Status
+## Current status
 
 Somewhat usable, no documentation yet (e.g. hot-keys, launching need to be described). The code still needs major
-revamps.
+revamps and polishing. No backward compatibility guarantees. See TODO list below to se missing or planned parts.
+
+## Requirements
+
+Currently only Linux-like systems with ALSA are supported. Volunteers to support other platforms are welcome.
+
+## Usage hints
+
+**Note** that the program functions only as MIDI editor and uses a MIDI sequencer port for playback.
+To get audible playback you should use some other software that can listen to the MIDI output port and produce some
+sound. Any DAW or a synthesiser plugin with stand-alone UI would do. The output MIDI sequencer port name is
+also `emmate`.
+
+Currently expected usage scenario is opening a MIDI file passed as command line argument. This will create an `*.emmate`
+folder with the same name containing editing history and exported MIDI files. For example
+
+```shell
+emmate --midi-file my-unpolished-masterpiece.mid
+```
+
+Run `emmate --help` to see other available switches.
+
+All editing actions are persisted immediately, no need to do anything special to save your work. To export the stave to
+a midi file press Ctrl+S. Exported file will be saved into the `*.emmate/export/`
+folder.
+
+Undo/redo history is unlimited.
+
+You can transpose/correct loudness/shift/adjust length of selected notes. Draw/delete notes or complete time slices.
+Draw on/off sustain pedal state (on the bottom lane).
+
+Mouse zoom and scroll is supported. "Follow playback" switch makes the stave to scroll during playback.
+You can set/clear bookmarks with `m`/`n`.
+
+See `Stave::handle_commands` (src/stave.rs) method for availiable keyboard shortcuts.
 
 ## Build
 
 In case you get "No package 'freetype2' found" on Linux
 `apt install libxft-dev`.
 
-ALSA wrapper dependency
+ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
 
 As an VST synth plugin you can use `amsynth`, for example.
@@ -50,7 +85,8 @@ I use Pianoteq, but that is a commercial product.
 - [ ] Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
   now).
 - [ ] Flight recorder (always record what is coming from the MIDI controller into a separate file or track).
-- [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be too small to be visible as is).
+- [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
+  visible as is).
 - [x] (refactoring) Minimize use of unwrap. The biggest contention currently is event data shared between
   engine and stave. Maybe can do this with async or sending update commands to the engine thread (e.g. can just swap to
   new track copy in the engine's events source after edits).

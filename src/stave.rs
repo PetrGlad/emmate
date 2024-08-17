@@ -337,6 +337,9 @@ impl Stave {
         }
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
+                // TODO (cleanup) Restrict actions to not change event types,
+                //      this should reduce number of cases to consider.
+
                 let note_a = Stave::note_animation_params(action.before());
                 let note_b = Stave::note_animation_params(action.after());
                 if note_a.is_some() || note_b.is_some() {
@@ -365,10 +368,10 @@ impl Stave {
                         cc_b,
                     );
                 }
-                // TODO (cleanup) Maybe restrict actions to not change event types,
-                //      this should reduce number of cases to consider.
+
                 if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
-                    dbg!("No animation params, bookmark action?");
+                    // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
+                    print!("WARN No animation params (a bookmark?).");
                 }
             }
         }
