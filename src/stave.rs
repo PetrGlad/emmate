@@ -119,14 +119,19 @@ impl EditTransition {
 pub struct Stave {
     pub history: RefCell<TrackHistory>,
 
+    /// Starting moment of visible time range.
     pub time_left: Time,
+    /// End moment of visible time range.
     pub time_right: Time,
+    /// The widget's displayed rectangle coordinates.
     pub view_rect: Rect,
 
     pub cursor_position: Time,
     pub time_selection: Option<Range<Time>>,
+    /// Currently drawn note.
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
+    /// Change animation parameters.
     pub transition: Option<EditTransition>,
 }
 
