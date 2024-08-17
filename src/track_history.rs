@@ -262,8 +262,7 @@ impl TrackHistory {
         let initial_version_id = 0;
         {
             self.id_seq = Arc::new(IdSeq::new(meta.next_id));
-            let mut track = self
-                .track
+            self.track
                 .edit(|track| track.reset(util::load(&self.snapshot_path(initial_version_id))));
         }
         self.set_version(initial_version_id);

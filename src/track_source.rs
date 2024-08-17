@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Formatter, Write};
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use sync_cow::SyncCow;
