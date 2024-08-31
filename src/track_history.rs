@@ -1,6 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use glob::glob;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use sync_cow::SyncCow;
 
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
@@ -8,10 +13,6 @@ use crate::track::{import_smf, Track};
 use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
 use crate::util;
 use crate::util::IdSeq;
-use glob::glob;
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use sync_cow::SyncCow;
 
 // Undo/redo history and snapshots.
 // #[derive(Debug)]
@@ -154,7 +155,9 @@ impl TrackHistory {
         }
     }
 
-    /// Maybe undo last edit action.
+    /** Maybe undo last edit action.
+       `changes` parameter may be used to accumulate a series of patches for persistence.
+    */
     pub fn undo(&mut self, changes: &mut EventActionsList) -> bool {
         let prev_version_id = self.version - 1;
         if TrackHistory::is_valid_version_id(prev_version_id) {

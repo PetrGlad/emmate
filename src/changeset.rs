@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
-use crate::track::{EventId, Track, TrackEvent};
+use crate::ev;
+use crate::track::{ev::Item, EventId, Track};
 use crate::track_edit::{CommandDiff, EditCommandId};
 
 /// Simplest track edit operation. See [Changeset] for uses.
@@ -15,9 +16,9 @@ pub enum EventAction {
      one of the recent snapshots. That approach may probably help to save space and simplify
      data structures. E.g. Delete action will only need the event id and update action will
      only need the new state. OTOH then we'll need to save snapshots more often. */
-    Delete(TrackEvent),
-    Update(TrackEvent, TrackEvent),
-    Insert(TrackEvent),
+    Delete(ev::Item),
+    Update(ev::Item, ev::Item),
+    Insert(ev::Item),
 }
 
 impl EventAction {
@@ -29,7 +30,7 @@ impl EventAction {
         }
     }
 
-    pub fn before(&self) -> Option<&TrackEvent> {
+    pub fn before(&self) -> Option<&ev::Item> {
         match self {
             EventAction::Delete(ev) => Some(ev),
             EventAction::Update(ev, _) => Some(ev),
@@ -37,7 +38,7 @@ impl EventAction {
         }
     }
 
-    pub fn after(&self) -> Option<&TrackEvent> {
+    pub fn after(&self) -> Option<&ev::Item> {
         match self {
             EventAction::Delete(_) => None,
             EventAction::Update(_, ev) => Some(ev),
@@ -57,8 +58,9 @@ impl EventAction {
 }
 
 /// Complete patch of a track editing action.
-/// Plain [EventActionsList] can be used instead, but there the actions order becomes important
-/// (e.g. duplicating 'update' actions will overwrite previous result).
+/// Plain [EventActionsList] (linearily ordered collection) can be used instead,
+/// but in that case the order of actions becomes important (e.g. duplicating
+/// 'update' actions will overwrite previous result).
 #[derive(Debug)]
 pub struct Changeset {
     pub changes: HashMap<EventId, EventAction>,
@@ -139,14 +141,14 @@ pub struct HistoryLogEntry {
 #[derive(Serialize, Deserialize)]
 pub struct Snapshot {
     pub version: VersionId,
-    pub events: Vec<TrackEvent>,
+    pub events: Vec<ev::Item>,
 }
 
 impl Snapshot {
     pub fn of_track(version: VersionId, track: &Track) -> Self {
         Snapshot {
             version,
-            events: track.events.clone(),
+            events: track.items.clone(),
         }
     }
 }

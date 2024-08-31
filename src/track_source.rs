@@ -7,9 +7,11 @@ use crate::common::Time;
 use crate::engine;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
-use crate::track::{Track, TrackEventType};
+use crate::track::Track;
 
 pub struct TrackSource {
+    /* Events must always be kept ordered by start
+    time ascending (see seel() and next() methods). */
     track: Arc<SyncCow<Track>>,
     current_idx: usize,
     running_at: Time,
@@ -44,7 +46,7 @@ impl EventSource for TrackSource {
 
     fn seek(&mut self, at: &Time) {
         let track = self.track.read();
-        let note_on_time = |i: usize| track.events.get(i).map(|ev| ev.at);
+        let note_on_time = |i: usize| track.items.get(i).map(|ev| ev.at);
         // Seek back until we cross the `at`, then forward, to stop on the earliest event after
         // the `at` moment. That is, looking for sup of {ev | ev.t <= at}. Should work if the
         // target is both before and after the current one.
@@ -67,7 +69,7 @@ impl EventSource for TrackSource {
                 break;
             }
             self.current_idx += 1;
-            if track.events.len() <= self.current_idx {
+            if track.items.len() <= self.current_idx {
                 break;
             }
         }
@@ -77,8 +79,8 @@ impl EventSource for TrackSource {
     fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
         let track = self.track.read();
         let mut events = vec![];
-        while self.current_idx < track.events.len() {
-            let notes = &track.events;
+        while self.current_idx < track.items.len() {
+            let notes = &track.items;
             let event = &notes[self.current_idx];
             let running_at = event.at;
             if running_at > *at {
@@ -86,7 +88,7 @@ impl EventSource for TrackSource {
             }
             self.running_at = running_at;
             match &event.event {
-                TrackEventType::Note(note) => {
+                ev::Type::Note(note) => {
                     events.push(EngineEvent {
                         at: running_at,
                         event: note_on(engine::MIDI_CHANNEL, note.pitch, note.velocity),
@@ -96,7 +98,7 @@ impl EventSource for TrackSource {
                         event: note_off(engine::MIDI_CHANNEL, note.pitch, note.velocity),
                     });
                 }
-                TrackEventType::Controller(set_val) => {
+                ev::Type::Controller(set_val) => {
                     events.push(EngineEvent {
                         at: running_at,
                         event: controller_set(
@@ -106,7 +108,7 @@ impl EventSource for TrackSource {
                         ),
                     });
                 }
-                TrackEventType::Bookmark => (), // Not an audible event.
+                ev::Type::Bookmark => (), // Not an audible event.
             }
             self.current_idx += 1;
         }
@@ -117,7 +119,7 @@ impl EventSource for TrackSource {
 #[cfg(test)]
 mod tests {
     use crate::track;
-    use crate::track::TrackEvent;
+    use crate::track::ev::Item;
 
     use super::*;
 
@@ -135,10 +137,10 @@ mod tests {
     #[test]
     fn one_note() {
         let mut track = Track::default();
-        track.events.push(TrackEvent {
+        track.items.push(ev::Item {
             id: 13,
             at: 1000,
-            event: TrackEventType::Note(track::Note {
+            event: ev::Type::Note(track::Note {
                 pitch: 55,
                 velocity: 55,
                 duration: 12,

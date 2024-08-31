@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -9,16 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
-use crate::midi;
+use crate::ev::{ControllerId, Level, Pitch, Velocity};
 use crate::util::{is_ordered, IdSeq};
+use crate::{ev, midi};
 
-pub type Pitch = u8;
-pub type ControllerId = u8;
-pub type Level = u8;
-pub type ChannelId = u8;
-pub type EventId = u64;
-
-pub const MAX_LEVEL: Level = 127; // Should be equal to u7::max_value().as_int();
+// Should be equal to u7::max_value().as_int();
+// ".max_value" is not declared as const yet.
+pub const MAX_LEVEL: Level = 127;
 
 #[allow(dead_code)]
 pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
@@ -30,55 +26,39 @@ pub fn is_cc_switch_on(x: Level) -> bool {
     x >= 64
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Note {
-    pub pitch: Pitch,
-    pub velocity: Level,
-    pub duration: Time,
-}
+/// Stave-history-unique event id.
+pub type EventId = u64;
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ControllerSetValue {
-    pub controller_id: ControllerId,
-    pub value: Level,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub enum TrackEventType {
-    Note(Note),
-    Controller(ControllerSetValue),
-    Bookmark,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TrackEvent {
+pub struct Item<Ev> {
     pub id: EventId,
     pub at: Time, // Since the track's beginning.
-    pub event: TrackEventType,
+    pub event: Ev,
 }
 
-impl TrackEvent {
+impl<Ev> Item<Ev> {
     pub fn is_active(&self, at: Time) -> bool {
-        match &self.event {
-            TrackEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
-            _ => false,
-        }
+        todo!();
+        // match &self.event {
+        //     TrackEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
+        //     _ => false,
+        // }
     }
 }
 
-impl PartialOrd for TrackEvent {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // TODO Maybe consider complete comparison (including actual events)
-        //      to avoid ambiguities in sorting.
-        Some(self.at.cmp(&other.at))
-    }
-}
+// impl PartialOrd for ev::Item<Ev> {
+//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+//         // TODO Maybe consider complete comparison (including actual events)
+//         //      to avoid ambiguities in sorting.
+//         Some(self.at.cmp(&other.at))
+//     }
+// }
 
-impl Ord for TrackEvent {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(&other).unwrap()
-    }
-}
+// impl Ord for ev::Item {
+//     fn cmp(&self, other: &Self) -> Ordering {
+//         self.partial_cmp(&other).unwrap()
+//     }
+// }
 
 /*
  TODO (refactoring, a big one, ???) Use MIDI-like events directly in the track.
@@ -91,8 +71,12 @@ impl Ord for TrackEvent {
     3. (optimally) Keep unsupported types of MIDI on the track also.
     4. (???) How selection and diff patches will refer to events then? Should we still have
        project-unique event ids? Or event id should be "lane_id:event_id"?
-    5. Map events to some internal convenient structs or provide some view functions directly
-       into SMD events? Dealing with 7 bit integers is cumbersome, I'd rather avoid that.
+    5. starting and ending event of a note will have to be stored separately in the edit history.
+    6. Map events to some internal convenient structs or provide some view functions directly
+       into SMD events? Dealing with midir's 7 bit integers is cumbersome, I'd rather avoid that.
+       MIDI v2 introduces more levels (1024?), which have to be also supported.
+    7. Note change animations will have to be inferred. If an end of a note is affected
+       then the range should be animated.
   Expected result:
     1. Export/import and playback would be more complex. In particular export procedure and
        track source for playback engine will have to scan all (non UI) lanes to see which event
@@ -108,29 +92,30 @@ impl Ord for TrackEvent {
        For example playback resuming may need to look up previous or next note. At the moment
        this may require to scan whole track to the beginning or to the end.
 */
+
 #[derive(Debug, Default, Clone)]
 pub struct Track {
-    /* Events must always be kept ordered by start time ascending.
-    This is a requirement of TrackSource. */
-    pub events: Vec<TrackEvent>,
+    pub items: Vec<ev::Item>,
 }
 
 impl Track {
     pub fn reset(&mut self, snapshot: Snapshot) {
-        self.events = snapshot.events;
+        self.items = snapshot.events;
     }
 
-    fn index_events(&self) -> HashMap<EventId, TrackEvent> {
-        let mut track_map = HashMap::with_capacity(self.events.len());
-        for ev in &self.events {
+    /// See also splat_events
+    fn index_events(&self) -> HashMap<EventId, ev::Item> {
+        let mut track_map = HashMap::with_capacity(self.items.len());
+        for ev in &self.items {
             track_map.insert(ev.id, ev.clone());
         }
         track_map
     }
 
-    fn splat_events(&mut self, indexed: &HashMap<EventId, TrackEvent>) {
-        self.events = indexed.values().cloned().collect();
-        self.events.sort();
+    /// Reverse of index_events
+    fn splat_events(&mut self, indexed: &HashMap<EventId, ev::Item>) {
+        self.items = indexed.values().cloned().collect();
+        self.items.sort();
     }
 
     pub fn patch(&mut self, changes: &EventActionsList) {
@@ -152,27 +137,17 @@ impl Track {
     }
 
     pub fn commit(&mut self) {
-        assert!(is_ordered(&self.events));
+        assert!(is_ordered(&self.items));
     }
 
-    pub fn insert_event(&mut self, ev: TrackEvent) {
-        let idx = self.events.partition_point(|x| x < &ev);
-        self.events.insert(idx, ev);
+    pub fn insert_event(&mut self, ev: ev::Item) {
+        let idx = self.items.partition_point(|x| x < &ev);
+        self.items.insert(idx, ev);
         self.commit();
     }
 
-    pub fn max_time(&self) -> Time {
-        // Looks cumbersome. Maybe this is a case for handling MIDI (-like) events directly (see README).
-        let mut result = 0;
-        for ev in &self.events {
-            let end_time = match &ev.event {
-                TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
-                TrackEventType::Controller(_) => ev.at,
-                TrackEventType::Bookmark => ev.at,
-            };
-            result = Time::max(result, end_time);
-        }
-        result
+    pub fn max_time(&self) -> Option<Time> {
+        self.items.iter().map(|item| item.at).max()
     }
 }
 
@@ -180,61 +155,58 @@ pub fn from_midi_events(
     id_seq: &IdSeq,
     events: Vec<midly::TrackEvent<'static>>,
     tick_duration: Time,
-) -> Vec<TrackEvent> {
-    // TODO The offset calculations are very similar to ones in the engine. Can these be shared?
-    let mut ons: HashMap<Pitch, (Time, MidiMessage)> = HashMap::new();
-    let mut track_events = vec![];
+) -> Vec<ev::Item> {
+    let mut items = vec![];
     let mut at: Time = 0;
     for ev in events {
         at += ev.delta.as_int() as Time * tick_duration;
         match ev.kind {
             TrackEventKind::Midi { message, .. } => match message {
-                MidiMessage::NoteOn { key, .. } => {
-                    ons.insert(key.as_int() as Pitch, (at, message));
+                MidiMessage::NoteOn { key, vel } => {
+                    items.push(ev::Item {
+                        id: id_seq.next(),
+                        at,
+                        ev: ev::Type::Audio(ev::Audio::Note(ev::Tone {
+                            on: true,
+                            pitch: key.as_int() as Pitch,
+                            velocity: vel.as_int() as Velocity,
+                        })),
+                    });
                 }
-                MidiMessage::NoteOff { key, .. } => {
-                    let on = ons.remove(&(key.as_int() as Pitch));
-                    match on {
-                        Some((t, MidiMessage::NoteOn { key, vel })) => {
-                            track_events.push(TrackEvent {
-                                id: id_seq.next(),
-                                at: t,
-                                event: TrackEventType::Note(Note {
-                                    duration: at - t,
-                                    pitch: key.as_int() as Pitch,
-                                    velocity: vel.as_int() as Level,
-                                }),
-                            });
-                        }
-                        None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev),
-                        _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
-                    }
+                MidiMessage::NoteOff { key, vel } => {
+                    items.push(ev::Item {
+                        id: id_seq.next(),
+                        at,
+                        ev: ev::Type::Audio(ev::Audio::Note(ev::Tone {
+                            on: true,
+                            pitch: key.as_int() as Pitch,
+                            velocity: vel.as_int() as Velocity,
+                        })),
+                    });
                 }
-                MidiMessage::Controller { controller, value } => track_events.push(TrackEvent {
+                MidiMessage::Controller { controller, value } => items.push(ev::Item {
                     id: id_seq.next(),
                     at,
-                    event: TrackEventType::Controller(ControllerSetValue {
+                    ev: ev::Type::Audio(ev::Audio::Cc(ev::Cc {
                         controller_id: controller.into(),
                         value: value.into(),
-                    }),
+                    })),
                 }),
                 _ => eprintln!("DEBUG Event ignored {:?}", ev),
             },
             _ => (),
         };
     }
-    // Notes are collected after they complete, This mixes the ordering with immediate events.
-    track_events.sort_by_key(|ev| ev.at);
-    track_events
+    items
 }
 
-pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<TrackEvent> {
+pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<ev::Item> {
     let data = std::fs::read(&file_path).unwrap();
     let events = midi::load_smf(&data);
-    from_midi_events(&id_seq, events.0, events.1 as Time)
+    from_midi_events(id_seq, events.0, events.1 as Time)
 }
 
-pub fn export_smf(events: &Vec<TrackEvent>, file_path: &PathBuf) {
+pub fn export_smf(events: &Vec<ev::Item>, file_path: &PathBuf) {
     let usec_per_tick = 26u32;
     let midi_events = to_midi_events(&events, usec_per_tick);
     let mut binary = Vec::new();
@@ -244,48 +216,38 @@ pub fn export_smf(events: &Vec<TrackEvent>, file_path: &PathBuf) {
 
 /// Reverse of from_midi_events
 pub fn to_midi_events(
-    events: &Vec<TrackEvent>,
+    events: &Vec<ev::Item>,
     usec_per_tick: u32,
 ) -> Vec<midly::TrackEvent<'static>> {
     let channel = u4::from(0); // Channel hard coded.
     let mut buffer: Vec<(Time, TrackEventKind)> = vec![];
     for ev in events {
-        match &ev.event {
-            TrackEventType::Note(n) => {
+        match &ev.ev {
+            ev::Type::Audio(ev::Audio::Note(note)) => {
                 buffer.push((
                     ev.at,
                     TrackEventKind::Midi {
                         channel,
                         message: MidiMessage::NoteOn {
-                            key: n.pitch.into(),
-                            vel: n.velocity.into(),
-                        },
-                    },
-                ));
-                buffer.push((
-                    ev.at + n.duration,
-                    TrackEventKind::Midi {
-                        channel,
-                        message: MidiMessage::NoteOff {
-                            key: n.pitch.into(),
-                            vel: n.velocity.into(),
+                            key: note.pitch.into(),
+                            vel: note.velocity.into(),
                         },
                     },
                 ));
             }
-            TrackEventType::Controller(v) => {
+            ev::Type::Audio(ev::Audio::Cc(cc)) => {
                 buffer.push((
                     ev.at,
                     TrackEventKind::Midi {
                         channel,
                         message: MidiMessage::Controller {
-                            controller: v.controller_id.into(),
-                            value: v.value.into(),
+                            controller: cc.controller_id.into(),
+                            value: cc.value.into(),
                         },
                     },
                 ));
             }
-            TrackEventType::Bookmark => (), // Not a MIDI event.
+            ev::Type::Bookmark => (), // Not a MIDI event.
         }
     }
     buffer.sort_by_key(|(at, _)| at.to_owned());

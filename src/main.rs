@@ -14,6 +14,7 @@ mod changeset;
 mod common;
 mod config;
 mod engine;
+mod ev;
 mod midi;
 mod project;
 mod stave;

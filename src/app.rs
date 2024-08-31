@@ -201,7 +201,7 @@ impl eframe::App for EmApp {
                             // Status line
                             ui.label(format!(
                                 "track_len={}  n_sel={}  t_sel={}  at={}s ",
-                                self.stave.history.borrow().with_track(|t| t.events.len()),
+                                self.stave.history.borrow().with_track(|t| t.items.len()),
                                 self.stave.note_selection.count(),
                                 self.stave.time_selection.as_ref().map_or(
                                     "()".to_string(),

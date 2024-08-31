@@ -11,7 +11,8 @@ use midly::MidiMessage;
 use midly::MidiMessage::NoteOff;
 
 use crate::common::Time;
-use crate::track::{ChannelId, MIDI_CC_SUSTAIN_ID};
+use crate::ev::ChannelId;
+use crate::track::MIDI_CC_SUSTAIN_ID;
 
 pub const MIDI_CHANNEL: ChannelId = 1;
 
