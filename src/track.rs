@@ -36,15 +36,8 @@ pub struct Item<Ev> {
     pub event: Ev,
 }
 
-impl<Ev> Item<Ev> {
-    pub fn is_active(&self, at: Time) -> bool {
-        todo!();
-        // match &self.event {
-        //     TrackEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
-        //     _ => false,
-        // }
-    }
-}
+// impl<Ev> Item<Ev> {
+// }
 
 // impl PartialOrd for ev::Item<Ev> {
 //     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -166,31 +159,31 @@ pub fn from_midi_events(
                     items.push(ev::Item {
                         id: id_seq.next(),
                         at,
-                        ev: ev::Type::Audio(ev::Audio::Note(ev::Tone {
+                        ev: ev::Type::Note(ev::Tone {
                             on: true,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
-                        })),
+                        }),
                     });
                 }
                 MidiMessage::NoteOff { key, vel } => {
                     items.push(ev::Item {
                         id: id_seq.next(),
                         at,
-                        ev: ev::Type::Audio(ev::Audio::Note(ev::Tone {
+                        ev: ev::Type::Note(ev::Tone {
                             on: true,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
-                        })),
+                        }),
                     });
                 }
                 MidiMessage::Controller { controller, value } => items.push(ev::Item {
                     id: id_seq.next(),
                     at,
-                    ev: ev::Type::Audio(ev::Audio::Cc(ev::Cc {
+                    ev: ev::Type::Cc(ev::Cc {
                         controller_id: controller.into(),
                         value: value.into(),
-                    })),
+                    }),
                 }),
                 _ => eprintln!("DEBUG Event ignored {:?}", ev),
             },
@@ -223,7 +216,7 @@ pub fn to_midi_events(
     let mut buffer: Vec<(Time, TrackEventKind)> = vec![];
     for ev in events {
         match &ev.ev {
-            ev::Type::Audio(ev::Audio::Note(note)) => {
+            ev::Type::Note(note) => {
                 buffer.push((
                     ev.at,
                     TrackEventKind::Midi {
@@ -235,7 +228,7 @@ pub fn to_midi_events(
                     },
                 ));
             }
-            ev::Type::Audio(ev::Audio::Cc(cc)) => {
+            ev::Type::Cc(cc) => {
                 buffer.push((
                     ev.at,
                     TrackEventKind::Midi {

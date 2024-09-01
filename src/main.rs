@@ -1,12 +1,14 @@
-use eframe::{egui, Theme};
-use midir::os::unix::VirtualOutput;
-use midir::MidiOutput;
-
 use crate::app::EmApp;
 use crate::config::Config;
 use crate::midi::SmfSource;
 use crate::project::Project;
 use crate::track_source::TrackSource;
+use clap::Command;
+use clap_complete::aot as ccomplete;
+use eframe::{egui, Theme, WindowBuilder, WindowBuilderHook};
+use midir::os::unix::VirtualOutput;
+use midir::MidiOutput;
+use std::io;
 
 mod app;
 mod audio_setup;
@@ -24,6 +26,8 @@ mod track_history;
 mod track_source;
 mod util;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub type Pix = f32;
 
 pub fn main() {
@@ -31,20 +35,18 @@ pub fn main() {
         // use log::*;
         // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
     }
-    let arg_matches = clap::Command::new("emmate")
-        .version("0.3.1")
-        .author("Petr <petrglad@gmail.com>")
-        .about("MIDI editor")
-        .arg(
-            clap::arg!(--"config-file" <VALUE>)
-                .value_parser(clap::value_parser!(std::path::PathBuf)),
-        )
-        .arg(
-            clap::arg!(--"midi-file" <VALUE>)
-                .value_parser(clap::value_parser!(std::path::PathBuf))
-                .default_value("yellow.mid"),
-        )
-        .get_matches();
+    let arg_matches = build_cli().get_matches();
+    if let Some(generator) = arg_matches
+        .get_one::<ccomplete::Shell>("shell-completion-script")
+        .copied()
+    {
+        eprintln!("Generating shell completion file for {generator}...");
+        let mut cli = build_cli();
+        let command_name = cli.get_name().to_string();
+        ccomplete::generate(generator, &mut cli, command_name, &mut io::stdout());
+        return;
+    }
+
     // No configurable values at the moment, keeping it here to keep config loader compilable.
     let _config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
 
@@ -87,15 +89,45 @@ pub fn main() {
     midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &mut engine));
 
     // GUI
+    let window_builder = Box::new(|wb: egui::ViewportBuilder| {
+        let mut wb = wb.clone();
+        wb.min_inner_size
+            .replace(egui::emath::Vec2 { x: 250.0, y: 150.0 });
+        wb
+    });
     let native_options = eframe::NativeOptions {
         default_theme: Theme::Light,
-        min_window_size: Some(egui::emath::Vec2 { x: 300.0, y: 200.0 }),
+        window_builder: Some(window_builder),
         ..Default::default()
     };
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Box::new(EmApp::new(ctx, engine_command_sender, project))),
+        Box::new(|ctx| Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))),
     )
     .expect("Emmate UI")
+}
+
+fn build_cli() -> Command {
+    let mut cli = clap::command!()
+        // let arg_matches = clap::Command::new("emmate")
+        //     .version(VERSION)
+        //     .author("Petr <petrglad@gmail.com>")
+        //     .about("MIDI editor")
+        .arg(
+            clap::arg!(--"config-file" <FILE>)
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            clap::arg!(--"midi-file" <FILE>)
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .default_value("yellow.mid")
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            clap::arg!(--"shell-completion-script" <SHELL_NAME>)
+                .value_parser(clap::value_parser!(ccomplete::Shell)),
+        );
+    cli
 }

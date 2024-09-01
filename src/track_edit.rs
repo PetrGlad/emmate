@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
 use crate::ev;
+use crate::ev::{ControllerId, Level, Pitch};
 use crate::stave::PIANO_KEY_LINES;
 use crate::track::{is_cc_switch_on, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::util::{range_contains, IdSeq, Range};
@@ -30,8 +31,14 @@ pub enum EditCommandId {
     ClearBookmark,
 }
 
+/*
+   FIXME Range edits like application of CC range or adding/shifting a note should handle conflicts,
+    the simplest wouild be to delete events inside. In case that is not enough (e.g. with notes)
+    ensure notes do not intersect or have reasonable on-off boundaries.
+*/
+
 /**
- Want to track the changed events for each command to have visual feedback on undo/redo and
+ I  want to track the changed events for each command to have visual feedback on undo/redo and
  to minimize amount of data stored in the edit history. Change list allows to have this in
  most cases. However, there are commands that may generate very large changesets and can be
  repeated by holding the hotkey combination, so in this struct we have a special case
@@ -167,26 +174,27 @@ fn edit_selected(
     vec![CommandDiff::ChangeList { patch }]
 }
 
-fn edit_selected_notes<'a, Action: Fn(&ev::Tone) -> Option<ev::Tone>>(
-    track: &Track,
-    selection: &HashSet<EventId>,
-    action: &'a Action,
-) -> Vec<CommandDiff> {
-    todo!();
-    // Let action to only process the note part.
-    let event_action = move |ev: &ev::Item| {
-        let mut ev2 = ev.clone();
-        if let ev::Type::Audio(ev::Audio::Note(t)) = &mut ev2.ev {
-            // if let Some(n) = action(n) {
-            //     let mut ev2 = ev.clone();
-            //     ev2.event = ev::Type::Note(n);
-            //     return Some(EventAction::Update(ev.clone(), ev2));
-            // }
-        }
-        None
-    };
-    edit_selected(track, selection, &event_action)
-}
+// TODO Either update it to make it useful for note editing or remove.
+// fn edit_selected_notes<'a, Action: Fn(&ev::Tone) -> Option<ev::Tone>>(
+//     track: &Track,
+//     selection: &HashSet<EventId>,
+//     action: &'a Action,
+// ) -> Vec<CommandDiff> {
+//     todo!();
+//     // Let action to only process the note part.
+//     let event_action = move |ev: &ev::Item| {
+//         let mut ev2 = ev.clone();
+//         if let ev::Type::Audio(ev::Audio::Note(t)) = &mut ev2.ev {
+//             // if let Some(n) = action(n) {
+//             //     let mut ev2 = ev.clone();
+//             //     ev2.event = ev::Type::Note(n);
+//             //     return Some(EventAction::Update(ev.clone(), ev2));
+//             // }
+//         }
+//         None
+//     };
+//     edit_selected(track, selection, &event_action)
+// }
 
 pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|ev| {
@@ -217,7 +225,7 @@ pub fn stretch_selected_notes(
 ) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|item: &ev::Item| {
         let mut item2 = item.clone();
-        if let ev::Type::Audio(ev::Audio::Note(t)) = &mut item2.ev {
+        if let ev::Type::Note(t) = &mut item2.ev {
             if !t.on {
                 item2.at += delta;
                 return Some(EventAction::Update(item.clone(), item2));
@@ -235,7 +243,7 @@ pub fn transpose_selected_notes(
 ) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|item: &ev::Item| {
         let mut item2 = item.clone();
-        if let ev::Type::Audio(ev::Audio::Note(t)) = &mut item2.ev {
+        if let ev::Type::Note(t) = &mut item2.ev {
             if let Some(x) = t.pitch.checked_add_signed(delta) {
                 if PIANO_KEY_LINES.contains(&x) {
                     t.pitch = x;
@@ -255,7 +263,7 @@ pub fn accent_selected_notes(
 ) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|item: &ev::Item| {
         let mut item2 = item.clone();
-        if let ev::Type::Audio(ev::Audio::Note(t)) = &mut item2.ev {
+        if let ev::Type::Note(t) = &mut item2.ev {
             if let Some(pitch) = t.velocity.checked_add_signed(delta) {
                 t.velocity = pitch;
                 return Some(EventAction::Update(item.clone(), item2));
@@ -270,15 +278,26 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
     let mut diff = vec![];
     assert!(range.1 - range.0 > 0);
     diff.push(CommandDiff::ChangeList {
-        patch: vec![EventAction::Insert(ev::Item {
-            id: id_seq.next(),
-            at: range.0,
-            event: ev::Type::Note(Note {
-                pitch: *pitch,
-                velocity: MAX_LEVEL / 2,
-                duration: range.1 - range.0,
+        patch: vec![
+            EventAction::Insert(ev::Item {
+                id: id_seq.next(),
+                at: range.0,
+                ev: ev::Type::Note(ev::Tone {
+                    on: true,
+                    pitch: *pitch,
+                    velocity: MAX_LEVEL / 2,
+                }),
             }),
-        })],
+            EventAction::Insert(ev::Item {
+                id: id_seq.next(),
+                at: range.1,
+                ev: ev::Type::Note(ev::Tone {
+                    on: false,
+                    pitch: *pitch,
+                    velocity: MAX_LEVEL / 2,
+                }),
+            }),
+        ],
     });
     Some((EditCommandId::AddNote, diff))
 }
@@ -287,7 +306,7 @@ fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> ev::Item {
     ev::Item {
         id: id_seq.next(),
         at: *at,
-        event: ev::Type::Controller(ControllerSetValue {
+        ev: ev::Type::Cc(ev::Cc {
             controller_id: MIDI_CC_SUSTAIN_ID,
             value: if on { MAX_LEVEL } else { 0 },
         }),
@@ -343,7 +362,7 @@ fn clear_cc_events(
 ) {
     for ev in &track.items {
         if range_contains(range, ev.at) {
-            if let ev::Type::Controller(cc) = &ev.event {
+            if let ev::Type::Cc(cc) = &ev.ev {
                 if cc.controller_id == cc_id {
                     patch.push(EventAction::Delete(ev.clone()));
                 }
@@ -357,21 +376,21 @@ fn cc_value_at(events: &Vec<ev::Item>, at: &Time, cc_id: &ControllerId) -> Level
     while idx > 0 {
         idx -= 1;
         if let Some(ev) = events.get(idx) {
-            if let ev::Type::Controller(cc) = &ev.event {
+            if let ev::Type::Cc(cc) = &ev.ev {
                 if cc.controller_id == *cc_id {
                     return cc.value;
                 }
             }
         }
     }
-    return 0; // default
+    return 0; // CC default
 }
 
 pub fn bookmark_at(track: &Track, at: &Time) -> Option<ev::Item> {
     track
-        .events
+        .items
         .iter()
-        .find(|ev| ev.at == *at && ev.event == ev::Type::Bookmark)
+        .find(|ev| ev.at == *at && ev.ev == ev::Type::Bookmark)
         .cloned()
 }
 
@@ -381,11 +400,11 @@ pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedC
     }
     Some((
         EditCommandId::SetBookmark,
-        vec![ChangeList {
+        vec![CommandDiff::ChangeList {
             patch: vec![EventAction::Insert(ev::Item {
                 id: id_seq.next(),
                 at: *at,
-                event: ev::Type::Bookmark,
+                ev: ev::Type::Bookmark,
             })],
         }],
     ))
@@ -395,7 +414,7 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     if let Some(bm) = bookmark_at(track, at) {
         Some((
             EditCommandId::ClearBookmark,
-            vec![ChangeList {
+            vec![CommandDiff::ChangeList {
                 patch: vec![EventAction::Delete(bm.clone())],
             }],
         ))
@@ -404,6 +423,7 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     }
 }
 
+// TODO Update the tests, they are not useful in this form anymore.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,7 +433,7 @@ mod tests {
         events.push(ev::Item {
             id: 10,
             at: 10,
-            event: ev::Type::Controller(ControllerSetValue {
+            ev: ev::Type::Cc(ev::Cc {
                 controller_id: 13,
                 value: 55,
             }),
@@ -421,16 +441,17 @@ mod tests {
         events.push(ev::Item {
             id: 20,
             at: 14,
-            event: ev::Type::Note(Note {
+            ev: ev::Type::Note(ev::Tone {
+                on: true,
                 pitch: 10,
                 velocity: 20,
-                duration: 30,
+                // duration: 30,
             }),
         });
         events.push(ev::Item {
             id: 30,
             at: 15,
-            event: ev::Type::Controller(ControllerSetValue {
+            ev: ev::Type::Cc(ev::Cc {
                 controller_id: 44,
                 value: 60,
             }),
@@ -438,7 +459,7 @@ mod tests {
         events.push(ev::Item {
             id: 40,
             at: 20,
-            event: ev::Type::Controller(ControllerSetValue {
+            ev: ev::Type::Cc(ev::Cc {
                 controller_id: 13,
                 value: 66,
             }),
@@ -472,7 +493,7 @@ mod tests {
                 EventAction::Insert(ev::Item {
                     id: 0,
                     at: 13,
-                    event: ev::Type::Controller(ControllerSetValue {
+                    ev: ev::Type::Cc(ev::Cc {
                         controller_id: 64,
                         value: 127,
                     }),
@@ -480,7 +501,7 @@ mod tests {
                 EventAction::Insert(ev::Item {
                     id: 1,
                     at: 17,
-                    event: ev::Type::Controller(ControllerSetValue {
+                    ev: ev::Type::Cc(ev::Cc {
                         controller_id: 64,
                         value: 0,
                     }),
@@ -492,11 +513,7 @@ mod tests {
         let expected_ids: Vec<EventId> = vec![10, 0, 20, 30, 1, 40];
         assert_eq!(
             expected_ids,
-            track
-                .events
-                .iter()
-                .map(|ev| ev.id)
-                .collect::<Vec<EventId>>()
+            track.items.iter().map(|ev| ev.id).collect::<Vec<EventId>>()
         );
 
         let expected_states: Vec<Option<bool>> = vec![
@@ -510,9 +527,9 @@ mod tests {
         assert_eq!(
             expected_states,
             track
-                .events
+                .items
                 .iter()
-                .map(|ev| if let ev::Type::Controller(ctl) = &ev.event {
+                .map(|ev| if let ev::Type::Cc(ctl) = &ev.ev {
                     Some(is_cc_switch_on(ctl.value))
                 } else {
                     None

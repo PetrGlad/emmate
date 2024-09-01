@@ -3,9 +3,17 @@ use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
+use eframe::egui::{
+    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
+    Rounding, Sense, Stroke, Ui,
+};
+use egui::Rgba;
+use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
+
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
-use crate::ev::{Level, Pitch, Tone, Velocity};
+use crate::ev::{Level, Pitch, Tone, Type, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
@@ -14,13 +22,6 @@ use crate::track_edit::{
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{ev, util, Pix};
-use eframe::egui::{
-    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
-    Rounding, Sense, Stroke, Ui,
-};
-use egui::Rgba;
-use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
 
 // Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -83,6 +84,7 @@ impl<Ev> Lanes<Ev> {
     }
 }
 
+#[derive(Default)]
 /// View model of a track.
 struct TrackLanes {
     pub notes: Vec<Lane<LaneNote>>,
@@ -90,12 +92,12 @@ struct TrackLanes {
     pub bookmarks: Vec<Lane<LaneBookmark>>,
 }
 
-impl Default for TrackLanes {
-    fn default() -> Self {
-        // Init 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks
-        todo!()
-    }
-}
+// FIXME Init 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks
+// impl Default for TrackLanes {
+//     fn default() -> Self {
+//         println!("ERROR Lanes lookup is not implemented.");
+//     }
+// }
 
 // UI state representing a currently drawn note,
 #[derive(Debug, Clone)]
@@ -105,7 +107,7 @@ struct NoteDraw {
 }
 
 #[derive(Debug, Default)]
-struct NotesSelection {
+pub struct NotesSelection {
     selected: HashSet<EventId>,
 }
 
@@ -367,8 +369,8 @@ impl Stave {
                     continue;
                 }
             }
-            match &event.event {
-                ev::Type::Audio(Note(note)) => {
+            match &event.ev {
+                ev::Type::Note(note) => {
                     if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
                         // Alternatively, can return known rect from draw_track_note and check that.
                         *note_hovered = Some(event.id);
@@ -376,13 +378,16 @@ impl Stave {
                     if self.note_selection.contains(&event) {
                         if x_range.max < self.x_from_time(event.at) {
                             selection_hints_right.insert(note.pitch);
-                        } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                            selection_hints_left.insert(note.pitch);
+                        } else {
+                            todo!("Match on/off pairs to draw note rectangles.");
+                            if self.x_from_time(event.at /* + note.duration */) < x_range.min {
+                                selection_hints_left.insert(note.pitch);
+                            }
                         }
                     }
                     self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
                 }
-                ev::Type::Audio(Cc(cc)) => self.draw_track_cc(
+                ev::Type::Cc(cc) => self.draw_track_cc(
                     &key_ys,
                     half_tone_step,
                     &painter,
@@ -502,7 +507,8 @@ impl Stave {
     ) -> bool {
         if let Some(t) = &time_hovered {
             if let Some(p) = pitch_hovered {
-                event.is_active(*t) && p == pitch
+                todo!();
+                // event.is_active(*t) && p == pitch
             } else {
                 false
             }
@@ -723,9 +729,9 @@ impl Stave {
                 .borrow()
                 .with_track(|track| {
                     track
-                        .events
+                        .items
                         .iter()
-                        .rfind(|ev| ev.at < at && ev.event == ev::Type::Bookmark)
+                        .rfind(|ev| ev.at < at && ev.ev == ev::Type::Bookmark)
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -744,9 +750,9 @@ impl Stave {
                 .borrow()
                 .with_track(move |track| {
                     track
-                        .events
+                        .items
                         .iter()
-                        .find(|ev| ev.at > at && ev.event == ev::Type::Bookmark)
+                        .find(|ev| ev.at > at && ev.ev == ev::Type::Bookmark)
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -846,7 +852,10 @@ impl Stave {
     }
 
     fn max_time(&self) -> Time {
-        self.history.borrow().with_track(|track| track.max_time())
+        self.history
+            .borrow()
+            .with_track(|track| track.max_time())
+            .unwrap_or(0)
     }
 
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
@@ -918,17 +927,34 @@ impl Stave {
             x,
             painter.clip_rect().y_range(),
             Stroke { width: 2.0, color },
-        )
+        );
     }
 
     fn note_animation_params(ev: Option<&ev::Item>) -> Option<((Time, Time), Pitch, Level)> {
         ev.and_then(|ev| {
-            if let ev::Type::Note(n) = &ev.event {
-                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
+            if let ev::Type::Note(n) = &ev.ev {
+                todo!("Use on/off event pairs for duration.");
+                Some(((ev.at, ev.at /*+ n.duration*/), n.pitch, n.velocity))
             } else {
                 None // CC is animated separately.
             }
         })
+    }
+
+    fn lane_next(&self, ev: &ev::Item) -> Option<ev::Item> {
+        let track = self.history.borrow().track.read();
+        let idx = track.items.partition_point(|x| x.at < ev.at);
+        // TODO (optimization) Implement lane lookup (Lanes).
+        while let Some(x) = track.items.get(idx) {
+            if match x.ev {
+                Type::Note(_) => matches!(ev.ev, ev::Type::Note(_)),
+                Type::Cc(_) => matches!(ev.ev, ev::Type::Cc(_)),
+                Type::Bookmark => matches!(ev.ev, ev::Type::Bookmark),
+            } {
+                return Some(x.clone());
+            }
+        }
+        None
     }
 
     fn draw_track_note(
@@ -939,14 +965,19 @@ impl Stave {
         event: &ev::Item,
         note: &Tone,
     ) {
+        if !note.on {
+            return;
+        }
         if let Some(y) = key_ys.get(&note.pitch) {
+            let end_at = self.lane_next(&event).map(|ev| ev.at).unwrap_or(Time::MAX);
             self.draw_note(
                 &painter,
-                (event.at, event.at + note.duration),
+                (event.at, end_at - event.at),
                 *y,
                 *half_tone_step,
                 note_color(&note.velocity, self.note_selection.contains(&event)),
             );
+            todo!("Use on/off event pairs for duration.");
         }
     }
 
@@ -1052,7 +1083,7 @@ impl Stave {
 
     fn cc_animation_params(ev: Option<&ev::Item>) -> Option<(Time, Level)> {
         ev.and_then(|ev| {
-            if let TrackEventType::Controller(cc) = &ev.event {
+            if let ev::Type::Cc(cc) = &ev.ev {
                 debug_assert_eq!(cc.controller_id, MIDI_CC_SUSTAIN_ID);
                 Some((ev.at, cc.value))
             } else {
@@ -1171,7 +1202,7 @@ impl Stave {
                 width: 1.0,
                 color: color.gamma_multiply(2.0),
             },
-        )
+        );
     }
 
     fn ensure_visible(&mut self, at: Time) {
@@ -1230,6 +1261,4 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}

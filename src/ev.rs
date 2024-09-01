@@ -1,5 +1,4 @@
 // A sketch of new track events.
-
 use crate::common::Time;
 use crate::track::EventId;
 use serde::{Deserialize, Serialize};
@@ -19,22 +18,28 @@ pub struct Tone {
     pub velocity: Velocity,
 }
 
+/// Continuous Controller (CC) value set.
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct Cc {
     pub controller_id: ControllerId,
     pub value: Level,
 }
 
-// Plan to use it in engine's track source.
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
-pub enum Audio {
+#[derive(
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Clone,
+    Serialize,
+    Deserialize,
+    strum_macros::EnumDiscriminants,
+)]
+pub enum Type {
     Note(Tone),
     Cc(Cc),
-}
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
-pub enum Type {
-    Audio(Audio),
     Bookmark,
 }
 

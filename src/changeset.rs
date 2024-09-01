@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
 use crate::ev;
-use crate::track::{ev::Item, EventId, Track};
+use crate::track::{EventId, Track};
 use crate::track_edit::{CommandDiff, EditCommandId};
 
 /// Simplest track edit operation. See [Changeset] for uses.

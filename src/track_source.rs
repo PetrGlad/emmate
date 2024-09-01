@@ -4,10 +4,10 @@ use std::sync::Arc;
 use sync_cow::SyncCow;
 
 use crate::common::Time;
-use crate::engine;
 use crate::engine::{EngineEvent, EventSource};
 use crate::midi::{controller_set, note_off, note_on};
 use crate::track::Track;
+use crate::{engine, ev};
 
 pub struct TrackSource {
     /* Events must always be kept ordered by start
@@ -23,7 +23,7 @@ impl Debug for TrackSource {
             "TrackSource{{i={}, t={}, len={}}}",
             self.current_idx,
             self.running_at,
-            self.track.read().events.len()
+            self.track.read().items.len()
         ))?;
         Ok(())
     }
@@ -87,18 +87,19 @@ impl EventSource for TrackSource {
                 return events;
             }
             self.running_at = running_at;
-            match &event.event {
+            match &event.ev {
                 ev::Type::Note(note) => {
                     events.push(EngineEvent {
                         at: running_at,
                         event: note_on(engine::MIDI_CHANNEL, note.pitch, note.velocity),
                     });
+                    todo!("Remove event duration handling from the audio engine");
                     events.push(EngineEvent {
-                        at: running_at + note.duration,
+                        at: running_at, /* + note.duration */
                         event: note_off(engine::MIDI_CHANNEL, note.pitch, note.velocity),
                     });
                 }
-                ev::Type::Controller(set_val) => {
+                ev::Type::Cc(set_val) => {
                     events.push(EngineEvent {
                         at: running_at,
                         event: controller_set(
@@ -118,10 +119,8 @@ impl EventSource for TrackSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::track;
-    use crate::track::ev::Item;
-
     use super::*;
+    use crate::track;
 
     #[test]
     fn empty_track() {
@@ -140,10 +139,11 @@ mod tests {
         track.items.push(ev::Item {
             id: 13,
             at: 1000,
-            event: ev::Type::Note(track::Note {
+            ev: ev::Type::Note(ev::Tone {
+                on: false,
                 pitch: 55,
                 velocity: 55,
-                duration: 12,
+                // duration: 12, // FIXME Review
             }),
         });
         let track = Arc::new(SyncCow::new(track));
