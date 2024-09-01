@@ -25,17 +25,7 @@ pub struct Cc {
     pub value: Level,
 }
 
-#[derive(
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Clone,
-    Serialize,
-    Deserialize,
-    strum_macros::EnumDiscriminants,
-)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub enum Type {
     Note(Tone),
     Cc(Cc),

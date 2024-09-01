@@ -171,7 +171,7 @@ pub fn from_midi_events(
                         id: id_seq.next(),
                         at,
                         ev: ev::Type::Note(ev::Tone {
-                            on: true,
+                            on: false,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
                         }),

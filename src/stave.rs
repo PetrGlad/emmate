@@ -507,8 +507,9 @@ impl Stave {
     ) -> bool {
         if let Some(t) = &time_hovered {
             if let Some(p) = pitch_hovered {
-                todo!();
+                // FIXME Update event selection
                 // event.is_active(*t) && p == pitch
+                false
             } else {
                 false
             }
@@ -943,16 +944,20 @@ impl Stave {
 
     fn lane_next(&self, ev: &ev::Item) -> Option<ev::Item> {
         let track = self.history.borrow().track.read();
-        let idx = track.items.partition_point(|x| x.at < ev.at);
-        // TODO (optimization) Implement lane lookup (Lanes).
+        // TODO (optimization) Implement lane lookup (stave::Lanes).
+        let mut idx = 0; // track.items.partition_point(|x| x.at > ev.at);
         while let Some(x) = track.items.get(idx) {
-            if match x.ev {
-                Type::Note(_) => matches!(ev.ev, ev::Type::Note(_)),
-                Type::Cc(_) => matches!(ev.ev, ev::Type::Cc(_)),
-                Type::Bookmark => matches!(ev.ev, ev::Type::Bookmark),
-            } {
+            if x.at > ev.at
+                // FIXME Also match controller id or pitch depending on type.
+                && match x.ev {
+                    Type::Note(_) => matches!(ev.ev, Type::Note(_)),
+                    Type::Cc(_) => matches!(ev.ev, Type::Cc(_)),
+                    Type::Bookmark => matches!(ev.ev, Type::Bookmark),
+                }
+            {
                 return Some(x.clone());
             }
+            idx += 1;
         }
         None
     }
@@ -977,7 +982,6 @@ impl Stave {
                 *half_tone_step,
                 note_color(&note.velocity, self.note_selection.contains(&event)),
             );
-            todo!("Use on/off event pairs for duration.");
         }
     }
 
@@ -1192,7 +1196,7 @@ impl Stave {
             clip.y_range(),
             Stroke {
                 width: 1.0,
-                color: color.gamma_multiply(2.0),
+                color: color.gamma_multiply(0.5),
             },
         );
         painter.vline(
@@ -1200,7 +1204,7 @@ impl Stave {
             clip.y_range(),
             Stroke {
                 width: 1.0,
-                color: color.gamma_multiply(2.0),
+                color: color.gamma_multiply(0.5),
             },
         );
     }
