@@ -977,7 +977,7 @@ impl Stave {
             let end_at = self.lane_next(&event).map(|ev| ev.at).unwrap_or(Time::MAX);
             self.draw_note(
                 &painter,
-                (event.at, end_at - event.at),
+                (event.at, end_at),
                 *y,
                 *half_tone_step,
                 note_color(&note.velocity, self.note_selection.contains(&event)),
