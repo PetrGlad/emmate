@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
-use crate::ev::{ControllerId, Level, Pitch, Velocity};
+use crate::ev::{ControllerId, Level, Pitch, Tone, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
@@ -106,9 +106,10 @@ impl TrackLanes {
 
     fn reset(&mut self) {
         self.notes.clear();
-        self.notes.resize(Pitch::MAX as usize, Lane::default());
+        self.notes.resize(Pitch::MAX as usize + 1, Lane::default());
         self.cc.clear();
-        self.cc.resize(ControllerId::MAX as usize, Lane::default());
+        self.cc
+            .resize(ControllerId::MAX as usize + 1, Lane::default());
         // Still using array for bookmarks to keep the code consistent.
         self.bookmarks.clear();
         self.bookmarks.resize(1, Lane::default());
@@ -159,7 +160,7 @@ impl NotesSelection {
         }
     }
 
-    fn contains(&self, ev: &ev::Item) -> bool {
+    fn contains(&self, ev: &LaneEvent<Tone>) -> bool {
         self.selected.contains(&ev.id)
     }
 
@@ -285,11 +286,12 @@ impl Stave {
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
-        // Zoom so that position under mouse pointer stays put.
+        // Zoom so that time position under mouse pointer stays put.
         // TODO (cleanup) Consider using emath::remap
         let at = self.time_from_x(mouse_x);
-        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time;
-        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time;
+        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time - 1;
+        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time + 1;
+        assert!(self.time_left < self.time_right)
     }
 
     pub fn scroll(&mut self, dt: Time) {
@@ -350,7 +352,6 @@ impl Stave {
                         &mut time_hovered,
                         &mut note_hovered,
                         &painter,
-                        &track,
                     );
                 }
                 self.draw_cursor(
@@ -395,54 +396,99 @@ impl Stave {
         time_hovered: &Option<Time>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
-        track: &Track,
     ) -> Option<util::Range<Time>> {
         let mut last_damper_value: (Time, Level) = (0, 0);
         let x_range = painter.clip_rect().x_range();
+        // Selection hints remind of selected notes that are not currently visible.
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
+        // Contains time range that includes all events affected by an edit action.
         let mut should_be_visible = None;
-        // FIXME (refactoring) Use TrackLanes instead of track here to get the sequence of events.
-        for i in 0..track.items.len() {
-            let event = &track.items[i];
+        let is_in_transition = |id| {
             if let Some(trans) = &self.transition {
-                if trans.changeset.changes.contains_key(&event.id) {
-                    continue;
-                }
+                trans.changeset.changes.contains_key(id)
+            } else {
+                false
             }
-            match &event.ev {
-                ev::Type::Note(note) => {
-                    if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
-                        // Alternatively, can return known rect from draw_track_note and check that.
-                        *note_hovered = Some(event.id);
+        };
+        for (pitch, lane) in self.lanes.notes.iter().enumerate() {
+            if let Some(y) = key_ys.get(&(pitch as Pitch)) {
+                let mut pos: usize = 0;
+                while pos < lane.events.len() {
+                    let note = &lane.events[pos];
+                    if is_in_transition(&note.id) {
+                        continue;
                     }
-                    if self.note_selection.contains(&event) {
-                        if x_range.max < self.x_from_time(event.at) {
-                            selection_hints_right.insert(note.pitch);
-                        } else {
-                            todo!("Match on/off pairs to draw note rectangles.");
-                            if self.x_from_time(event.at /* + note.duration */) < x_range.min {
-                                selection_hints_left.insert(note.pitch);
-                            }
-                        }
-                    }
-                    self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
+                    assert_eq!(note.ev.pitch, pitch as Pitch);
+                    self.draw_track_note(
+                        y,
+                        half_tone_step,
+                        painter,
+                        note,
+                        lane.events.get(pos + 1),
+                    );
+
+                    // FIXME Implement
+                    // if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &pitch) {
+                    //     // Alternatively, can return known rect from draw_track_note and check that.
+                    //     *note_hovered = Some(event.id);
+                    // }
+                    // if self.note_selection.contains(&event) {
+                    //     if x_range.max < self.x_from_time(event.at) {
+                    //         selection_hints_right.insert(note.pitch);
+                    //     } else {
+                    //         todo!("Match on/off pairs to draw note rectangles.");
+                    //         if self.x_from_time(event.at /* + note.duration */) < x_range.min {
+                    //             selection_hints_left.insert(note.pitch);
+                    //         }
+                    //     }
+                    // }
+                    pos += 2;
                 }
-                ev::Type::Cc(cc) => self.draw_track_cc(
-                    &key_ys,
-                    half_tone_step,
-                    &painter,
-                    &mut last_damper_value,
-                    &event,
-                    &cc,
-                ),
-                ev::Type::Bookmark(_) => self.draw_cursor(
-                    &painter,
-                    self.x_from_time(event.at),
-                    Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                ),
             }
         }
+        // FIXME Draw sustein lane here
+        // FIXME Draw bookmarks here
+
+        // FIXME (refactoring) Use TrackLanes instead of track here to get the sequence of events.
+        // for i in 0..track.items.len() {
+        //     let event = &track.items[i];
+        //     if is_in_transition(&event.id) {
+        //         continue;
+        //     }
+        //     match &event.ev {
+        //         ev::Type::Note(note) => {
+        //             if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
+        //                 // Alternatively, can return known rect from draw_track_note and check that.
+        //                 *note_hovered = Some(event.id);
+        //             }
+        //             if self.note_selection.contains(&event) {
+        //                 if x_range.max < self.x_from_time(event.at) {
+        //                     selection_hints_right.insert(note.pitch);
+        //                 } else {
+        //                     todo!("Match on/off pairs to draw note rectangles.");
+        //                     if self.x_from_time(event.at /* + note.duration */) < x_range.min {
+        //                         selection_hints_left.insert(note.pitch);
+        //                     }
+        //                 }
+        //             }
+        //             self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
+        //         }
+        //         ev::Type::Cc(cc) => self.draw_track_cc(
+        //             &key_ys,
+        //             half_tone_step,
+        //             &painter,
+        //             &mut last_damper_value,
+        //             &event,
+        //             &cc,
+        //         ),
+        //         ev::Type::Bookmark(_) => self.draw_cursor(
+        //             &painter,
+        //             self.x_from_time(event.at),
+        //             Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+        //         ),
+        //     }
+        // }
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
                 // TODO (cleanup) Restrict actions to not change event types,
@@ -912,7 +958,7 @@ impl Stave {
             if let Some(time) = time {
                 self.time_selection = Some(*time..*time);
             }
-        } else if response.drag_released_by(drag_button) {
+        } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
@@ -944,7 +990,7 @@ impl Stave {
                     });
                 }
             }
-        } else if response.drag_released_by(drag_button) {
+        } else if response.drag_stopped_by(drag_button) {
             if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.start, draw.time.end);
@@ -989,63 +1035,66 @@ impl Stave {
 
     fn lane_next(&self, ev: &ev::Item) -> Option<ev::Item> {
         dbg!("[ev]", ev); // DEBUG
-        let track = self.history.borrow().track.read();
-        // TODO (optimization, cleanup) It is almost O(N^2), implement lane lookup (stave::Lanes).
-        let mut idx = track.items.partition_point(|x| x.at <= ev.at);
-        while let Some(x) = track.items.get(idx) {
-            if x.at > ev.at
-                && match &x.ev {
-                    ev::Type::Note(ta) => {
-                        if !ta.on {
-                            if let ev::Type::Note(tb) = &ev.ev {
-                                ta.pitch == tb.pitch
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                    ev::Type::Cc(va) => {
-                        if let ev::Type::Cc(vb) = &ev.ev {
-                            va.controller_id == vb.controller_id
-                        } else {
-                            false
-                        }
-                    }
-                    ev::Type::Bookmark(_) => matches!(ev.ev, ev::Type::Bookmark(_)),
-                }
-            {
-                dbg!("[pair]", x); // DEBUG
-                return Some(x.clone());
-            }
-            idx += 1;
-        }
-        eprintln!("[no end pair found]"); // DEBUG
+        todo!();
+        // let lane_items = match ev.ev {
+        //     Type::Note(n) => &self.lanes.notes[n.pitch as usize],
+        //     Type::Cc(cc) => &self.lanes.cc[cc.controller_id as usize],
+        //     Type::Bookmark(bm) => &self.lanes.bookmarks.first(),
+        // }
+        // let mut idx = lane_items.partition_point(|x| x.at <= ev.at);
+        // while let Some(x) = lane_items.get(idx) {
+        //     if x.at > ev.at
+        //         && match &x.ev {
+        //             ev::Type::Note(ta) => {
+        //                 if !ta.on {
+        //                     if let ev::Type::Note(tb) = &ev.ev {
+        //                         ta.pitch == tb.pitch
+        //                     } else {
+        //                         false
+        //                     }
+        //                 } else {
+        //                     false
+        //                 }
+        //             }
+        //             ev::Type::Cc(va) => {
+        //                 if let ev::Type::Cc(vb) = &ev.ev {
+        //                     va.controller_id == vb.controller_id
+        //                 } else {
+        //                     false
+        //                 }
+        //             }
+        //             ev::Type::Bookmark(_) => matches!(ev.ev, ev::Type::Bookmark(_)),
+        //         }
+        //     {
+        //         dbg!("[pair]", x); // DEBUG
+        //         return Some(x.clone());
+        //     }
+        //     idx += 1;
+        // }
+        // eprintln!("[no end pair found]"); // DEBUG
         None
     }
 
     fn draw_track_note(
         &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
+        y: &Pix,
         half_tone_step: &Pix,
         painter: &Painter,
-        event: &ev::Item,
-        note: &ev::Tone,
-    ) {
-        if !note.on {
-            return;
+        this: &LaneEvent<ev::Tone>,
+        next: Option<&LaneEvent<ev::Tone>>,
+    ) -> Option<Rect> {
+        if !this.ev.on {
+            eprintln!("Unmatched note event {:?} (next {:?})", this, next);
+            return None;
         }
-        if let Some(y) = key_ys.get(&note.pitch) {
-            let end_at = self.lane_next(&event).map(|ev| ev.at).unwrap_or(Time::MAX);
-            self.draw_note(
-                &painter,
-                (event.at, end_at),
-                *y,
-                *half_tone_step,
-                note_color(&note.velocity, self.note_selection.contains(&event)),
-            );
-        }
+        let end_at = next.map(|ev| ev.at).unwrap_or(Time::MAX);
+        Some(self.draw_note(
+            &painter,
+            (this.at, end_at),
+            *y,
+            *half_tone_step,
+            note_color(&this.ev.velocity, self.note_selection.contains(&this)),
+        ))
     }
 
     fn draw_note_transition(
@@ -1091,7 +1140,7 @@ impl Stave {
         y: Pix,
         height: Pix,
         color: Color32,
-    ) {
+    ) -> Rect {
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(time_range.0),
@@ -1103,6 +1152,7 @@ impl Stave {
             },
         };
         painter.rect_filled(paint_rect, Rounding::ZERO, color);
+        paint_rect
     }
 
     fn draw_point_accent(

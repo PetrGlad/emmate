@@ -79,6 +79,8 @@ I use Pianoteq, but that is a commercial product.
   tabs?
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
 - [ ] Zoom to fit whole composition.
+- [ ] Limit zoom-out so the whole composition is always visible (at least 5-10% of widow width).
+- [ ] Limit zoom-in to some reasonable value (so the window width covers at least 50-100ms).
 - [ ] The sustain lane is left in an inconsistent state sometines (needs investigation).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
