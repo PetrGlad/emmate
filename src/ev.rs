@@ -11,7 +11,7 @@ pub type Velocity = Level;
 /// Midi channel id.
 pub type ChannelId = u8;
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct Tone {
     pub on: bool,
     pub pitch: Pitch,
@@ -19,18 +19,21 @@ pub struct Tone {
 }
 
 /// Continuous Controller (CC) value set.
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct Cc {
     pub controller_id: ControllerId,
     pub value: Level,
 }
+
+#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+pub struct Bookmark {}
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub enum Type {
     Note(Tone),
     Cc(Cc),
 
-    Bookmark,
+    Bookmark(Bookmark),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Serialize, Deserialize)]

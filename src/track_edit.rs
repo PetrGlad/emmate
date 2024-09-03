@@ -390,7 +390,7 @@ pub fn bookmark_at(track: &Track, at: &Time) -> Option<ev::Item> {
     track
         .items
         .iter()
-        .find(|ev| ev.at == *at && ev.ev == ev::Type::Bookmark)
+        .find(|ev| ev.at == *at && matches!(ev.ev, ev::Type::Bookmark(_)))
         .cloned()
 }
 
@@ -404,7 +404,7 @@ pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedC
             patch: vec![EventAction::Insert(ev::Item {
                 id: id_seq.next(),
                 at: *at,
-                ev: ev::Type::Bookmark,
+                ev: ev::Type::Bookmark(ev::Bookmark {}),
             })],
         }],
     ))

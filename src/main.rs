@@ -85,7 +85,6 @@ pub fn main() {
         "Digital Piano",
         &mut engine,
     ));
-    midi_inputs.push(audio_setup::midi_keyboard_input("XPIANOGT", &mut engine));
     midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &mut engine));
 
     // GUI

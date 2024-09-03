@@ -240,7 +240,7 @@ pub fn to_midi_events(
                     },
                 ));
             }
-            ev::Type::Bookmark => (), // Not a MIDI event.
+            ev::Type::Bookmark(_) => (), // Not a MIDI event.
         }
     }
     buffer.sort_by_key(|(at, _)| at.to_owned());

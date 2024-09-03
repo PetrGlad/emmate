@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
-use crate::ev::{Level, Pitch, Tone, Type, Velocity};
+use crate::ev::{ControllerId, Level, Pitch, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
@@ -47,12 +47,13 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 enum LaneNote {
     On(Velocity),
-    Off(Velocity),
+    Off,
 }
 
 /// Controller's id is determined by the containing lane.
 struct LaneCc(Velocity);
 
+#[derive(Default)]
 struct LaneBookmark();
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -62,9 +63,11 @@ pub struct LaneEvent<Ev> {
     pub ev: Ev,
 }
 
+/// In contrast to Track this contain only one type of events, which should streamline
+/// calculations and help compiler to optimize the code.
 #[derive(Debug, Default, Clone)]
 pub struct Lane<Ev> {
-    events: Vec<LaneEvent<Ev>>,
+    pub events: Vec<LaneEvent<Ev>>,
 }
 
 impl<Ev> Lane<Ev> {
@@ -75,6 +78,7 @@ impl<Ev> Lane<Ev> {
 
 pub type LaneIndex = i8;
 
+// TODO Is this helpful or just keep Vecs?
 #[derive(Debug, Default, Clone)]
 pub struct Lanes<Ev>(Vec<Lane<Ev>>);
 
@@ -86,18 +90,53 @@ impl<Ev> Lanes<Ev> {
 
 #[derive(Default)]
 /// View model of a track.
+/// 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks
 struct TrackLanes {
-    pub notes: Vec<Lane<LaneNote>>,
-    pub cc: Vec<Lane<LaneCc>>,
-    pub bookmarks: Vec<Lane<LaneBookmark>>,
+    pub notes: Vec<Lane<ev::Tone>>,
+    pub cc: Vec<Lane<ev::Cc>>,
+    pub bookmarks: Vec<Lane<ev::Bookmark>>,
 }
 
-// FIXME Init 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks
-// impl Default for TrackLanes {
-//     fn default() -> Self {
-//         println!("ERROR Lanes lookup is not implemented.");
-//     }
-// }
+impl TrackLanes {
+    fn new(track: &Track) -> Self {
+        let mut lanes = TrackLanes::default();
+        lanes.update(track);
+        lanes
+    }
+
+    fn reset(&mut self) {
+        self.notes.clear();
+        self.notes.resize(Pitch::MAX as usize, Lane::default());
+        self.cc.clear();
+        self.cc.resize(ControllerId::MAX as usize, Lane::default());
+        // Still using array for bookmarks to keep the code consistent.
+        self.bookmarks.clear();
+        self.bookmarks.resize(1, Lane::default());
+    }
+
+    fn update(&mut self, track: &Track) {
+        self.reset();
+        for ev in &track.items {
+            match &ev.ev {
+                ev::Type::Note(n) => self.notes[n.pitch as usize].events.push(LaneEvent {
+                    id: ev.id,
+                    at: ev.at,
+                    ev: n.clone(),
+                }),
+                ev::Type::Cc(cc) => self.cc[cc.controller_id as usize].events.push(LaneEvent {
+                    id: ev.id,
+                    at: ev.at,
+                    ev: cc.clone(),
+                }),
+                ev::Type::Bookmark(bm) => self.bookmarks[0].events.push(LaneEvent {
+                    id: ev.id,
+                    at: ev.at,
+                    ev: bm.clone(),
+                }),
+            }
+        }
+    }
+}
 
 // UI state representing a currently drawn note,
 #[derive(Debug, Clone)]
@@ -175,7 +214,7 @@ pub struct Stave {
     /// The track's reference data.
     pub history: RefCell<TrackHistory>,
     /// View model of the track.
-    pub lanes: TrackLanes,
+    lanes: TrackLanes,
 
     /// Starting moment of visible time range.
     pub time_left: Time,
@@ -211,9 +250,10 @@ pub struct StaveResponse {
 
 impl Stave {
     pub fn new(history: RefCell<TrackHistory>) -> Stave {
+        let lanes = TrackLanes::new(history.borrow().track.read().as_ref());
         Stave {
             history,
-            lanes: TrackLanes::default(),
+            lanes,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
@@ -362,6 +402,7 @@ impl Stave {
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         let mut should_be_visible = None;
+        // FIXME (refactoring) Use TrackLanes instead of track here to get the sequence of events.
         for i in 0..track.items.len() {
             let event = &track.items[i];
             if let Some(trans) = &self.transition {
@@ -395,7 +436,7 @@ impl Stave {
                     &event,
                     &cc,
                 ),
-                ev::Type::Bookmark => self.draw_cursor(
+                ev::Type::Bookmark(_) => self.draw_cursor(
                     &painter,
                     self.x_from_time(event.at),
                     Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
@@ -732,7 +773,7 @@ impl Stave {
                     track
                         .items
                         .iter()
-                        .rfind(|ev| ev.at < at && ev.ev == ev::Type::Bookmark)
+                        .rfind(|ev| ev.at < at && matches!(ev.ev, ev::Type::Bookmark(_)))
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -753,7 +794,7 @@ impl Stave {
                     track
                         .items
                         .iter()
-                        .find(|ev| ev.at > at && ev.ev == ev::Type::Bookmark)
+                        .find(|ev| ev.at > at && matches!(ev.ev, ev::Type::Bookmark(_)))
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -844,6 +885,10 @@ impl Stave {
             .history
             .borrow_mut()
             .update_track(|track| action(&self, track));
+        // TODO (refactoring) No strict need to access the track through history, but still need to keep
+        //  all the parts updated. Are alternatives (using channel pub/sub, maybe) better?
+        self.lanes
+            .update(self.history.borrow().track.read().as_ref());
         self.transition = Self::animate_edit(
             context,
             transition_id,
@@ -943,22 +988,40 @@ impl Stave {
     }
 
     fn lane_next(&self, ev: &ev::Item) -> Option<ev::Item> {
+        dbg!("[ev]", ev); // DEBUG
         let track = self.history.borrow().track.read();
-        // TODO (optimization) Implement lane lookup (stave::Lanes).
-        let mut idx = 0; // track.items.partition_point(|x| x.at > ev.at);
+        // TODO (optimization, cleanup) It is almost O(N^2), implement lane lookup (stave::Lanes).
+        let mut idx = track.items.partition_point(|x| x.at <= ev.at);
         while let Some(x) = track.items.get(idx) {
             if x.at > ev.at
-                // FIXME Also match controller id or pitch depending on type.
-                && match x.ev {
-                    Type::Note(_) => matches!(ev.ev, Type::Note(_)),
-                    Type::Cc(_) => matches!(ev.ev, Type::Cc(_)),
-                    Type::Bookmark => matches!(ev.ev, Type::Bookmark),
+                && match &x.ev {
+                    ev::Type::Note(ta) => {
+                        if !ta.on {
+                            if let ev::Type::Note(tb) = &ev.ev {
+                                ta.pitch == tb.pitch
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    ev::Type::Cc(va) => {
+                        if let ev::Type::Cc(vb) = &ev.ev {
+                            va.controller_id == vb.controller_id
+                        } else {
+                            false
+                        }
+                    }
+                    ev::Type::Bookmark(_) => matches!(ev.ev, ev::Type::Bookmark(_)),
                 }
             {
+                dbg!("[pair]", x); // DEBUG
                 return Some(x.clone());
             }
             idx += 1;
         }
+        eprintln!("[no end pair found]"); // DEBUG
         None
     }
 
@@ -968,7 +1031,7 @@ impl Stave {
         half_tone_step: &Pix,
         painter: &Painter,
         event: &ev::Item,
-        note: &Tone,
+        note: &ev::Tone,
     ) {
         if !note.on {
             return;
