@@ -6,10 +6,10 @@ Grid-less MIDI editor with following goals:
 * Do not care (much) about measures. Primarily aimed at piano real time recordings without explicit tempo/bars.
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
   of MIDI recording as one can remove a time fragment from PCM recording. For some odd reason DAW authors insist on
-  handling time in MIDI editors differently from PCM sound recordings. In some editors this is doable but cumbersome at
-  best.
-* Playing/editing very long (at elast up to about 25K of playable events) files. Those files are usually recordings of
-  real performances (e.g. from a MIDI keyboard).
+  handling time in MIDI editors differently than in PCM sound recordings. In some editors this is doable but cumbersome
+  at best.
+* Playing/editing very long sequences of at least up to 30 thousand playable events. Those files are usually
+  recordings of real performances (e.g. from a MIDI keyboard).
 * Comfortable workflow with keyboard.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
@@ -67,6 +67,16 @@ ALSA wrapper dependency (used for MIDI input)
 
 As an VST synth plugin you can use `amsynth`, for example.
 I use Pianoteq, but that is a commercial product.
+
+# Implementation notes
+
+MIDI event types are supported on the "best effort" basis. Event types that are essential for the piano recordings
+editing are supported, other event types may be ignored or remain not editable.
+
+Unless stated otherwise
+
+* Integer-typed times are in microseconds.
+* Ranges assumed to be half-open, excluding ending (upper bound) value.
 
 ## TODO
 
@@ -150,13 +160,6 @@ Have to explore following options for the further development
 * Ideally, the editor should be a part of some open source DAW. I found one that is written in
   Rust, [MeadowlarkDAW](https://github.com/MeadowlarkDAW/Meadowlark). It is open source but not a collaborative
   project (as stated in its README).
-
-# Implementation notes
-
-Unless stated otherwise
-
-* Integer-typed times are in microseconds.
-* Ranges assumed to be half open, excluding end (upper bound) value.
 
 # Notes
 

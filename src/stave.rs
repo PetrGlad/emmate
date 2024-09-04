@@ -26,7 +26,8 @@ use crate::{ev, util, Pix};
 // Tone 60 is C3, tones start at C-2 (21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
-const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
+/// Reserve this ley lane for damper display.
+const PIANO_DAMPER_LANE: Pitch = PIANO_LOWEST_KEY - 1;
 pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
     PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 // Lines including controller values placeholder.
@@ -407,9 +408,8 @@ impl Stave {
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
     ) -> Option<util::Range<Time>> {
-        let mut last_damper_value: (Time, Level) = (0, 0);
         let x_range = painter.clip_rect().x_range();
-        // Selection hints remind of selected notes that are not currently visible.
+        // Selection hints that remind of selected notes that are not currently visible.
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         // Contains time range that includes all events affected by an edit action.
@@ -421,6 +421,8 @@ impl Stave {
                 false
             }
         };
+
+        // Paint notes
         for (pitch, lane) in self.lanes.notes.iter().enumerate() {
             if let Some(y) = key_ys.get(&(pitch as Pitch)) {
                 let mut pos: usize = 0;
@@ -457,48 +459,25 @@ impl Stave {
                 }
             }
         }
-        // FIXME Draw sustein lane here
-        // FIXME Draw bookmarks here
 
-        // FIXME (refactoring) Use TrackLanes instead of track here to get the sequence of events.
-        // for i in 0..track.items.len() {
-        //     let event = &track.items[i];
-        //     if is_in_transition(&event.id) {
-        //         continue;
-        //     }
-        //     match &event.ev {
-        //         ev::Type::Note(note) => {
-        //             if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
-        //                 // Alternatively, can return known rect from draw_track_note and check that.
-        //                 *note_hovered = Some(event.id);
-        //             }
-        //             if self.note_selection.contains(&event) {
-        //                 if x_range.max < self.x_from_time(event.at) {
-        //                     selection_hints_right.insert(note.pitch);
-        //                 } else {
-        //                     todo!("Match on/off pairs to draw note rectangles.");
-        //                     if self.x_from_time(event.at /* + note.duration */) < x_range.min {
-        //                         selection_hints_left.insert(note.pitch);
-        //                     }
-        //                 }
-        //             }
-        //             self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
-        //         }
-        //         ev::Type::Cc(cc) => self.draw_track_cc(
-        //             &key_ys,
-        //             half_tone_step,
-        //             &painter,
-        //             &mut last_damper_value,
-        //             &event,
-        //             &cc,
-        //         ),
-        //         ev::Type::Bookmark(_) => self.draw_cursor(
-        //             &painter,
-        //             self.x_from_time(event.at),
-        //             Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-        //         ),
-        //     }
-        // }
+        {
+            // Paint sustain lane
+            let mut last_damper = (0 as Time, 0 as Level);
+            for cc in &self.lanes.cc[MIDI_CC_SUSTAIN_ID as usize].events {
+                assert_eq!(cc.ev.controller_id, MIDI_CC_SUSTAIN_ID);
+                self.draw_track_cc(&key_ys, half_tone_step, &painter, &last_damper, &cc);
+                last_damper = (cc.at, cc.ev.value);
+            }
+        }
+
+        for bm in &self.lanes.bookmarks[0].events {
+            self.draw_cursor(
+                &painter,
+                self.x_from_time(bm.at),
+                Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+            );
+        }
+
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
                 // TODO (cleanup) Restrict actions to not change event types,
@@ -1006,7 +985,7 @@ impl Stave {
                     let time_range = (draw.time.start, draw.time.end);
                     let id_seq = &self.history.borrow().id_seq.clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                        if draw.pitch == PIANO_DAMPER_LINE {
+                        if draw.pitch == PIANO_DAMPER_LANE {
                             set_damper(id_seq, track, &time_range, !modifiers.alt)
                         } else {
                             add_new_note(id_seq, &time_range, &draw.pitch)
@@ -1230,7 +1209,7 @@ impl Stave {
         b: Option<(Time, Level)>,
     ) {
         assert!(a.is_some() || b.is_some());
-        if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+        if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
             let (t1, v1) = a.or(b).unwrap();
             let (t2, v2) = b.or(a).unwrap();
 
@@ -1253,23 +1232,20 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
-        last_damper_value: &mut (Time, Level),
-        event: &ev::Item,
-        cc: &ev::Cc,
+        last_cc: &(Time, Level),
+        cc: &LaneEvent<ev::Cc>,
     ) {
-        if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
-                // TODO (visuals, improvement) The time range here is not right: is shown up to the event,
-                //   should be from the event to the next one instead.
-                self.draw_note(
-                    painter,
-                    (last_damper_value.0, event.at),
-                    *y,
-                    *half_tone_step,
-                    note_color(&cc.value, false),
-                );
-                *last_damper_value = (event.at, cc.value);
-            }
+        if (cc.ev.controller_id != MIDI_CC_SUSTAIN_ID) {
+            return;
+        }
+        if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
+            self.draw_note(
+                painter,
+                (last_cc.0, cc.at),
+                *y,
+                *half_tone_step,
+                note_color(&cc.ev.value, false),
+            );
         }
     }
 
