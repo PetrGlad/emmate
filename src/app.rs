@@ -153,7 +153,7 @@ impl eframe::App for EmApp {
                             if zoom_factor != 1.0 {
                                 self.stave.zoom(zoom_factor, hover_pos.x);
                             }
-                            let scroll_delta = ui.input(|i| i.raw_scroll_delta);
+                            let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
                             if scroll_delta != Vec2::ZERO {
                                 self.stave.scroll_by(scroll_delta.x);
                             }

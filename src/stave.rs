@@ -149,6 +149,7 @@ struct NoteDraw {
 
 #[derive(Debug, Default)]
 pub struct NotesSelection {
+    /// Starting events of selectable item ranges.
     selected: HashSet<EventId>,
 }
 
@@ -235,7 +236,7 @@ pub struct Stave {
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
-const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
+const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.1, 0.4, 1.0);
 
 struct InnerResponse {
     response: egui::Response,
@@ -353,18 +354,13 @@ impl Stave {
                 );
                 let mut note_hovered = None;
                 let should_be_visible;
-                {
-                    let history = self.history.borrow();
-                    let track = history.track.read();
-                    should_be_visible = self.draw_track(
-                        &key_ys,
-                        &half_tone_step,
-                        &mut pitch_hovered,
-                        &mut time_hovered,
-                        &mut note_hovered,
-                        &painter,
-                    );
-                }
+                should_be_visible = self.draw_events(
+                    &key_ys,
+                    &half_tone_step,
+                    &pointer_pos,
+                    &mut note_hovered,
+                    &painter,
+                );
                 self.draw_cursor(
                     &painter,
                     self.x_from_time(self.cursor_position),
@@ -399,12 +395,11 @@ impl Stave {
             .inner
     }
 
-    fn draw_track(
+    fn draw_events(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<Time>,
+        pointer_pos: &Option<Pos2>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
     ) -> Option<util::Range<Time>> {
@@ -428,33 +423,33 @@ impl Stave {
                 let mut pos: usize = 0;
                 while pos < lane.events.len() {
                     let note = &lane.events[pos];
+                    assert_eq!(note.ev.pitch, pitch as Pitch);
                     if is_in_transition(&note.id) {
                         continue;
                     }
-                    assert_eq!(note.ev.pitch, pitch as Pitch);
-                    self.draw_track_note(
-                        y,
-                        half_tone_step,
-                        painter,
-                        note,
-                        lane.events.get(pos + 1),
-                    );
-
-                    // FIXME Implement
-                    // if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &pitch) {
-                    //     // Alternatively, can return known rect from draw_track_note and check that.
-                    //     *note_hovered = Some(event.id);
-                    // }
-                    // if self.note_selection.contains(&event) {
-                    //     if x_range.max < self.x_from_time(event.at) {
-                    //         selection_hints_right.insert(note.pitch);
-                    //     } else {
-                    //         todo!("Match on/off pairs to draw note rectangles.");
-                    //         if self.x_from_time(event.at /* + note.duration */) < x_range.min {
-                    //             selection_hints_left.insert(note.pitch);
-                    //         }
-                    //     }
-                    // }
+                    let end = lane.events.get(pos + 1);
+                    let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
+                    if let Some(pointer_pos) = pointer_pos {
+                        if let Some(r) = note_rect {
+                            if r.contains(*pointer_pos) {
+                                painter.rect_stroke(
+                                    r,
+                                    Rounding::ZERO,
+                                    Stroke::new(2.0, COLOR_HOVERED),
+                                );
+                                *note_hovered = Some(note.id);
+                            }
+                        }
+                    }
+                    if self.note_selection.contains(&note) {
+                        if x_range.max < self.x_from_time(note.at) {
+                            selection_hints_right.insert(note.ev.pitch);
+                        } else if let Some(ev) = end {
+                            if self.x_from_time(ev.at) < x_range.min {
+                                selection_hints_left.insert(ev.ev.pitch);
+                            }
+                        }
+                    }
                     pos += 2;
                 }
             }
