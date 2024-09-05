@@ -1,14 +1,16 @@
+use std::io;
+
+use clap::Command;
+use clap_complete::aot as ccomplete;
+use eframe::{egui, Theme};
+use midir::os::unix::VirtualOutput;
+use midir::MidiOutput;
+
 use crate::app::EmApp;
 use crate::config::Config;
 use crate::midi::SmfSource;
 use crate::project::Project;
 use crate::track_source::TrackSource;
-use clap::Command;
-use clap_complete::aot as ccomplete;
-use eframe::{egui, Theme, WindowBuilder, WindowBuilderHook};
-use midir::os::unix::VirtualOutput;
-use midir::MidiOutput;
-use std::io;
 
 mod app;
 mod audio_setup;

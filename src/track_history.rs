@@ -15,7 +15,7 @@ use crate::util;
 use crate::util::IdSeq;
 
 // Undo/redo history and snapshots.
-// #[derive(Debug)]
+// #[derive(Debug)] // Debug is not implemented for SyncCow
 pub struct TrackHistory {
     pub track: Arc<SyncCow<Track>>,
     pub id_seq: Arc<IdSeq>,

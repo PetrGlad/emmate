@@ -84,6 +84,10 @@ pub struct Item<Ev> {
     5. Simplify some time operations at expense of note selection which will be trickier.
        For example playback resuming may need to look up previous or next note. At the moment
        this may require to scan whole track to the beginning or to the end.
+
+FIXME (implementation, new-events) See how should we gracefully handle intersecting
+   notes or mismatched on/off events. Edits may produce intersections like [on, on, off, off],
+   input MIDI data may contain mismatched events.
 */
 
 #[derive(Debug, Default, Clone)]
@@ -130,13 +134,7 @@ impl Track {
     }
 
     pub fn commit(&mut self) {
-        assert!(is_ordered(&self.items));
-    }
-
-    pub fn insert_event(&mut self, ev: ev::Item) {
-        let idx = self.items.partition_point(|x| x < &ev);
-        self.items.insert(idx, ev);
-        self.commit();
+        self.items.sort();
     }
 
     pub fn max_time(&self) -> Option<Time> {
