@@ -84,7 +84,7 @@ impl TrackHistory {
         };
         self.push(log_entry);
         // TODO also store a new snapshot here if necessary
-        //   (avoid long timeouts and long diff-only runs between snapshots).
+        //   (to avoid long timeouts and long diff-only runs between snapshots).
         self.discard_tail(self.max_version);
     }
 

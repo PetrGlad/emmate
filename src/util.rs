@@ -30,6 +30,20 @@ pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
     true
 }
 
+#[allow(dead_code)]
+pub fn is_ordered_by_key<T, K: Ord, F>(seq: &Vec<T>, mut f: F) -> bool
+where
+    F: FnMut(&T) -> K,
+    K: Ord,
+{
+    for (a, b) in seq.iter().zip(seq.iter().skip(1)) {
+        if f(a) > f(b) {
+            return false;
+        }
+    }
+    true
+}
+
 #[derive(Debug, Default)]
 pub struct IdSeq(atomic::AtomicU64);
 

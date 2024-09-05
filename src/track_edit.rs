@@ -38,12 +38,12 @@ pub enum EditCommandId {
 */
 
 /**
- I  want to track the changed events for each command to have visual feedback on undo/redo and
- to minimize amount of data stored in the edit history. Change list allows to have this in
+ I want to track the changed events for each command to have visual feedback on an undo/redo and
+ to minimize the amount of data stored in the edit history. Change list allows to have this in
  most cases. However, there are commands that may generate very large changesets and can be
  repeated by holding the hotkey combination, so in this struct we have a special case
  supporting custom logic for these. This complicates the implementation a lot, but I do
- not see a better solution at the moment.
+ not see a better solution now.
 
  Commands that do not usually generate large patches can use generic Changeset,
  this is the default. Commands that cannot be stored efficiently should use custom diffs.
@@ -56,7 +56,8 @@ pub enum CommandDiff {
     TailShift { at: Time, delta: Time },
 }
 
-// TODO (refactoring) make this a struct in order to have named fields.
+// TODO (refactoring) make this a struct in order to have named fields?
+/// A serializable and reasonably compact diff that an edit command produces.
 pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
 
 pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
@@ -173,28 +174,6 @@ fn edit_selected(
     }
     vec![CommandDiff::ChangeList { patch }]
 }
-
-// TODO Either update it to make it useful for note editing or remove.
-// fn edit_selected_notes<'a, Action: Fn(&ev::Tone) -> Option<ev::Tone>>(
-//     track: &Track,
-//     selection: &HashSet<EventId>,
-//     action: &'a Action,
-// ) -> Vec<CommandDiff> {
-//     todo!();
-//     // Let action to only process the note part.
-//     let event_action = move |ev: &ev::Item| {
-//         let mut ev2 = ev.clone();
-//         if let ev::Type::Audio(ev::Audio::Note(t)) = &mut ev2.ev {
-//             // if let Some(n) = action(n) {
-//             //     let mut ev2 = ev.clone();
-//             //     ev2.event = ev::Type::Note(n);
-//             //     return Some(EventAction::Update(ev.clone(), ev2));
-//             // }
-//         }
-//         None
-//     };
-//     edit_selected(track, selection, &event_action)
-// }
 
 pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|ev| {

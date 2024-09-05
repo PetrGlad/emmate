@@ -23,14 +23,14 @@ use crate::track_edit::{
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{ev, util, Pix};
 
-// Tone 60 is C3, tones start at C-2 (21).
+// Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 /// Reserve this ley lane for damper display.
 const PIANO_DAMPER_LANE: Pitch = PIANO_LOWEST_KEY - 1;
 pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
     PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
-// Lines including controller values placeholder.
+/// All lanes including CC placeholder.
 const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
@@ -44,7 +44,7 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
     (lines, step)
 }
 
-/// Note's pitch is determined by the containing lane.
+/// Note’s pitch is determined by the containing lane.
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 enum LaneNote {
     On(Velocity),
@@ -155,6 +155,7 @@ pub struct NotesSelection {
 
 impl NotesSelection {
     fn toggle(&mut self, id: &EventId) {
+        // FIXME select/deselect related events OR update edit actions to also affect related events.
         if self.selected.contains(&id) {
             self.selected.remove(&id);
         } else {
@@ -242,7 +243,7 @@ struct InnerResponse {
     response: egui::Response,
     pitch_hovered: Option<Pitch>,
     time_hovered: Option<Time>,
-    note_hovered: Option<EventId>,
+    note_hovered: Vec<EventId>,
     modifiers: Modifiers,
 }
 
@@ -352,9 +353,8 @@ impl Stave {
                     &Stave::NOTHING_ZONE,
                     &Color32::from_black_alpha(15),
                 );
-                let mut note_hovered = None;
-                let should_be_visible;
-                should_be_visible = self.draw_events(
+                let mut note_hovered = vec![];
+                let should_be_visible = self.draw_events(
                     &key_ys,
                     &half_tone_step,
                     &pointer_pos,
@@ -400,7 +400,7 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         pointer_pos: &Option<Pos2>,
-        note_hovered: &mut Option<EventId>,
+        note_hovered: &mut Vec<EventId>,
         painter: &Painter,
     ) -> Option<util::Range<Time>> {
         let x_range = painter.clip_rect().x_range();
@@ -420,14 +420,16 @@ impl Stave {
         // Paint notes
         for (pitch, lane) in self.lanes.notes.iter().enumerate() {
             if let Some(y) = key_ys.get(&(pitch as Pitch)) {
-                let mut pos: usize = 0;
-                while pos < lane.events.len() {
-                    let note = &lane.events[pos];
+                let mut iev = lane.events.iter();
+                while let Some(note) = iev.next() {
                     assert_eq!(note.ev.pitch, pitch as Pitch);
+                    dbg!(note);
+                    debug_assert!(note.ev.on);
                     if is_in_transition(&note.id) {
                         continue;
                     }
-                    let end = lane.events.get(pos + 1);
+                    let end = iev.next();
+                    debug_assert!(end.map(|x| !x.ev.on).unwrap_or(true));
                     let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
                     if let Some(pointer_pos) = pointer_pos {
                         if let Some(r) = note_rect {
@@ -437,7 +439,10 @@ impl Stave {
                                     Rounding::ZERO,
                                     Stroke::new(2.0, COLOR_HOVERED),
                                 );
-                                *note_hovered = Some(note.id);
+                                note_hovered.push(note.id);
+                                if let Some(end) = end {
+                                    note_hovered.push(end.id);
+                                }
                             }
                         }
                     }
@@ -450,7 +455,6 @@ impl Stave {
                             }
                         }
                     }
-                    pos += 2;
                 }
             }
         }
@@ -473,43 +477,46 @@ impl Stave {
             );
         }
 
-        if let Some(trans) = &self.transition {
-            for (_ev_id, action) in &trans.changeset.changes {
-                // TODO (cleanup) Restrict actions to not change event types,
-                //      this should reduce number of cases to consider.
+        if false {
+            // FIXME (implementation) Update transition animations.
+            if let Some(trans) = &self.transition {
+                for (_ev_id, action) in &trans.changeset.changes {
+                    // TODO (cleanup) Explicitly restrict actions to not change event types,
+                    //      this should reduce number of cases to consider here.
 
-                let note_a = Stave::note_animation_params(action.before());
-                let note_b = Stave::note_animation_params(action.after());
-                if note_a.is_some() || note_b.is_some() {
-                    self.draw_note_transition(
-                        key_ys,
-                        half_tone_step,
-                        painter,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        false,
-                        note_a,
-                        note_b,
-                    );
-                }
+                    let note_a = Stave::note_animation_params(action.before());
+                    let note_b = Stave::note_animation_params(action.after());
+                    if note_a.is_some() || note_b.is_some() {
+                        self.draw_note_transition(
+                            key_ys,
+                            half_tone_step,
+                            painter,
+                            &mut should_be_visible,
+                            trans.coeff,
+                            false,
+                            note_a,
+                            note_b,
+                        );
+                    }
 
-                let cc_a = Stave::cc_animation_params(action.before());
-                let cc_b = Stave::cc_animation_params(action.after());
-                if cc_a.is_some() || cc_b.is_some() {
-                    self.draw_cc_transition(
-                        key_ys,
-                        half_tone_step,
-                        painter,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        cc_a,
-                        cc_b,
-                    );
-                }
+                    let cc_a = Stave::cc_animation_params(action.before());
+                    let cc_b = Stave::cc_animation_params(action.after());
+                    if cc_a.is_some() || cc_b.is_some() {
+                        self.draw_cc_transition(
+                            key_ys,
+                            half_tone_step,
+                            painter,
+                            &mut should_be_visible,
+                            trans.coeff,
+                            cc_a,
+                            cc_b,
+                        );
+                    }
 
-                if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
-                    // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                    print!("WARN No animation params (a bookmark?).");
+                    if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
+                        // TODO (implementation, ux) Handle bookmarks (can be either animated somehow or just ignored).
+                        print!("WARN No animation params (a bookmark?).");
+                    }
                 }
             }
         }
@@ -541,12 +548,12 @@ impl Stave {
         }
         let stave_response = self.view(ui);
 
-        if let Some(note_id) = stave_response.note_hovered {
-            if stave_response.response.clicked() {
-                if !ui.input(|i| i.modifiers.ctrl) {
-                    self.note_selection.clear()
-                }
-                self.note_selection.toggle(&note_id);
+        if stave_response.response.clicked() {
+            if !ui.input(|i| i.modifiers.ctrl) {
+                self.note_selection.clear()
+            }
+            for event_id in stave_response.note_hovered {
+                self.note_selection.toggle(&event_id);
             }
         }
 
@@ -567,25 +574,6 @@ impl Stave {
         StaveResponse {
             ui_response: stave_response.response,
             new_cursor_position,
-        }
-    }
-
-    fn event_hovered(
-        pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<Time>,
-        event: &ev::Item,
-        pitch: &Pitch,
-    ) -> bool {
-        if let Some(t) = &time_hovered {
-            if let Some(p) = pitch_hovered {
-                // FIXME Update event selection
-                // event.is_active(*t) && p == pitch
-                false
-            } else {
-                false
-            }
-        } else {
-            false
         }
     }
 
@@ -915,8 +903,9 @@ impl Stave {
             .history
             .borrow_mut()
             .update_track(|track| action(&self, track));
-        // TODO (refactoring) No strict need to access the track through history, but still need to keep
-        //  all the parts updated. Are alternatives (using channel pub/sub, maybe) better?
+        // TODO (refactoring) No strict need to access the track through history anymore,
+        // but we still need to keep  all the parts updated. Are the alternatives
+        // (using channel pub/sub, maybe) better?
         self.lanes
             .update(self.history.borrow().track.read().as_ref());
         self.transition = Self::animate_edit(
@@ -1006,6 +995,7 @@ impl Stave {
         );
     }
 
+    /// Extract a number of scalar values to interpolate from a note event.
     fn note_animation_params(ev: Option<&ev::Item>) -> Option<((Time, Time), Pitch, Level)> {
         ev.and_then(|ev| {
             if let ev::Type::Note(n) = &ev.ev {
@@ -1015,48 +1005,6 @@ impl Stave {
                 None // CC is animated separately.
             }
         })
-    }
-
-    fn lane_next(&self, ev: &ev::Item) -> Option<ev::Item> {
-        dbg!("[ev]", ev); // DEBUG
-        todo!();
-        // let lane_items = match ev.ev {
-        //     Type::Note(n) => &self.lanes.notes[n.pitch as usize],
-        //     Type::Cc(cc) => &self.lanes.cc[cc.controller_id as usize],
-        //     Type::Bookmark(bm) => &self.lanes.bookmarks.first(),
-        // }
-        // let mut idx = lane_items.partition_point(|x| x.at <= ev.at);
-        // while let Some(x) = lane_items.get(idx) {
-        //     if x.at > ev.at
-        //         && match &x.ev {
-        //             ev::Type::Note(ta) => {
-        //                 if !ta.on {
-        //                     if let ev::Type::Note(tb) = &ev.ev {
-        //                         ta.pitch == tb.pitch
-        //                     } else {
-        //                         false
-        //                     }
-        //                 } else {
-        //                     false
-        //                 }
-        //             }
-        //             ev::Type::Cc(va) => {
-        //                 if let ev::Type::Cc(vb) = &ev.ev {
-        //                     va.controller_id == vb.controller_id
-        //                 } else {
-        //                     false
-        //                 }
-        //             }
-        //             ev::Type::Bookmark(_) => matches!(ev.ev, ev::Type::Bookmark(_)),
-        //         }
-        //     {
-        //         dbg!("[pair]", x); // DEBUG
-        //         return Some(x.clone());
-        //     }
-        //     idx += 1;
-        // }
-        // eprintln!("[no end pair found]"); // DEBUG
-        None
     }
 
     fn draw_track_note(

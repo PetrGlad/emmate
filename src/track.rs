@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::ev::{ControllerId, Level, Pitch, Velocity};
-use crate::util::{is_ordered, IdSeq};
+use crate::util::{is_ordered, is_ordered_by_key, IdSeq};
 use crate::{ev, midi};
 
 // Should be equal to u7::max_value().as_int();

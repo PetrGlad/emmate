@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 // A sketch of new track events.
 use crate::common::Time;
 use crate::track::EventId;
@@ -36,12 +37,31 @@ pub enum Type {
     Bookmark(Bookmark),
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Serialize, Deserialize)]
+/*
+ TODO (refactoring) I would like to avoid explicit ids here as events can be uniquely identified by its position
+   in the track (requires linear comparison ordering for ambiguous timestamps, though).
+   Currently, the patch logic depends on it so to speed-up refactoring keeping id here for now.
+*/
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Item {
-    /// I would like to avoid explicit ids here as events can be uniquely identified by its position
-    /// in the track (requires linear comparison ordering for ambiguous timestamps, though).
-    /// Currently, the patch logic depends on it so to speed-up refactoring keeping id here for now.
     pub id: EventId,
     pub at: Time,
     pub ev: Type,
+}
+
+impl Ord for Item {
+    /**
+        Ordering events by track time, while ensuring sort order always produces the same
+        result every time. The time ordering is important for playback and editing while unique
+        sort order ensures we do not have any surprises when changing or serializing the track.
+    */
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.at, &self.ev, self.id).cmp(&(other.at, &other.ev, other.id))
+    }
+}
+
+impl PartialOrd for Item {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
