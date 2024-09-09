@@ -110,7 +110,7 @@ pub fn main() {
 }
 
 fn build_cli() -> Command {
-    let mut cli = clap::command!()
+    clap::command!()
         // let arg_matches = clap::Command::new("emmate")
         //     .version(VERSION)
         //     .author("Petr <petrglad@gmail.com>")
@@ -129,6 +129,5 @@ fn build_cli() -> Command {
         .arg(
             clap::arg!(--"shell-completion-script" <SHELL_NAME>)
                 .value_parser(clap::value_parser!(ccomplete::Shell)),
-        );
-    cli
+        )
 }
