@@ -74,7 +74,7 @@ pub fn store<T: Serialize>(x: &T, file_path: &PathBuf) {
     x.serialize(
         // TODO If using compact representation (without field names), add some format version info
         //  in the data and/or in file names.
-        //  Consider using protobuf.
+        //  Consider using protobuf or libSQL.
         &mut rmp_serde::Serializer::new(&mut binary), /*.with_struct_map()*/
     )
     .expect("serialize");

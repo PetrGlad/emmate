@@ -159,6 +159,8 @@ impl TrackHistory {
        `changes` parameter may be used to accumulate a series of patches for persistence.
     */
     pub fn undo(&mut self, changes: &mut EventActionsList) -> bool {
+        // FIXME (new-events) Notify stave of changes in history (it needs to refresh cached data now).
+        //   Stave may listen to some notification channel or look at the track version.
         let prev_version_id = self.version - 1;
         if TrackHistory::is_valid_version_id(prev_version_id) {
             assert!(self.go_to_version(prev_version_id, changes));
