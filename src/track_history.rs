@@ -19,7 +19,7 @@ use crate::util::IdSeq;
 pub struct TrackHistory {
     pub track: Arc<SyncCow<Track>>,
     pub id_seq: Arc<IdSeq>,
-    pub version: VersionId,
+    version: VersionId,
     pub max_version: VersionId, // May be higher than self.version after an undo.
     pub directory: PathBuf,
 }
@@ -40,8 +40,8 @@ impl Version {
 }
 
 impl TrackHistory {
-    const SNAPSHOT_NAME_EXT: &'static str = "snapshot";
-    const DIFF_NAME_EXT: &'static str = "changeset";
+    const SNAPSHOT_NAME_EXT: &'static str = "ss";
+    const DIFF_NAME_EXT: &'static str = "d";
 
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read();

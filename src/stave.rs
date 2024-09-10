@@ -12,7 +12,7 @@ use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventActionsList};
-use crate::common::Time;
+use crate::common::{Time, VersionId};
 use crate::ev::{ControllerId, Level, Pitch, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
@@ -155,7 +155,6 @@ pub struct NotesSelection {
 
 impl NotesSelection {
     fn toggle(&mut self, id: &EventId) {
-        // FIXME select/deselect related events OR update edit actions to also affect related events.
         if self.selected.contains(&id) {
             self.selected.remove(&id);
         } else {
@@ -219,6 +218,8 @@ pub struct Stave {
     pub history: RefCell<TrackHistory>,
     /// View model of the track.
     lanes: TrackLanes,
+    /// Used to invalidate cached data
+    track_version: VersionId,
 
     /// Starting moment of visible time range.
     pub time_left: Time,
@@ -263,6 +264,7 @@ impl Stave {
         Stave {
             history,
             lanes,
+            track_version: VersionId::MIN,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
@@ -325,7 +327,18 @@ impl Stave {
 
     const NOTHING_ZONE: Range<Time> = Time::MIN..0;
 
+    /// Update cached data.
+    fn update(&mut self) {
+        let history = self.history.borrow();
+        let v = history.version();
+        if self.track_version != v {
+            history.with_track(|t| self.lanes.update(t));
+            self.track_version = v
+        }
+    }
+
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
+        self.update();
         Frame::none()
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
