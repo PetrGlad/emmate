@@ -17,6 +17,17 @@ pub struct Tone {
     pub on: bool,
     pub pitch: Pitch,
     pub velocity: Velocity,
+    /**
+     Link to respective note end event, only for "on" events.
+     This is only necessary when note edits make them intersecting.
+     It is possible to apply some automatic resolution like cutting off the intersecting parts,
+     but I'd prefer to let user decide what to do there.
+     TODO (refactoring?) Ideally "on" and "off" should be separate cases, but then the pattern
+        matching looks cumbersome.
+     TODO (usability) When painting clearly mark intersecting note parts
+        (with red or orange, maybe).
+    */
+    pub end: Option<EventId>,
 }
 
 /// Continuous Controller (CC) value set.

@@ -256,8 +256,19 @@ pub fn accent_selected_notes(
 pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Option<AppliedCommand> {
     let mut diff = vec![];
     assert!(range.1 - range.0 > 0);
+    let off_id = id_seq.next();
     diff.push(CommandDiff::ChangeList {
         patch: vec![
+            EventAction::Insert(ev::Item {
+                id: off_id,
+                at: range.1,
+                ev: ev::Type::Note(ev::Tone {
+                    on: false,
+                    pitch: *pitch,
+                    velocity: MAX_LEVEL / 2,
+                    end: None,
+                }),
+            }),
             EventAction::Insert(ev::Item {
                 id: id_seq.next(),
                 at: range.0,
@@ -265,15 +276,7 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
                     on: true,
                     pitch: *pitch,
                     velocity: MAX_LEVEL / 2,
-                }),
-            }),
-            EventAction::Insert(ev::Item {
-                id: id_seq.next(),
-                at: range.1,
-                ev: ev::Type::Note(ev::Tone {
-                    on: false,
-                    pitch: *pitch,
-                    velocity: MAX_LEVEL / 2,
+                    end: Some(off_id),
                 }),
             }),
         ],

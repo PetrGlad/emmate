@@ -1,9 +1,12 @@
 [package]
 name = "emmate"
-version = "0.0.4"
+version = "0.2.0"
 edition = "2021"
+authors = ["Petr <petrglad@gmail.com>"]
+description = "A MIDI editor."
+homepage = "https://github.com/PetrGlad/emmate"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# See also https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.dev]
 panic = 'abort'
@@ -55,6 +58,7 @@ flate2 = "1.0.33"
 sync_cow = "0.1.1"
 strum_macros = "0.26.4"
 clap_complete = "4.5.24"
+indoc = "2"
 # rhai = "1.19.0"
 
 # These may be useful

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::ev::{ControllerId, Level, Pitch, Velocity};
-use crate::util::{is_ordered, is_ordered_by_key, IdSeq};
+use crate::util::IdSeq;
 use crate::{ev, midi};
 
 // Should be equal to u7::max_value().as_int();
@@ -35,23 +35,6 @@ pub struct Item<Ev> {
     pub at: Time, // Since the track's beginning.
     pub event: Ev,
 }
-
-// impl<Ev> Item<Ev> {
-// }
-
-// impl PartialOrd for ev::Item<Ev> {
-//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-//         // TODO Maybe consider complete comparison (including actual events)
-//         //      to avoid ambiguities in sorting.
-//         Some(self.at.cmp(&other.at))
-//     }
-// }
-
-// impl Ord for ev::Item {
-//     fn cmp(&self, other: &Self) -> Ordering {
-//         self.partial_cmp(&other).unwrap()
-//     }
-// }
 
 /*
  TODO (refactoring, a big one, ???) Use MIDI-like events directly in the track.
@@ -161,6 +144,7 @@ pub fn from_midi_events(
                             on: true,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
+                            end: None,
                         }),
                     });
                 }
@@ -172,6 +156,7 @@ pub fn from_midi_events(
                             on: false,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
+                            end: None,
                         }),
                     });
                 }
@@ -194,7 +179,29 @@ pub fn from_midi_events(
 pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<ev::Item> {
     let data = std::fs::read(&file_path).unwrap();
     let events = midi::load_smf(&data);
-    from_midi_events(id_seq, events.0, events.1 as Time)
+    let mut items = from_midi_events(id_seq, events.0, events.1 as Time);
+    link_note_ends(&mut items);
+    items
+}
+
+fn link_note_ends(items: &mut Vec<ev::Item>) {
+    let mut ends: HashMap<Pitch, EventId> = HashMap::new();
+    for ev in items.iter_mut().rev() {
+        match &ev.ev {
+            ev::Type::Note(n) if n.on => {
+                // Limit scope of the preceding note in case its end is not matched.
+                let end_id = ends.insert(n.pitch, ev.id.clone());
+                // Just in case, panicking here is not strictly necessary.
+                debug_assert!(end_id.is_some());
+                ev.ev = ev::Type::Note(ev::Tone { end: end_id, ..*n });
+            }
+            ev::Type::Note(n) if !n.on => {
+                assert!(n.end.is_none());
+                ends.insert(n.pitch, ev.id);
+            }
+            _ => {}
+        }
+    }
 }
 
 pub fn export_smf(events: &Vec<ev::Item>, file_path: &PathBuf) {

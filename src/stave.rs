@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
-use crate::ev::{ControllerId, Level, Pitch, Tone, Velocity};
+use crate::ev::{ControllerId, Level, Pitch, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
@@ -79,7 +79,7 @@ impl<Ev> Lane<Ev> {
 
 pub type LaneIndex = i8;
 
-// TODO Is this helpful or just keep Vecs?
+// TODO Is this helpful or just keep Vecs instead?
 #[derive(Debug, Default, Clone)]
 pub struct Lanes<Ev>(Vec<Lane<Ev>>);
 
@@ -163,7 +163,7 @@ impl NotesSelection {
         }
     }
 
-    fn contains(&self, ev: &LaneEvent<Tone>) -> bool {
+    fn contains(&self, ev: &LaneEvent<ev::Tone>) -> bool {
         self.selected.contains(&ev.id)
     }
 
@@ -230,7 +230,7 @@ pub struct Stave {
     pub cursor_position: Time,
     pub time_selection: Option<Range<Time>>,
     /// Currently drawn note.
-    pub note_draw: Option<NoteDraw>,
+    note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
     /// Change animation parameters.
     pub transition: Option<EditTransition>,
@@ -418,18 +418,23 @@ impl Stave {
         };
 
         // Paint notes
+        // The notes may intersect in some cases.
         for (pitch, lane) in self.lanes.notes.iter().enumerate() {
             if let Some(y) = key_ys.get(&(pitch as Pitch)) {
                 let mut iev = lane.events.iter();
                 while let Some(note) = iev.next() {
                     assert_eq!(note.ev.pitch, pitch as Pitch);
-                    dbg!(note);
-                    debug_assert!(note.ev.on);
-                    if is_in_transition(&note.id) {
+                    /////////// dbg!(note);
+                    if !note.ev.on || is_in_transition(&note.id) {
                         continue;
                     }
-                    let end = iev.next();
-                    debug_assert!(end.map(|x| !x.ev.on).unwrap_or(true));
+                    debug_assert!(note.ev.end.is_some());
+                    // O(N^2) but end should not be too far away, in most cases it is just next.
+                    let end = note
+                        .ev
+                        .end
+                        .and_then(|end_id| iev.clone().find(|x| x.id == end_id));
+                    ///// debug_assert!(end.map(|x| !x.ev.on).unwrap_or(true));
                     let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
                     if let Some(pointer_pos) = pointer_pos {
                         if let Some(r) = note_rect {
@@ -1178,7 +1183,7 @@ impl Stave {
         last_cc: &(Time, Level),
         cc: &LaneEvent<ev::Cc>,
     ) {
-        if (cc.ev.controller_id != MIDI_CC_SUSTAIN_ID) {
+        if cc.ev.controller_id != MIDI_CC_SUSTAIN_ID {
             return;
         }
         if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {

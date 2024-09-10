@@ -3,6 +3,7 @@ use std::io;
 use clap::Command;
 use clap_complete::aot as ccomplete;
 use eframe::{egui, Theme};
+use indoc::indoc;
 use midir::os::unix::VirtualOutput;
 use midir::MidiOutput;
 
@@ -130,4 +131,14 @@ fn build_cli() -> Command {
             clap::arg!(--"shell-completion-script" <SHELL_NAME>)
                 .value_parser(clap::value_parser!(ccomplete::Shell)),
         )
+        .help_template(indoc! {
+        "{name}{tab}{about}
+            Version{tab}{version}
+            Authors{tab}{author}
+
+            {usage-heading}
+            {tab}{usage}
+
+            {all-args}
+            "})
 }

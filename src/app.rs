@@ -103,8 +103,6 @@ impl eframe::App for EmApp {
                 }
             }
         }
-
-        ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -149,9 +147,9 @@ impl eframe::App for EmApp {
                     strip.cell(|ui| {
                         let response = self.stave.show(ui);
                         if let Some(hover_pos) = response.ui_response.hover_pos() {
-                            let zoom_factor = ui.input(|i| i.zoom_delta());
-                            if zoom_factor != 1.0 {
-                                self.stave.zoom(zoom_factor, hover_pos.x);
+                            let dz = ui.input(|i| i.zoom_delta());
+                            if dz != 1.0 {
+                                self.stave.zoom(dz, hover_pos.x);
                             }
                             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
                             if scroll_delta != Vec2::ZERO {

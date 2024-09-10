@@ -5,7 +5,6 @@ use sync_cow::SyncCow;
 
 use crate::common::Time;
 use crate::engine::{EngineEvent, EventSource};
-use crate::midi::{controller_set, note_off, note_on};
 use crate::track::Track;
 use crate::{engine, ev};
 
@@ -76,7 +75,7 @@ impl EventSource for TrackSource {
         self.running_at = *at;
     }
 
-    fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
+    fn next(&mut self, _at: &Time) -> Vec<EngineEvent> {
         // FIXME Remove event duration handling from the audio engine.
 
         return vec![];
