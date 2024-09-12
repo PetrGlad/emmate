@@ -1,8 +1,3 @@
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
-use std::ops::Range;
-use std::path::PathBuf;
-
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Rounding, Sense, Stroke, Ui,
@@ -10,10 +5,15 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
+use std::ops::Range;
+use std::path::PathBuf;
+use std::slice::Iter;
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::{Time, VersionId};
-use crate::ev::{ControllerId, Level, Pitch, Velocity};
+use crate::ev::{ControllerId, Level, Pitch, Tone, Velocity};
 use crate::track::{export_smf, EventId, Track, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
@@ -255,8 +255,8 @@ pub struct StaveResponse {
 
 impl Stave {
     /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
-    /// World record playing piano seems to be 130 hours so some might find this limiting.
-    // I would like to use Duration but that is not 'const' yet.
+    /// World record playing piano seems to be 130 hours, so some might find this limiting.
+    // I would like to use Duration but that is not "const compatible" yet.
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
     pub fn new(history: RefCell<TrackHistory>) -> Stave {
@@ -437,17 +437,12 @@ impl Stave {
                 let mut iev = lane.events.iter();
                 while let Some(note) = iev.next() {
                     assert_eq!(note.ev.pitch, pitch as Pitch);
-                    /////////// dbg!(note);
                     if !note.ev.on || is_in_transition(&note.id) {
                         continue;
                     }
                     debug_assert!(note.ev.end.is_some());
                     // O(N^2) but end should not be too far away, in most cases it is just next.
-                    let end = note
-                        .ev
-                        .end
-                        .and_then(|end_id| iev.clone().find(|x| x.id == end_id));
-                    ///// debug_assert!(end.map(|x| !x.ev.on).unwrap_or(true));
+                    let end = Self::lookup_note_end(&iev, note);
                     let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
                     if let Some(pointer_pos) = pointer_pos {
                         if let Some(r) = note_rect {
@@ -495,46 +490,47 @@ impl Stave {
             );
         }
 
-        if false {
-            // FIXME (implementation) Update transition animations.
-            if let Some(trans) = &self.transition {
-                for (_ev_id, action) in &trans.changeset.changes {
-                    // TODO (cleanup) Explicitly restrict actions to not change event types,
-                    //      this should reduce number of cases to consider here.
+        // FIXME (implementation) Update transition animations.
+        // TODO (cleanup?) Separate CC and note animation handling?
+        if let Some(trans) = &self.transition {
+            for (_ev_id, action) in &trans.changeset.changes {
+                // TODO (cleanup) Explicitly restrict actions to not change event types,
+                //      this should reduce number of cases to consider here.
 
-                    let note_a = Stave::note_animation_params(action.before());
-                    let note_b = Stave::note_animation_params(action.after());
-                    if note_a.is_some() || note_b.is_some() {
-                        self.draw_note_transition(
-                            key_ys,
-                            half_tone_step,
-                            painter,
-                            &mut should_be_visible,
-                            trans.coeff,
-                            false,
-                            note_a,
-                            note_b,
-                        );
-                    }
+                ///////////// FIXME let end = Self::lookup_end(&iev, note);
 
-                    let cc_a = Stave::cc_animation_params(action.before());
-                    let cc_b = Stave::cc_animation_params(action.after());
-                    if cc_a.is_some() || cc_b.is_some() {
-                        self.draw_cc_transition(
-                            key_ys,
-                            half_tone_step,
-                            painter,
-                            &mut should_be_visible,
-                            trans.coeff,
-                            cc_a,
-                            cc_b,
-                        );
-                    }
+                let note_a = Stave::note_animation_params(action.before());
+                let note_b = Stave::note_animation_params(action.after());
+                if note_a.is_some() || note_b.is_some() {
+                    self.draw_note_transition(
+                        key_ys,
+                        half_tone_step,
+                        painter,
+                        &mut should_be_visible,
+                        trans.coeff,
+                        false,
+                        note_a,
+                        note_b,
+                    );
+                }
 
-                    if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
-                        // TODO (implementation, ux) Handle bookmarks (can be either animated somehow or just ignored).
-                        print!("WARN No animation params (a bookmark?).");
-                    }
+                let cc_a = Stave::cc_animation_params(action.before());
+                let cc_b = Stave::cc_animation_params(action.after());
+                if cc_a.is_some() || cc_b.is_some() {
+                    self.draw_cc_transition(
+                        key_ys,
+                        half_tone_step,
+                        painter,
+                        &mut should_be_visible,
+                        trans.coeff,
+                        cc_a,
+                        cc_b,
+                    );
+                }
+
+                if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
+                    // TODO (implementation, ux) Handle bookmarks (can be either animated somehow or just ignored).
+                    print!("WARN No animation params (a bookmark?).");
                 }
             }
         }
@@ -553,6 +549,14 @@ impl Stave {
             &selection_hints_right,
         );
         should_be_visible
+    }
+
+    fn lookup_note_end<'a>(
+        iev: &'a Iter<LaneEvent<Tone>>,
+        note: &LaneEvent<Tone>,
+    ) -> Option<&'a LaneEvent<Tone>> {
+        let mut i = iev.clone();
+        note.ev.end.and_then(|end_id| i.find(|x| x.id == end_id))
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
@@ -1013,11 +1017,11 @@ impl Stave {
         );
     }
 
-    /// Extract a number of scalar values to interpolate from a note event.
+    /// Extract from a note event a tuple of scalar values to interpolate.
     fn note_animation_params(ev: Option<&ev::Item>) -> Option<((Time, Time), Pitch, Level)> {
         ev.and_then(|ev| {
             if let ev::Type::Note(n) = &ev.ev {
-                todo!("Use on/off event pairs for duration.");
+                todo!("Use on/off event pairs for duration."); ///////////// FIXME
                 Some(((ev.at, ev.at /*+ n.duration*/), n.pitch, n.velocity))
             } else {
                 None // CC is animated separately.

@@ -121,7 +121,6 @@ impl EventSource for TrackSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::track;
 
     #[test]
     fn empty_track() {
@@ -144,7 +143,7 @@ mod tests {
                 on: false,
                 pitch: 55,
                 velocity: 55,
-                // duration: 12, // FIXME Review
+                end: None,
             }),
         });
         let track = Arc::new(SyncCow::new(track));

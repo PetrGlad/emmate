@@ -31,12 +31,6 @@ pub enum EditCommandId {
     ClearBookmark,
 }
 
-/*
-   FIXME Range edits like application of CC range or adding/shifting a note should handle conflicts,
-    the simplest wouild be to delete events inside. In case that is not enough (e.g. with notes)
-    ensure notes do not intersect or have reasonable on-off boundaries.
-*/
-
 /**
  I want to track the changed events for each command to have visual feedback on an undo/redo and
  to minimize the amount of data stored in the edit history. Change list allows to have this in
@@ -427,7 +421,7 @@ mod tests {
                 on: true,
                 pitch: 10,
                 velocity: 20,
-                // duration: 30,
+                end: None,
             }),
         });
         events.push(ev::Item {

@@ -88,7 +88,7 @@ impl TrackHistory {
         self.discard_tail(self.max_version);
     }
 
-    /// Save current version into history.
+    /// Save the current version into history.
     pub fn push(&mut self, log_entry: HistoryLogEntry) {
         util::store(&log_entry, &self.diff_path(log_entry.version));
         self.set_version(log_entry.version);
@@ -159,8 +159,6 @@ impl TrackHistory {
        `changes` parameter may be used to accumulate a series of patches for persistence.
     */
     pub fn undo(&mut self, changes: &mut EventActionsList) -> bool {
-        // FIXME (new-events) Notify stave of changes in history (it needs to refresh cached data now).
-        //   Stave may listen to some notification channel or look at the track version.
         let prev_version_id = self.version - 1;
         if TrackHistory::is_valid_version_id(prev_version_id) {
             assert!(self.go_to_version(prev_version_id, changes));
@@ -387,11 +385,11 @@ mod tests {
         assert!(TrackHistory::parse_snapshot_name(&PathBuf::from("asdfsadf")).is_none());
         assert_eq!(
             Some(5),
-            TrackHistory::parse_snapshot_name(&PathBuf::from("5.snapshot"))
+            TrackHistory::parse_snapshot_name(&PathBuf::from("5.ss"))
         );
         assert_eq!(
             Some(145),
-            TrackHistory::parse_snapshot_name(&PathBuf::from("145.snapshot"))
+            TrackHistory::parse_snapshot_name(&PathBuf::from("145.ss"))
         );
     }
 

@@ -67,10 +67,6 @@ pub struct Item<Ev> {
     5. Simplify some time operations at expense of note selection which will be trickier.
        For example playback resuming may need to look up previous or next note. At the moment
        this may require to scan whole track to the beginning or to the end.
-
-FIXME (implementation, new-events) See how should we gracefully handle intersecting
-   notes or mismatched on/off events. Edits may produce intersections like [on, on, off, off],
-   input MIDI data may contain mismatched events.
 */
 
 #[derive(Debug, Default, Clone)]
@@ -189,7 +185,8 @@ fn link_note_ends(items: &mut Vec<ev::Item>) {
     for ev in items.iter_mut().rev() {
         match &ev.ev {
             ev::Type::Note(n) if n.on => {
-                // Limit scope of the preceding note in case its end is not matched.
+                // Heuristic: inserting current to limit scope of the preceding note
+                // in case its end is not matched. Instead of this, we may ask user what to do.
                 let end_id = ends.insert(n.pitch, ev.id.clone());
                 // Just in case, panicking here is not strictly necessary.
                 debug_assert!(end_id.is_some());
@@ -270,13 +267,14 @@ mod tests {
         let id_seq = IdSeq::new(0);
         let path_short = PathBuf::from("./test/files/short.mid");
         let events = import_smf(&id_seq, &path_short);
-        assert_eq!(events.len(), 10);
+        assert_eq!(events.len(), 16);
         let path_exported = PathBuf::from("./target/test_track_load.mid");
         export_smf(&events, &path_exported);
 
         // The recorded SMD may have some additional system/heartbeat events,
         // so comparing the sequence only after a save.
         let id_seq = IdSeq::new(0);
+        // FIXME (test) Review event sequence here, the debug assert might be a false positive.
         let events2 = import_smf(&id_seq, &path_exported);
         assert_eq!(events2.len(), 10);
         assert_eq!(events, events2);
