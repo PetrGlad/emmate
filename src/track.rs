@@ -181,16 +181,19 @@ pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<ev::Item> {
 }
 
 fn link_note_ends(items: &mut Vec<ev::Item>) {
+    dbg!("ALL BEFORE", &items);
     let mut ends: HashMap<Pitch, EventId> = HashMap::new();
     for ev in items.iter_mut().rev() {
         match &ev.ev {
             ev::Type::Note(n) if n.on => {
                 // Heuristic: inserting current to limit scope of the preceding note
                 // in case its end is not matched. Instead of this, we may ask user what to do.
-                let end_id = ends.insert(n.pitch, ev.id.clone());
-                // Just in case, panicking here is not strictly necessary.
-                debug_assert!(end_id.is_some());
-                ev.ev = ev::Type::Note(ev::Tone { end: end_id, ..*n });
+                let end_id = ends.insert(n.pitch, ev.id);
+                if end_id.is_none() {
+                    println!("INFO No matching end for event #{}", ev.id);
+                } else {
+                    ev.ev = ev::Type::Note(ev::Tone { end: end_id, ..*n });
+                }
             }
             ev::Type::Note(n) if !n.on => {
                 assert!(n.end.is_none());
@@ -223,9 +226,16 @@ pub fn to_midi_events(
                     ev.at,
                     TrackEventKind::Midi {
                         channel,
-                        message: MidiMessage::NoteOn {
-                            key: note.pitch.into(),
-                            vel: note.velocity.into(),
+                        message: if note.on {
+                            MidiMessage::NoteOn {
+                                key: note.pitch.into(),
+                                vel: note.velocity.into(),
+                            }
+                        } else {
+                            MidiMessage::NoteOff {
+                                key: note.pitch.into(),
+                                vel: note.velocity.into(),
+                            }
                         },
                     },
                 ));
@@ -274,9 +284,7 @@ mod tests {
         // The recorded SMD may have some additional system/heartbeat events,
         // so comparing the sequence only after a save.
         let id_seq = IdSeq::new(0);
-        // FIXME (test) Review event sequence here, the debug assert might be a false positive.
         let events2 = import_smf(&id_seq, &path_exported);
-        assert_eq!(events2.len(), 10);
         assert_eq!(events, events2);
     }
 }
