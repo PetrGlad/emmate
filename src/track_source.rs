@@ -6,7 +6,7 @@ use sync_cow::SyncCow;
 use crate::common::Time;
 use crate::engine::{EngineEvent, EventSource};
 use crate::track::Track;
-use crate::{engine, ev};
+use crate::{engine, ev, midi};
 
 pub struct TrackSource {
     /* Events must always be kept ordered by start
@@ -75,46 +75,43 @@ impl EventSource for TrackSource {
         self.running_at = *at;
     }
 
-    fn next(&mut self, _at: &Time) -> Vec<EngineEvent> {
-        // FIXME Remove event duration handling from the audio engine.
-
-        return vec![];
-        // let track = self.track.read();
-        // let mut events = vec![];
-        // while self.current_idx < track.items.len() {
-        //     let notes = &track.items;
-        //     let event = &notes[self.current_idx];
-        //     let running_at = event.at;
-        //     if running_at > *at {
-        //         return events;
-        //     }
-        //     self.running_at = running_at;
-        //     match &event.ev {
-        //         ev::Type::Note(note) => {
-        //             events.push(EngineEvent {
-        //                 at: running_at,
-        //                 event: note_on(engine::MIDI_CHANNEL, note.pitch, note.velocity),
-        //             });
-        //             events.push(EngineEvent {
-        //                 at: running_at, /* + note.duration */
-        //                 event: note_off(engine::MIDI_CHANNEL, note.pitch, note.velocity),
-        //             });
-        //         }
-        //         ev::Type::Cc(set_val) => {
-        //             events.push(EngineEvent {
-        //                 at: running_at,
-        //                 event: controller_set(
-        //                     engine::MIDI_CHANNEL,
-        //                     set_val.controller_id,
-        //                     set_val.value,
-        //                 ),
-        //             });
-        //         }
-        //         ev::Type::Bookmark => (), // Not an audible event.
-        //     }
-        //     self.current_idx += 1;
-        // }
-        // events
+    fn next(&mut self, at: &Time) -> Vec<EngineEvent> {
+        let track = self.track.read();
+        let mut events = vec![];
+        while self.current_idx < track.items.len() {
+            let notes = &track.items;
+            let event = &notes[self.current_idx];
+            let running_at = event.at;
+            if running_at > *at {
+                return events;
+            }
+            self.running_at = running_at;
+            match &event.ev {
+                ev::Type::Note(note) => {
+                    events.push(EngineEvent {
+                        at: running_at,
+                        event: if note.on {
+                            midi::note_on(engine::MIDI_CHANNEL, note.pitch, note.velocity)
+                        } else {
+                            midi::note_off(engine::MIDI_CHANNEL, note.pitch, note.velocity)
+                        },
+                    });
+                }
+                ev::Type::Cc(cc) => {
+                    events.push(EngineEvent {
+                        at: running_at,
+                        event: midi::controller_set(
+                            engine::MIDI_CHANNEL,
+                            cc.controller_id,
+                            cc.value,
+                        ),
+                    });
+                }
+                ev::Type::Bookmark(_) => (), // Not an audible event.
+            }
+            self.current_idx += 1;
+        }
+        events
     }
 }
 

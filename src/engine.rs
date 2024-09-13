@@ -49,7 +49,7 @@ pub trait EventSource {
     /** Return false when no events will be produced from the source anymore.
     Use this to detach it from the engine. */
     fn is_running(&self) -> bool;
-    /** Reset current source's time to this moment. */
+    /** Reset the current source's time to this moment. */
     fn seek(&mut self, at: &Time);
     /** The next event to be played at the instant. On subsequent
     calls instants must not decrease unless a reset call sets back the time. */

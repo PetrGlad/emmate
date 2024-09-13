@@ -175,6 +175,8 @@ impl NotesSelection {
     }
 }
 
+type AnimationNode = (Time, Pitch, Level);
+
 #[derive(Debug)]
 pub struct EditTransition {
     pub animation_id: egui::Id,
@@ -431,7 +433,7 @@ impl Stave {
         };
 
         // Paint notes
-        // The notes may intersect in some cases.
+        // They may intersect in some cases.
         for (pitch, lane) in self.lanes.notes.iter().enumerate() {
             if let Some(y) = key_ys.get(&(pitch as Pitch)) {
                 let mut iev = lane.events.iter();
@@ -441,7 +443,6 @@ impl Stave {
                         continue;
                     }
                     debug_assert!(note.ev.end.is_some());
-                    // O(N^2) but end should not be too far away, in most cases it is just next.
                     let end = Self::lookup_note_end(&iev, note);
                     let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
                     if let Some(pointer_pos) = pointer_pos {
@@ -555,8 +556,11 @@ impl Stave {
         iev: &'a Iter<LaneEvent<Tone>>,
         note: &LaneEvent<Tone>,
     ) -> Option<&'a LaneEvent<Tone>> {
-        let mut i = iev.clone();
-        note.ev.end.and_then(|end_id| i.find(|x| x.id == end_id))
+        // Invoked from a loop so is O(N^2), but end should not be too far away,
+        // in most cases it is the next element, if notes are intersecting the end may be farther.
+        note.ev
+            .end
+            .and_then(|end_id| iev.clone().find(|x| x.id == end_id))
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
@@ -1017,12 +1021,11 @@ impl Stave {
         );
     }
 
-    /// Extract from a note event a tuple of scalar values to interpolate.
-    fn note_animation_params(ev: Option<&ev::Item>) -> Option<((Time, Time), Pitch, Level)> {
+    /// Extract from a note event a tuple of scalar values for interpolation.
+    fn note_animation_params(ev: Option<&ev::Item>) -> Option<AnimationNode> {
         ev.and_then(|ev| {
             if let ev::Type::Note(n) = &ev.ev {
-                todo!("Use on/off event pairs for duration."); ///////////// FIXME
-                Some(((ev.at, ev.at /*+ n.duration*/), n.pitch, n.velocity))
+                Some((ev.at, n.pitch, n.velocity))
             } else {
                 None // CC is animated separately.
             }
@@ -1059,32 +1062,33 @@ impl Stave {
         should_be_visible: &mut Option<util::Range<Time>>,
         coeff: f32,
         is_selected: bool,
-        a: Option<((Time, Time), Pitch, Level)>,
-        b: Option<((Time, Time), Pitch, Level)>,
+        a: Option<AnimationNode>,
+        b: Option<AnimationNode>,
     ) {
         // Interpolate the note states.
         assert!(a.is_some() || b.is_some());
-        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
-        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
-
-        *should_be_visible = should_be_visible
-            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
-            .or(Some((t1_a, t2_a)));
-
-        // May want to handle gracefully when note gets in/out of visible pitch range.
-        // Just patching with existing y for now.
-        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
-        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
-        let y = egui::lerp(*y_a..=*y_b, coeff);
-
-        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
-        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
-
-        let c_a = note_color(&v_a, is_selected);
-        let c_b = note_color(&v_b, is_selected);
-        let color = Self::transition_color(c_a, c_b, coeff);
-
-        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
+        // FIXME reimplement animation
+        // let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
+        // let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
+        //
+        // *should_be_visible = should_be_visible
+        //     .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+        //     .or(Some((t1_a, t2_a)));
+        //
+        // // May want to handle gracefully when note gets in/out of visible pitch range.
+        // // Just patching with existing y for now.
+        // let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
+        // let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
+        // let y = egui::lerp(*y_a..=*y_b, coeff);
+        //
+        // let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
+        // let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
+        //
+        // let c_a = note_color(&v_a, is_selected);
+        // let c_b = note_color(&v_b, is_selected);
+        // let color = Self::transition_color(c_a, c_b, coeff);
+        //
+        // self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
     }
 
     fn draw_note(
