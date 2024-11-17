@@ -11,6 +11,9 @@ homepage = "https://github.com/PetrGlad/emmate"
 [profile.dev]
 panic = 'abort'
 
+[profile.release]
+debug = true
+
 [dependencies]
 
 ordered-float = "4.2.2"

@@ -29,8 +29,6 @@ mod track_history;
 mod track_source;
 mod util;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 pub type Pix = f32;
 
 pub fn main() {
@@ -112,10 +110,6 @@ pub fn main() {
 
 fn build_cli() -> Command {
     clap::command!()
-        // let arg_matches = clap::Command::new("emmate")
-        //     .version(VERSION)
-        //     .author("Petr <petrglad@gmail.com>")
-        //     .about("MIDI editor")
         .arg(
             clap::arg!(--"config-file" <FILE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
