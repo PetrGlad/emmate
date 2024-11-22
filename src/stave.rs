@@ -541,7 +541,7 @@ impl Stave {
 
                 if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
                     // TODO (implementation, ux) Handle bookmarks (can be either animated somehow or just ignored).
-                    print!("WARN No animation params (a bookmark?).");
+                    println!("WARN No animation params (a bookmark?).");
                 }
             }
         }
