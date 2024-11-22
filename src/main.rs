@@ -1,14 +1,16 @@
-use std::io;
-
 use clap::Command;
 use clap_complete::aot as ccomplete;
 use eframe::{egui, Theme};
 use indoc::indoc;
 use midir::os::unix::VirtualOutput;
 use midir::MidiOutput;
+use std::io;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 
 use crate::app::EmApp;
 use crate::config::Config;
+use crate::engine::EngineCommand;
 use crate::midi::SmfSource;
 use crate::project::Project;
 use crate::track_source::TrackSource;
@@ -64,15 +66,6 @@ pub fn main() {
 
     // Stream and engine references keep them open.
     let (mut engine, engine_command_sender) = audio_setup::setup_audio_engine(midi_output);
-    if false {
-        // Want the section to still be compilable.
-        // Play MIDI from an SMD file.
-        let smf_data = std::fs::read(midi_file_path).unwrap();
-        let smf_midi_source = SmfSource::new(smf_data);
-        engine_command_sender
-            .send(Box::new(|engine| engine.add(Box::new(smf_midi_source))))
-            .unwrap();
-    }
 
     {
         let track_midi_source = TrackSource::new(project.history.borrow().track.clone());
@@ -106,6 +99,15 @@ pub fn main() {
         Box::new(|ctx| Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))),
     )
     .expect("Emmate UI")
+}
+
+// Play MIDI from an SMD file.
+fn play_midi_file(midi_file_path: &PathBuf, engine_command_sender: &Sender<Box<EngineCommand>>) {
+    let smf_data = std::fs::read(midi_file_path).unwrap();
+    let smf_midi_source = SmfSource::new(smf_data);
+    engine_command_sender
+        .send(Box::new(|engine| engine.add(Box::new(smf_midi_source))))
+        .unwrap();
 }
 
 fn build_cli() -> Command {

@@ -6,7 +6,7 @@ use egui::Rgba;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::slice::Iter;
@@ -44,19 +44,6 @@ fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch,
     (lines, step)
 }
 
-/// Note’s pitch is determined by the containing lane.
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
-enum LaneNote {
-    On(Velocity),
-    Off,
-}
-
-/// Controller's id is determined by the containing lane.
-struct LaneCc(Velocity);
-
-#[derive(Default)]
-struct LaneBookmark();
-
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct LaneEvent<Ev> {
     pub id: EventId,
@@ -64,38 +51,41 @@ pub struct LaneEvent<Ev> {
     pub ev: Ev,
 }
 
-/// In contrast to Track this contain only one type of events, which should streamline
-/// calculations and help compiler to optimize the code.
-#[derive(Debug, Default, Clone)]
-pub struct Lane<Ev> {
-    pub events: Vec<LaneEvent<Ev>>,
-}
-
-impl<Ev> Lane<Ev> {
-    pub fn max_time(&self) -> Option<Time> {
-        self.events.last().map(|ev| ev.at)
-    }
-}
-
 pub type LaneIndex = i8;
 
-// TODO Is this helpful or just keep Vecs instead?
-#[derive(Debug, Default, Clone)]
-pub struct Lanes<Ev>(Vec<Lane<Ev>>);
+/// View model of a note
+struct NoteSpan {
+    time_range: util::Range<Time>,
+    pitch: Pitch,
+    // Not supporting `off` velocity just yet.
+    velocity: Velocity,
+    on_id: EventId,
+    off_id: Option<EventId>,
+}
 
-impl<Ev> Lanes<Ev> {
-    pub fn new() -> Self {
-        Lanes(vec![])
+impl NoteSpan {
+    #[inline]
+    fn id(&self) -> EventId {
+        self.on_id
+    }
+
+    #[inline]
+    fn end_at(&self) -> Option<Time> {
+        if self.off_id.is_some() {
+            Some(self.time_range.1)
+        } else {
+            None
+        }
     }
 }
 
+/// Stave's view model of the track.
+/// 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks.
 #[derive(Default)]
-/// View model of a track.
-/// 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks
 struct TrackLanes {
-    pub notes: Vec<Lane<ev::Tone>>,
-    pub cc: Vec<Lane<ev::Cc>>,
-    pub bookmarks: Vec<Lane<ev::Bookmark>>,
+    pub notes: Vec<NoteSpan>,
+    pub cc: Vec<LaneEvent<ev::Cc>>,
+    pub bookmarks: Vec<LaneEvent<ev::Bookmark>>,
 }
 
 impl TrackLanes {
@@ -107,30 +97,53 @@ impl TrackLanes {
 
     fn reset(&mut self) {
         self.notes.clear();
-        self.notes.resize(Pitch::MAX as usize + 1, Lane::default());
         self.cc.clear();
-        self.cc
-            .resize(ControllerId::MAX as usize + 1, Lane::default());
-        // Still using array for bookmarks to keep the code consistent.
         self.bookmarks.clear();
-        self.bookmarks.resize(1, Lane::default());
     }
 
+    /// Fill UI model from the track events.
     fn update(&mut self, track: &Track) {
         self.reset();
+        // Note that notes may intersect after edits.
+        // Alternative implementation may forbid intersections altogether,
+        //   but I'd like to support this for now,
+        // End event id -> start event index.
+        let mut start_idxs: HashMap<EventId, usize> = HashMap::default();
         for ev in &track.items {
             match &ev.ev {
-                ev::Type::Note(n) => self.notes[n.pitch as usize].events.push(LaneEvent {
-                    id: ev.id,
-                    at: ev.at,
-                    ev: n.clone(),
-                }),
-                ev::Type::Cc(cc) => self.cc[cc.controller_id as usize].events.push(LaneEvent {
+                ev::Type::Note(n) => {
+                    if n.on {
+                        if let Some(end_id) = n.end {
+                            start_idxs.insert(end_id, self.notes.len());
+                        }
+                        self.notes.push(NoteSpan {
+                            time_range: (ev.at, ev.at),
+                            pitch: n.pitch,
+                            velocity: n.velocity,
+                            on_id: ev.id,
+                            off_id: None,
+                        });
+                    } else {
+                        if let Some(start_idx) = start_idxs.remove(&ev.id) {
+                            if let Some(start) = self.notes.get_mut(start_idx) {
+                                assert_eq!(start.pitch, n.pitch);
+                                start.time_range.1 = ev.at;
+                                start.off_id = Some(ev.id);
+                            } else {
+                                println!(
+                                    "ERROR Unmatched note end, ev.at={}, ev.id={}.",
+                                    &ev.at, &ev.id
+                                );
+                            }
+                        }
+                    }
+                }
+                ev::Type::Cc(cc) => self.cc.push(LaneEvent {
                     id: ev.id,
                     at: ev.at,
                     ev: cc.clone(),
                 }),
-                ev::Type::Bookmark(bm) => self.bookmarks[0].events.push(LaneEvent {
+                ev::Type::Bookmark(bm) => self.bookmarks.push(LaneEvent {
                     id: ev.id,
                     at: ev.at,
                     ev: bm.clone(),
@@ -154,6 +167,9 @@ pub struct NotesSelection {
 }
 
 impl NotesSelection {
+    // TODO (refactoring) Make it clear that this contains both begin and the end ids,
+    //   or keep track of pairs explicitly,
+    //   or, maybe, use the end reference in edit actions (this one maybe complicated).
     fn toggle(&mut self, id: &EventId) {
         if self.selected.contains(&id) {
             self.selected.remove(&id);
@@ -162,8 +178,9 @@ impl NotesSelection {
         }
     }
 
-    fn contains(&self, ev: &LaneEvent<ev::Tone>) -> bool {
-        self.selected.contains(&ev.id)
+    #[inline]
+    fn contains(&self, id: &EventId) -> bool {
+        self.selected.contains(&id)
     }
 
     fn clear(&mut self) {
@@ -403,7 +420,7 @@ impl Stave {
                     response: egui_response,
                     pitch_hovered,
                     time_hovered,
-                    note_hovered: note_hovered,
+                    note_hovered,
                     modifiers: ui.input(|i| i.modifiers),
                 }
             })
@@ -424,6 +441,7 @@ impl Stave {
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         // Contains time range that includes all events affected by an edit action.
         let mut should_be_visible = None;
+        // FIXME (implementation, edit-animations)
         let is_in_transition = |id| {
             if let Some(trans) = &self.transition {
                 trans.changeset.changes.contains_key(id)
@@ -431,59 +449,51 @@ impl Stave {
                 false
             }
         };
-
-        // Paint notes
-        // They may intersect in some cases.
-        for (pitch, lane) in self.lanes.notes.iter().enumerate() {
-            if let Some(y) = key_ys.get(&(pitch as Pitch)) {
-                let mut iev = lane.events.iter();
-                while let Some(note) = iev.next() {
-                    assert_eq!(note.ev.pitch, pitch as Pitch);
-                    if !note.ev.on || is_in_transition(&note.id) {
-                        continue;
-                    }
-                    debug_assert!(note.ev.end.is_some());
-                    let end = Self::lookup_note_end(&iev, note);
-                    let note_rect = self.draw_track_note(y, half_tone_step, painter, note, end);
+        {
+            // Paint notes
+            for note in self.lanes.notes.iter() {
+                let pitch = note.pitch;
+                if let Some(y) = key_ys.get(&pitch) {
+                    let note_rect = self.draw_track_note(y, half_tone_step, painter, note);
+                    // Note hover.
                     if let Some(pointer_pos) = pointer_pos {
                         if let Some(r) = note_rect {
+                            // TODO (cleanup) reduce number of matches here (use Option::map maybe)
                             if r.contains(*pointer_pos) {
                                 painter.rect_stroke(
                                     r,
                                     Rounding::ZERO,
                                     Stroke::new(2.0, COLOR_HOVERED),
                                 );
-                                note_hovered.push(note.id);
-                                if let Some(end) = end {
-                                    note_hovered.push(end.id);
+                                note_hovered.push(note.on_id);
+                                if let Some(id) = note.off_id {
+                                    note_hovered.push(id);
                                 }
                             }
                         }
                     }
-                    if self.note_selection.contains(&note) {
-                        if x_range.max < self.x_from_time(note.at) {
-                            selection_hints_right.insert(note.ev.pitch);
-                        } else if let Some(ev) = end {
-                            if self.x_from_time(ev.at) < x_range.min {
-                                selection_hints_left.insert(ev.ev.pitch);
-                            }
+                    if self.note_selection.contains(&note.id()) {
+                        if x_range.max < self.x_from_time(note.time_range.0) {
+                            selection_hints_right.insert(note.pitch);
+                        } else if self.x_from_time(note.time_range.1) < x_range.min {
+                            selection_hints_left.insert(note.pitch);
                         }
                     }
                 }
             }
         }
-
         {
             // Paint sustain lane
             let mut last_damper = (0 as Time, 0 as Level);
-            for cc in &self.lanes.cc[MIDI_CC_SUSTAIN_ID as usize].events {
-                assert_eq!(cc.ev.controller_id, MIDI_CC_SUSTAIN_ID);
-                self.draw_track_cc(&key_ys, half_tone_step, &painter, &last_damper, &cc);
-                last_damper = (cc.at, cc.ev.value);
+            for cc in &self.lanes.cc {
+                if cc.ev.controller_id == MIDI_CC_SUSTAIN_ID {
+                    self.draw_track_cc(&key_ys, half_tone_step, &painter, &last_damper, &cc);
+                    last_damper = (cc.at, cc.ev.value);
+                }
             }
         }
 
-        for bm in &self.lanes.bookmarks[0].events {
+        for bm in &self.lanes.bookmarks {
             self.draw_cursor(
                 &painter,
                 self.x_from_time(bm.at),
@@ -1037,20 +1047,14 @@ impl Stave {
         y: &Pix,
         half_tone_step: &Pix,
         painter: &Painter,
-        this: &LaneEvent<ev::Tone>,
-        next: Option<&LaneEvent<ev::Tone>>,
+        note: &NoteSpan,
     ) -> Option<Rect> {
-        if !this.ev.on {
-            eprintln!("Unmatched note event {:?} (next {:?})", this, next);
-            return None;
-        }
-        let end_at = next.map(|ev| ev.at).unwrap_or(Time::MAX);
         Some(self.draw_note(
             &painter,
-            (this.at, end_at),
+            (note.time_range.0, note.end_at().unwrap_or(Time::MAX)),
             *y,
             *half_tone_step,
-            note_color(&this.ev.velocity, self.note_selection.contains(&this)),
+            note_color(&note.velocity, self.note_selection.contains(&note.on_id)),
         ))
     }
 
@@ -1067,7 +1071,7 @@ impl Stave {
     ) {
         // Interpolate the note states.
         assert!(a.is_some() || b.is_some());
-        // FIXME reimplement animation
+        // FIXME Reimplement animation.
         // let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
         // let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
         //
@@ -1333,4 +1337,7 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[test]
+    fn lab() {}
+}

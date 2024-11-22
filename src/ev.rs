@@ -12,6 +12,7 @@ pub type Velocity = Level;
 /// Midi channel id.
 pub type ChannelId = u8;
 
+/// Serializable note event on the track.
 #[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct Tone {
     pub on: bool,

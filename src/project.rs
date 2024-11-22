@@ -24,6 +24,7 @@ impl Project {
         }
         directory.set_extension("");
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
+        dbg!("project directory", &directory);
 
         let mut snapshots_dir = directory.clone();
         snapshots_dir.push(Self::HISTORY_DIR_NAME);
