@@ -17,6 +17,7 @@ enum Message {
 }
 
 pub struct EmApp {
+    title: String,
     home_path: PathBuf,
     stave: Stave,
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
@@ -33,6 +34,7 @@ impl EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
 
         let app = EmApp {
+            title: project.title,
             home_path: project.home_path,
             stave: Stave::new(project.history),
             engine_command_send,
@@ -137,7 +139,7 @@ impl eframe::App for EmApp {
 
             {
                 let h = self.stave.history.borrow();
-                ui.heading(format!("🌲 {} [{}]", h.directory.display(), h.version()));
+                ui.heading(format!("🌲 {} [{}]", self.title, h.version()));
             }
             StripBuilder::new(ui)
                 .size(Size::remainder())

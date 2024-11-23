@@ -1,10 +1,10 @@
+use crate::track_history::TrackHistory;
 use std::cell::RefCell;
 use std::fs;
-use std::path::PathBuf;
-
-use crate::track_history::TrackHistory;
+use std::path::{Path, PathBuf};
 
 pub struct Project {
+    pub title: String,
     pub history: RefCell<TrackHistory>,
     pub home_path: PathBuf,
 }
@@ -38,8 +38,24 @@ impl Project {
         };
         history.open();
         Project {
+            title: Self::path_to_title(&directory),
             home_path: directory,
             history: RefCell::new(history),
         }
+    }
+
+    // Clean the project path to make it less cluttered.
+    fn path_to_title(project_path: &PathBuf) -> String {
+        let mut result = project_path
+            .canonicalize()
+            .unwrap_or(project_path.to_owned());
+        if let Some(hd) = dirs::home_dir() {
+            result = result
+                .strip_prefix(hd)
+                .map(Path::to_path_buf)
+                .unwrap_or(result)
+        };
+        result.set_extension("");
+        result.to_string_lossy().to_string()
     }
 }
