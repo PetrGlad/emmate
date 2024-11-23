@@ -39,10 +39,15 @@ pub enum EditCommandId {
  supporting custom logic for these. This complicates the implementation a lot, but I do
  not see a better solution now.
 
+ TODO (refactoring?) If no other batch commands than TailShift will be necessary (tempo changes, maybe?),
+    then this logic can be simplified further by using relative event times directly from SMF instead
+    of absolute times. (Tail shift should only change time delta to the beginning event of the tail).
+    Now we have view model that is separate from track events, so this change should be straightforward.
+
  Commands that do not usually generate large patches can use generic Changeset,
- this is the default. Commands that cannot be stored efficiently should use custom diffs.
+ this is the default. Commands that cannot be stored efficiently that way should use custom diffs.
  Note to support undo/redo, custom event updates must be unambiguously reversible and replayable
- (change lists always are).
+ (event action lists always are).
 */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CommandDiff {

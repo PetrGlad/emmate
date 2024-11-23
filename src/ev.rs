@@ -63,8 +63,8 @@ pub struct Item {
 
 impl Ord for Item {
     /**
-        Ordering events by track time, while ensuring sort order always produces the same
-        result every time. The time ordering is important for playback and editing while unique
+        Ordering events by track time, while ensuring sorting always produces the same
+        sequence every time. The time ordering is important for playback and editing while unique
         sort order ensures we do not have any surprises when changing or serializing the track.
     */
     fn cmp(&self, other: &Self) -> Ordering {

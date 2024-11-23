@@ -79,7 +79,7 @@ impl Track {
         self.items = snapshot.events;
     }
 
-    /// See also splat_events
+    /// See also [`Track::splat_events`]
     fn index_events(&self) -> HashMap<EventId, ev::Item> {
         let mut track_map = HashMap::with_capacity(self.items.len());
         for ev in &self.items {
@@ -88,7 +88,7 @@ impl Track {
         track_map
     }
 
-    /// Reverse of index_events
+    /// Reverse of [`Track::index_events`]
     fn splat_events(&mut self, indexed: &HashMap<EventId, ev::Item>) {
         self.items = indexed.values().cloned().collect();
         self.items.sort();

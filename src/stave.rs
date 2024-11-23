@@ -104,9 +104,9 @@ impl TrackLanes {
     /// Fill UI model from the track events.
     fn update(&mut self, track: &Track) {
         self.reset();
-        // Note that notes may intersect after edits.
-        // Alternative implementation may forbid intersections altogether,
-        //   but I'd like to support this for now,
+        // Note that notes may intersect after edits. Alternative implementation may
+        // forbid intersections altogether, but I'd like to support this for now.
+
         // End event id -> start event index.
         let mut start_idxs: HashMap<EventId, usize> = HashMap::default();
         for ev in &track.items {
@@ -125,16 +125,15 @@ impl TrackLanes {
                         });
                     } else {
                         if let Some(start_idx) = start_idxs.remove(&ev.id) {
-                            if let Some(start) = self.notes.get_mut(start_idx) {
-                                assert_eq!(start.pitch, n.pitch);
-                                start.time_range.1 = ev.at;
-                                start.off_id = Some(ev.id);
-                            } else {
-                                println!(
-                                    "ERROR Unmatched note end, ev.at={}, ev.id={}.",
-                                    &ev.at, &ev.id
-                                );
-                            }
+                            let start = &mut self.notes[start_idx];
+                            assert_eq!(start.pitch, n.pitch);
+                            start.time_range.1 = ev.at;
+                            start.off_id = Some(ev.id);
+                        } else {
+                            println!(
+                                "ERROR Unmatched note end, ev.at={}, ev.id={}.",
+                                &ev.at, &ev.id
+                            );
                         }
                     }
                 }
@@ -178,7 +177,6 @@ impl NotesSelection {
         }
     }
 
-    #[inline]
     fn contains(&self, id: &EventId) -> bool {
         self.selected.contains(&id)
     }
@@ -507,8 +505,6 @@ impl Stave {
             for (_ev_id, action) in &trans.changeset.changes {
                 // TODO (cleanup) Explicitly restrict actions to not change event types,
                 //      this should reduce number of cases to consider here.
-
-                ///////////// FIXME let end = Self::lookup_end(&iev, note);
 
                 let note_a = Stave::note_animation_params(action.before());
                 let note_b = Stave::note_animation_params(action.after());
