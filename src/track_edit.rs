@@ -133,7 +133,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     }
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
-            EditCommandId::TapeInsert,
+            EditCommandId::TapeDelete,
             vec![CommandDiff::ChangeList { patch }, tail_shift],
         )
     })

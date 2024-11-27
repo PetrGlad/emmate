@@ -1,22 +1,27 @@
-use std::collections::HashMap;
-
-use serde::{Deserialize, Serialize};
-
 use crate::common::VersionId;
 use crate::ev;
+use crate::ev::Type;
 use crate::track::{EventId, Track};
 use crate::track_edit::{CommandDiff, EditCommandId};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::mem;
 
 /// Simplest track edit operation. See [Changeset] for uses.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub enum EventAction {
-    /* Adding "before" states here to support undo operations (the EventAction itself has
-    enough information to undo).
-    TODO (possible revamp) Alternatively it is also possible to recover necessary state by patching
-     one of the recent snapshots. That approach may probably help to save space and simplify
-     data structures. E.g. Delete action will only need the event id and update action will
-     only need the new state. OTOH then we'll need to save snapshots more often. */
+    /* Adding "before" values here in order to support undo operations (the EventAction itself has
+       enough information to undo).
+    TODO (possible revamp) Alternatively it is also possible to recover necessary previous state
+     by patching one of the recent snapshots with subsequent version diffs. That approach may
+     probably help to save space and simplify  data structures. E.g. Delete action will only
+     need the event id and update action will only need the new state.
+     OTOH then we'll need to save snapshots more often. */
     Delete(ev::Item),
+    // TODO Restrict updates to never change event type (`mem::discriminant(ev::Item::type)`
+    //   before and after should be the same). This should simplify at least animation code.
+    //   Editing logic does not depend on this but it is changing type while updating is
+    //   unexpected anyway.
     Update(ev::Item, ev::Item),
     Insert(ev::Item),
 }

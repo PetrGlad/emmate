@@ -7,6 +7,7 @@ use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::mem;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::slice::Iter;
@@ -54,6 +55,7 @@ pub struct LaneEvent<Ev> {
 pub type LaneIndex = i8;
 
 /// View model of a note
+#[derive(Debug, Clone)]
 struct NoteSpan {
     time_range: util::Range<Time>,
     pitch: Pitch,
@@ -81,7 +83,7 @@ impl NoteSpan {
 
 /// Stave's view model of the track.
 /// 88 lanes for notes, 1 lane for damper, 1 lane for bookmarks.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TrackLanes {
     pub notes: Vec<NoteSpan>,
     pub cc: Vec<LaneEvent<ev::Cc>>,
@@ -233,8 +235,10 @@ impl EditTransition {
 pub struct Stave {
     /// The track's reference data.
     pub history: RefCell<TrackHistory>,
-    /// View model of the track.
+    /// View model of the track (current state, after edit action).
     lanes: TrackLanes,
+    /// View model of the track (previous state, before edit action).
+    lanes_old: TrackLanes,
     /// Used to invalidate cached data
     track_version: VersionId,
 
@@ -280,7 +284,8 @@ impl Stave {
         let lanes = TrackLanes::new(history.borrow().track.read().as_ref());
         Stave {
             history,
-            lanes,
+            lanes: lanes.clone(),
+            lanes_old: lanes,
             track_version: VersionId::MIN,
             time_left: 0,
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
@@ -346,9 +351,13 @@ impl Stave {
 
     /// Update cached data.
     fn update(&mut self) {
+        // TODO (refactoring) No strict need to access the track strictly through history
+        //   anymore, but we still need to keep all the parts updated. Are the alternatives
+        //   (using channel pub/sub, maybe) better?
         let history = self.history.borrow();
         let v = history.version();
         if self.track_version != v {
+            mem::swap(&mut self.lanes, &mut self.lanes_old);
             history.with_track(|t| self.lanes.update(t));
             self.track_version = v
         }
@@ -439,17 +448,15 @@ impl Stave {
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         // Contains time range that includes all events affected by an edit action.
         let mut should_be_visible = None;
-        // FIXME (implementation, edit-animations)
-        let is_in_transition = |id| {
-            if let Some(trans) = &self.transition {
-                trans.changeset.changes.contains_key(id)
-            } else {
-                false
-            }
-        };
         {
             // Paint notes
             for note in self.lanes.notes.iter() {
+                if let Some(trans) = &self.transition {
+                    if trans.changeset.changes.contains_key(&note.id()) {
+                        // Animated events are shown separately.
+                        continue;
+                    }
+                }
                 let pitch = note.pitch;
                 if let Some(y) = key_ys.get(&pitch) {
                     let note_rect = self.draw_track_note(y, half_tone_step, painter, note);
@@ -499,7 +506,7 @@ impl Stave {
             );
         }
 
-        // FIXME (implementation) Update transition animations.
+        // FIXME (implementation) Reimplement transition animations.
         // TODO (cleanup?) Separate CC and note animation handling?
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
@@ -935,11 +942,7 @@ impl Stave {
             .history
             .borrow_mut()
             .update_track(|track| action(&self, track));
-        // TODO (refactoring) No strict need to access the track through history anymore,
-        // but we still need to keep  all the parts updated. Are the alternatives
-        // (using channel pub/sub, maybe) better?
-        self.lanes
-            .update(self.history.borrow().track.read().as_ref());
+        self.update();
         self.transition = Self::animate_edit(
             context,
             transition_id,
@@ -1067,7 +1070,7 @@ impl Stave {
     ) {
         // Interpolate the note states.
         assert!(a.is_some() || b.is_some());
-        // FIXME Reimplement animation.
+
         // let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
         // let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
         //
@@ -1334,6 +1337,11 @@ fn note_color(velocity: &Level, selected: bool) -> Color32 {
 
 #[cfg(test)]
 mod tests {
+    use num::rational::Ratio;
+
     #[test]
-    fn lab() {}
+    fn lab() {
+        let ratio = num::rational::Rational32::approximate_float(2.3f32).unwrap();
+        dbg!(ratio.numer(), ratio.denom());
+    }
 }

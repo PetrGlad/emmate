@@ -63,6 +63,7 @@ strum_macros = "0.26.4"
 clap_complete = "4.5.24"
 indoc = "2"
 dirs = "5"
+num = "0.4.3"
 # rhai = "1.19.0"
 
 # These may be useful
