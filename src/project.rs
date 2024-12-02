@@ -1,5 +1,6 @@
 use crate::track_history::TrackHistory;
 use std::cell::RefCell;
+use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,7 @@ impl Project {
     const HISTORY_DIR_NAME: &'static str = "history";
 
     pub fn open_file(source_file: &PathBuf) -> Project {
-        dbg!("source file", source_file.to_string_lossy());
+        log::info!("Source file {}", source_file.to_string_lossy());
         let mut directory = source_file.to_owned();
         if directory.file_name().is_none() {
             panic!(
@@ -24,7 +25,10 @@ impl Project {
         }
         directory.set_extension("");
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
-        dbg!("project directory", &directory);
+        let directory = directory
+            .canonicalize()
+            .expect("project directory path can be normalized");
+        log::info!("Project directory {}", &directory.to_string_lossy());
 
         let mut snapshots_dir = directory.clone();
         snapshots_dir.push(Self::HISTORY_DIR_NAME);

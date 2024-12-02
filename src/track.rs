@@ -164,7 +164,7 @@ pub fn from_midi_events(
                         value: value.into(),
                     }),
                 }),
-                _ => eprintln!("DEBUG Event ignored {:?}", ev),
+                _ => log::trace!("Event ignored {:?}", ev),
             },
             _ => (),
         };

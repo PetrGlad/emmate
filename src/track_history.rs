@@ -219,7 +219,7 @@ impl TrackHistory {
     }
 
     pub fn with_directory(directory: &PathBuf) -> Self {
-        dbg!("history directory", directory.to_string_lossy());
+        log::info!("History directory {}", directory.to_string_lossy());
         Self {
             directory: directory.to_owned(),
             id_seq: Arc::new(IdSeq::new(0)),

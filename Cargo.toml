@@ -1,6 +1,6 @@
 [package]
 name = "emmate"
-version = "0.2.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Petr <petrglad@gmail.com>"]
 description = "A MIDI editor."
@@ -15,11 +15,10 @@ panic = 'abort'
 debug = true
 
 [dependencies]
-
 ordered-float = "4.2.2"
 
-eframe = { version = "0.28.1" }
-egui_extras = { version = "0.28.1" }
+eframe = { version = "0.29.1" }
+egui_extras = { version = "0.29.1" }
 
 # https://github.com/negamartin/midly
 midly = { version = "0.5.3", features = ["alloc"] }
@@ -47,7 +46,7 @@ wmidi = "4.0.10"
 midir = "0.10.0"
 
 log = "0.4.22"
-stderrlog = "~0.4" # >=0.5 have breaking dependency changes.
+env_logger = "0.11.5"
 
 toml = "0.8.19"
 serde = "1.0.209"
@@ -63,6 +62,7 @@ strum_macros = "0.26.4"
 clap_complete = "4.5.24"
 indoc = "2"
 dirs = "5"
+
 num = "0.4.3"
 # rhai = "1.19.0"
 

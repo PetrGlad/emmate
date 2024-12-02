@@ -1,6 +1,6 @@
 use clap::Command;
 use clap_complete::aot as ccomplete;
-use eframe::{egui, Theme};
+use eframe::egui;
 use indoc::indoc;
 use midir::os::unix::VirtualOutput;
 use midir::MidiOutput;
@@ -34,16 +34,26 @@ mod util;
 pub type Pix = f32;
 
 pub fn main() {
-    {
-        // use log::*;
-        // stderrlog::new()/*.module(module_path!())*/.verbosity(Level::Trace).init().unwrap();
-    }
     let arg_matches = build_cli().get_matches();
+    if arg_matches.get_flag("log") {
+        env_logger::builder()
+            .filter_level(log::LevelFilter::Trace)
+            .init();
+    } else {
+        env_logger::init();
+    }
+
+    log::info!(
+        "Starting {} version {}.",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
+
     if let Some(generator) = arg_matches
         .get_one::<ccomplete::Shell>("shell-completion-script")
         .copied()
     {
-        eprintln!("Generating shell completion file for {generator}...");
+        log::info!("Generating shell completion file for {generator}...");
         let mut cli = build_cli();
         let command_name = cli.get_name().to_string();
         ccomplete::generate(generator, &mut cli, command_name, &mut io::stdout());
@@ -55,8 +65,11 @@ pub fn main() {
 
     let midi_file_path = arg_matches
         .get_one::<std::path::PathBuf>("midi-file")
-        .unwrap();
-    println!("MIDI file name {:?}", midi_file_path);
+        .unwrap_or_else(|| {
+            log::error!("Missing argument 'midi-file'");
+            std::process::exit(1);
+        });
+    log::info!("MIDI file name {:?}", midi_file_path);
     let project = Project::open_file(midi_file_path);
 
     let midi_output = MidiOutput::new("emmate")
@@ -89,7 +102,6 @@ pub fn main() {
         wb
     });
     let native_options = eframe::NativeOptions {
-        default_theme: Theme::Light,
         window_builder: Some(window_builder),
         ..Default::default()
     };
@@ -120,12 +132,16 @@ fn build_cli() -> Command {
         .arg(
             clap::arg!(--"midi-file" <FILE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
-                .default_value("yellow.mid")
                 .value_hint(clap::ValueHint::FilePath),
         )
         .arg(
             clap::arg!(--"shell-completion-script" <SHELL_NAME>)
                 .value_parser(clap::value_parser!(ccomplete::Shell)),
+        )
+        .arg(
+            clap::arg!(--"log")
+                .value_parser(clap::value_parser!(bool))
+                .help("Enable detailed logging. RUST_LOG environment variable is also supported."),
         )
         .help_template(indoc! {
         "{name}{tab}{about}
