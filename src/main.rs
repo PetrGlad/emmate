@@ -108,7 +108,10 @@ pub fn main() {
     eframe::run_native(
         "emmate",
         native_options,
-        Box::new(|ctx| Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))),
+        Box::new(|ctx| {
+            ctx.egui_ctx.set_visuals(egui::Visuals::light());
+            Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))
+        }),
     )
     .expect("Emmate UI")
 }
@@ -141,7 +144,7 @@ fn build_cli() -> Command {
         .arg(
             clap::arg!(--"log")
                 .value_parser(clap::value_parser!(bool))
-                .help("Enable detailed logging. RUST_LOG environment variable is also supported."),
+                .help("Enable detailed log. RUST_LOG environment variable is also supported."),
         )
         .help_template(indoc! {
         "{name}{tab}{about}
