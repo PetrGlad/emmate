@@ -115,7 +115,7 @@ impl TrackLanes {
             match &ev.ev {
                 ev::Type::Note(n) => {
                     if n.on {
-                        if let Some(end_id) = n.end {
+                        if let Some(end_id) = n.other {
                             start_idxs.insert(end_id, self.notes.len());
                         }
                         self.notes.push(NoteSpan {
@@ -448,8 +448,9 @@ impl Stave {
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         // Contains time range that includes all events affected by an edit action.
         let mut should_be_visible = None;
+
+        // Paint notes
         {
-            // Paint notes
             for note in self.lanes.notes.iter() {
                 if let Some(trans) = &self.transition {
                     if trans.changeset.changes.contains_key(&note.id()) {
@@ -487,8 +488,8 @@ impl Stave {
                 }
             }
         }
+        // Paint sustain lane
         {
-            // Paint sustain lane
             let mut last_damper = (0 as Time, 0 as Level);
             for cc in &self.lanes.cc {
                 if cc.ev.controller_id == MIDI_CC_SUSTAIN_ID {
@@ -544,7 +545,7 @@ impl Stave {
 
                 if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
                     // TODO (implementation, ux) Handle bookmarks (can be either animated somehow or just ignored).
-                    println!("WARN No animation params (a bookmark?).");
+                    log::info!("No animation params (a bookmark?).");
                 }
             }
         }
@@ -572,7 +573,7 @@ impl Stave {
         // Invoked from a loop so is O(N^2), but end should not be too far away,
         // in most cases it is the next element, if notes are intersecting the end may be farther.
         note.ev
-            .end
+            .other
             .and_then(|end_id| iev.clone().find(|x| x.id == end_id))
     }
 
@@ -585,6 +586,7 @@ impl Stave {
         if self.transition.is_none() {
             ui.ctx().clear_animations();
         }
+
         let stave_response = self.view(ui);
 
         if stave_response.response.clicked() {

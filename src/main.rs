@@ -37,7 +37,8 @@ pub fn main() {
     let arg_matches = build_cli().get_matches();
     if arg_matches.get_flag("log") {
         env_logger::builder()
-            .filter_level(log::LevelFilter::Trace)
+            .filter_level(log::LevelFilter::Info)
+            .filter_module("emmate", log::LevelFilter::Trace)
             .init();
     } else {
         env_logger::init();

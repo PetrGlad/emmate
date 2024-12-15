@@ -140,7 +140,7 @@ mod tests {
                 on: false,
                 pitch: 55,
                 velocity: 55,
-                end: None,
+                other: None,
             }),
         });
         let track = Arc::new(SyncCow::new(track));

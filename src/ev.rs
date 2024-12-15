@@ -28,7 +28,7 @@ pub struct Tone {
      TODO (usability) When painting clearly mark intersecting note parts
         (with red or orange, maybe).
     */
-    pub end: Option<EventId>,
+    pub other: Option<EventId>,
 }
 
 /// Continuous Controller (CC) value set.

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -77,6 +78,16 @@ pub struct Track {
 impl Track {
     pub fn reset(&mut self, snapshot: Snapshot) {
         self.items = snapshot.events;
+        self.commit();
+    }
+
+    // Primarily used to find other note end. Can be cached until self.items changes.
+    pub fn positions(&self) -> HashMap<EventId, usize> {
+        let mut positions = HashMap::new();
+        for (i, ev) in self.items.iter().enumerate() {
+            positions.insert(ev.id, i);
+        }
+        positions
     }
 
     /// See also [`Track::splat_events`]
@@ -91,7 +102,7 @@ impl Track {
     /// Reverse of [`Track::index_events`]
     fn splat_events(&mut self, indexed: &HashMap<EventId, ev::Item>) {
         self.items = indexed.values().cloned().collect();
-        self.items.sort();
+        self.commit()
     }
 
     pub fn patch(&mut self, changes: &EventActionsList) {
@@ -140,7 +151,7 @@ pub fn from_midi_events(
                             on: true,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
-                            end: None,
+                            other: None,
                         }),
                     });
                 }
@@ -152,7 +163,7 @@ pub fn from_midi_events(
                             on: false,
                             pitch: key.as_int() as Pitch,
                             velocity: vel.as_int() as Velocity,
-                            end: None,
+                            other: None,
                         }),
                     });
                 }
@@ -181,25 +192,34 @@ pub fn import_smf(id_seq: &IdSeq, file_path: &PathBuf) -> Vec<ev::Item> {
 }
 
 fn link_note_ends(items: &mut Vec<ev::Item>) {
-    dbg!("ALL BEFORE", &items);
-    let mut ends: HashMap<Pitch, EventId> = HashMap::new();
-    for ev in items.iter_mut().rev() {
+    let mut starts: HashMap<Pitch, usize> = HashMap::new();
+    let mut ends: Vec<(usize, usize)> = vec![];
+    for (i, ev) in items.iter().enumerate() {
         match &ev.ev {
             ev::Type::Note(n) if n.on => {
-                // Heuristic: inserting current to limit scope of the preceding note
-                // in case its end is not matched. Instead of this, we may ask user what to do.
-                let end_id = ends.insert(n.pitch, ev.id);
-                if end_id.is_none() {
-                    println!("INFO No matching end for event #{}", ev.id);
-                } else {
-                    ev.ev = ev::Type::Note(ev::Tone { end: end_id, ..*n });
-                }
+                assert!(n.other.is_none());
+                starts.insert(n.pitch, i);
             }
             ev::Type::Note(n) if !n.on => {
-                assert!(n.end.is_none());
-                ends.insert(n.pitch, ev.id);
+                // Heuristic: inserting current instead og just lookomg up an element
+                // to limit scope of the preceding note in case its other end is not matched.
+                if let Some(start_idx) = starts.insert(n.pitch, i) {
+                    ends.push((i, start_idx));
+                } else {
+                    log::debug!("No matching start for event #{}", ev.id);
+                }
             }
             _ => {}
+        }
+    }
+    for (ia, ib) in ends {
+        let idb = items[ib].id;
+        if let ev::Type::Note(n) = &mut items[ia].ev {
+            n.other = Some(idb);
+        }
+        let ida = items[ia].id;
+        if let ev::Type::Note(n) = &mut items[ib].ev {
+            n.other = Some(ida);
         }
     }
 }
@@ -208,11 +228,11 @@ pub fn export_smf(events: &Vec<ev::Item>, file_path: &PathBuf) {
     let usec_per_tick = 26u32;
     let midi_events = to_midi_events(&events, usec_per_tick);
     let mut binary = Vec::new();
-    midi::serialize_smf(midi_events, usec_per_tick, &mut binary).expect("Cannot store SMF track.");
-    std::fs::write(&file_path, binary).expect(&*format!("Cannot save to {}", &file_path.display()));
+    midi::serialize_smf(midi_events, usec_per_tick, &mut binary).expect("serialize SMF track.");
+    std::fs::write(&file_path, binary).expect(&*format!("save SMF to {}", &file_path.display()));
 }
 
-/// Reverse of from_midi_events
+/// Reverse of from_midi_events, produce SMF events.
 pub fn to_midi_events(
     events: &Vec<ev::Item>,
     usec_per_tick: u32,

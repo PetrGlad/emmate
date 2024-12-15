@@ -2,7 +2,7 @@ use crate::track_history::TrackHistory;
 use std::cell::RefCell;
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{absolute, Path, PathBuf};
 
 pub struct Project {
     pub title: String,
@@ -25,9 +25,7 @@ impl Project {
         }
         directory.set_extension("");
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
-        let directory = directory
-            .canonicalize()
-            .expect("project directory path can be normalized");
+        let directory = absolute(directory).expect("project directory path can be normalized");
         log::info!("Project directory {}", &directory.to_string_lossy());
 
         let mut snapshots_dir = directory.clone();

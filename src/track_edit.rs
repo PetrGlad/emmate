@@ -125,11 +125,24 @@ pub fn tape_insert(range: &Range<Time>) -> Option<AppliedCommand> {
 pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand> {
     let delta = range.1 - range.0;
     assert!(delta >= 0);
+    let mut deletions = HashSet::new();
     let mut patch = vec![];
     for ev in &track.items {
         if range_contains(range, ev.at) {
-            patch.push(EventAction::Delete(ev.clone()));
+            deletions.insert(ev.id);
+            if let ev::Type::Note(n) = &ev.ev {
+                // Alternatively we could cut the note and keep the outside part.
+                if let Some(id) = n.other {
+                    deletions.insert(id);
+                }
+            }
         }
+    }
+    let lookup = track.positions();
+    for id in deletions {
+        patch.push(EventAction::Delete(
+            track.items[*lookup.get(&id).unwrap()].clone(),
+        ));
     }
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
@@ -265,7 +278,7 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
                     on: false,
                     pitch: *pitch,
                     velocity: MAX_LEVEL / 2,
-                    end: None,
+                    other: None,
                 }),
             }),
             EventAction::Insert(ev::Item {
@@ -275,7 +288,7 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
                     on: true,
                     pitch: *pitch,
                     velocity: MAX_LEVEL / 2,
-                    end: Some(off_id),
+                    other: Some(off_id),
                 }),
             }),
         ],
@@ -426,7 +439,7 @@ mod tests {
                 on: true,
                 pitch: 10,
                 velocity: 20,
-                end: None,
+                other: None,
             }),
         });
         events.push(ev::Item {
