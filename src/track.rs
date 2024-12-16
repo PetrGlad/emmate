@@ -206,7 +206,7 @@ pub fn from_midi_events(
                                 }),
                             });
                         }
-                        None => eprintln!("INFO NoteOff event without NoteOn {:?}", ev),
+                        None => log::warn!("NoteOff event without NoteOn {:?}", ev),
                         _ => panic!("ERROR Unexpected state: {:?} event in \"on\" queue.", on),
                     }
                 }
@@ -218,7 +218,7 @@ pub fn from_midi_events(
                         value: value.into(),
                     }),
                 }),
-                _ => eprintln!("DEBUG Event ignored {:?}", ev),
+                _ => log::trace!("Event ignored {:?}", ev),
             },
             _ => (),
         };

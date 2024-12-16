@@ -73,7 +73,7 @@ impl EmApp {
         let mut path = self.home_path.clone();
         path.push("export");
         if !path.is_dir() {
-            println!("Creating {}", path.to_string_lossy());
+            log::debug!("Creating export directory {}", path.to_string_lossy());
             fs::create_dir_all(&path).expect("Create export directory.");
         }
         path.push(
@@ -81,7 +81,7 @@ impl EmApp {
                 .format("%Y-%m-%d_%H-%M-%S.mid")
                 .to_string(),
         );
-        println!("Saving to {}", path.to_string_lossy());
+        log::info!("Saving to {}", path.to_string_lossy());
         self.stave.save_to(&PathBuf::from(path));
     }
 

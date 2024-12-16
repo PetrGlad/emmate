@@ -401,7 +401,7 @@ impl Stave {
 
                 if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
                     // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                    print!("WARN No animation params (a bookmark?).");
+                    log::trace!("No animation params (a bookmark?).");
                 }
             }
         }
@@ -822,7 +822,7 @@ impl Stave {
             if let Some(time) = time {
                 self.time_selection = Some(*time..*time);
             }
-        } else if response.drag_released_by(drag_button) {
+        } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
@@ -854,7 +854,7 @@ impl Stave {
                     });
                 }
             }
-        } else if response.drag_released_by(drag_button) {
+        } else if response.drag_stopped_by(drag_button) {
             if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.start, draw.time.end);

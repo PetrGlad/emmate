@@ -71,7 +71,7 @@ impl TrackHistory {
     fn update(&mut self, applied_command: &(EditCommandId, Vec<CommandDiff>)) {
         let (command_id, diff) = applied_command;
         if diff.is_empty() {
-            dbg!("No changes.");
+            log::trace!("No changes.");
             return;
         }
         // The changeset should be already applied to track by now.
@@ -109,14 +109,18 @@ impl TrackHistory {
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);
         if version.is_empty() {
-            println!("No track history found.");
+            log::info!("No track history found.");
             return false;
         }
         {
             let track = self.track.clone();
             track.edit(|track| self.apply_patches(changes, version, track));
         }
-        dbg!(self.version, version_id);
+        log::debug!(
+            "Actual version {}, required version {}",
+            self.version,
+            version_id
+        );
         self.write_meta();
         self.version == version_id
     }
@@ -134,7 +138,7 @@ impl TrackHistory {
         if let Some(snapshot_path) = version.snapshot_path {
             track.reset(util::load(&snapshot_path));
             self.set_version(version.id);
-            println!("Found a snapshot for revision {}.", version.id);
+            log::debug!("Found a snapshot for revision {}.", version.id);
         }
         // Replays
         while self.version < version.id {
@@ -216,7 +220,7 @@ impl TrackHistory {
     }
 
     pub fn with_directory(directory: &PathBuf) -> Self {
-        dbg!("history directory", directory.to_string_lossy());
+        log::info!("History directory {}", directory.to_string_lossy());
         Self {
             directory: directory.to_owned(),
             id_seq: Arc::new(IdSeq::new(0)),

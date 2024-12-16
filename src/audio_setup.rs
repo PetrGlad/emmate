@@ -22,19 +22,19 @@ pub fn midi_keyboard_input(
 ) -> Option<MidiInputConnection<()>> {
     let input = MidiInput::new("emmate").unwrap();
     let mut port_idx = None;
-    println!("Available MIDI input ports:");
+    log::debug!("Available MIDI input ports:");
     let ports = input.ports();
     for (i, port) in ports.iter().enumerate() {
         let name = input.port_name(&port).unwrap();
-        println!("\t{}", name);
+        log::debug!("\t{}", name);
         if name.starts_with(name_prefix) {
             port_idx = Some(i);
-            println!("Selected MIDI input: '{}'", name);
+            log::info!("Selected MIDI input: '{}'", name);
             break;
         }
     }
     if port_idx == None {
-        println!("WARN No midi input selected.");
+        log::warn!("WARN No midi input selected.");
         return None;
     }
     let port = ports.get(port_idx.unwrap()).unwrap();

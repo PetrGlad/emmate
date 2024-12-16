@@ -19,8 +19,8 @@ pub struct SmfSource {
 
 pub fn load_smf(smf_data: &Vec<u8>) -> (Vec<TrackEvent<'static>>, u32) {
     let smf = Smf::parse(smf_data).unwrap();
-    println!("SMF header {:#?}", &smf.header);
-    println!(
+    log::debug!("SMF header {:#?}", &smf.header);
+    log::debug!(
         "SMF file has {} tracks, format is {:?}.",
         smf.tracks.len(),
         smf.header.format
