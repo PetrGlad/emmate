@@ -1,14 +1,7 @@
-use std::cell::RefCell;
+use std::cell::{LazyCell, RefCell};
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
 use std::path::PathBuf;
-
-use eframe::egui::{
-    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
-    Rounding, Sense, Stroke, Ui,
-};
-use egui::Rgba;
-use ordered_float::OrderedFloat;
 
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
@@ -22,7 +15,14 @@ use crate::track_edit::{
     transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{util, Pix};
+use crate::{track, util, Pix};
+use eframe::egui::{
+    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
+    Rounding, Sense, Stroke, Ui,
+};
+use egui::Rgba;
+use ordered_float::OrderedFloat;
+use wmidi::Velocity;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -134,6 +134,9 @@ pub struct Stave {
     pub note_selection: NotesSelection,
     /// Change animation parameters.
     pub transition: Option<EditTransition>,
+
+    // Velocity -> note_color lookup map
+    note_colors: Vec<Color32>,
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -154,6 +157,18 @@ pub struct StaveResponse {
 
 impl Stave {
     pub fn new(history: RefCell<TrackHistory>) -> Stave {
+        let mut note_colors = vec![];
+        assert_eq!(Level::MIN, 0); // Otherwise need to adjust lookups.
+        for velocity in Level::MIN..Level::MAX {
+            note_colors.push(
+                egui::lerp(
+                    Rgba::from_rgb(0.6, 0.7, 0.7)..=Rgba::from_rgb(0.0, 0.0, 0.0),
+                    velocity as f32 / MAX_LEVEL as f32,
+                )
+                .into(),
+            );
+        }
+
         Stave {
             history,
             time_left: 0,
@@ -164,6 +179,7 @@ impl Stave {
             note_draw: None,
             note_selection: NotesSelection::default(),
             transition: None,
+            note_colors,
         }
     }
 
@@ -245,7 +261,7 @@ impl Stave {
                 {
                     let history = self.history.borrow();
                     let track = history.track.read();
-                    should_be_visible = self.draw_track(
+                    should_be_visible = self.draw_events(
                         &key_ys,
                         &half_tone_step,
                         &pointer_pos,
@@ -288,7 +304,7 @@ impl Stave {
             .inner
     }
 
-    fn draw_track(
+    fn draw_events(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
@@ -880,6 +896,14 @@ impl Stave {
         })
     }
 
+    fn note_color(&self, velocity: &Level, selected: bool) -> Color32 {
+        if selected {
+            COLOR_SELECTED.into()
+        } else {
+            self.note_colors[*velocity as usize]
+        }
+    }
+
     fn draw_track_note(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
@@ -894,7 +918,7 @@ impl Stave {
                 (event.at, event.at + note.duration),
                 *y,
                 *half_tone_step,
-                note_color(&note.velocity, self.note_selection.contains(&event)),
+                self.note_color(&note.velocity, self.note_selection.contains(&event)),
             ))
         } else {
             None
@@ -930,8 +954,8 @@ impl Stave {
         let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
         let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
 
-        let c_a = note_color(&v_a, is_selected);
-        let c_b = note_color(&v_b, is_selected);
+        let c_a = self.note_color(&v_a, is_selected);
+        let c_b = self.note_color(&v_b, is_selected);
         let color = Self::transition_color(c_a, c_b, coeff);
 
         self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
@@ -986,7 +1010,13 @@ impl Stave {
         height: Pix,
         selected: bool,
     ) {
-        self.draw_note(painter, x_range, y, height, note_color(&velocity, selected));
+        self.draw_note(
+            painter,
+            x_range,
+            y,
+            height,
+            self.note_color(&velocity, selected),
+        );
     }
 
     fn transition_color(color_a: Color32, color_b: Color32, coeff: f32) -> Color32 {
@@ -1030,8 +1060,8 @@ impl Stave {
 
             let t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
 
-            let c_a = note_color(&v1, false);
-            let c_b = note_color(&v2, false);
+            let c_a = self.note_color(&v1, false);
+            let c_b = self.note_color(&v2, false);
             let color = Self::transition_color(c_a, c_b, coeff);
             *should_be_visible = should_be_visible
                 .map(|r| (r.0.min(t2), r.1.max(t2)))
@@ -1060,7 +1090,7 @@ impl Stave {
                     (last_damper_value.0, event.at),
                     *y,
                     *half_tone_step,
-                    note_color(&cc.value, false),
+                    self.note_color(&cc.value, false),
                 );
                 *last_damper_value = (event.at, cc.value);
             }
@@ -1167,18 +1197,6 @@ fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
         .min_by_key(|(_, &y)| OrderedFloat((y - pointer_pos.y).abs()))
         .unwrap()
         .0
-}
-
-fn note_color(velocity: &Level, selected: bool) -> Color32 {
-    if selected {
-        COLOR_SELECTED.into()
-    } else {
-        egui::lerp(
-            Rgba::from_rgb(0.6, 0.7, 0.7)..=Rgba::from_rgb(0.0, 0.0, 0.0),
-            *velocity as f32 / MAX_LEVEL as f32,
-        )
-        .into()
-    }
 }
 
 #[cfg(test)]
