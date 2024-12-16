@@ -24,10 +24,11 @@ use crate::track_edit::{
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{util, Pix};
 
-// Tone 60 is C3, tones start at C-2 (21).
+// Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
-const PIANO_DAMPER_LINE: Pitch = PIANO_LOWEST_KEY - 1;
+/// Reserve this ley lane for damper display.
+const PIANO_DAMPER_LANE: Pitch = PIANO_LOWEST_KEY - 1;
 pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
     PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 // Lines including controller values placeholder.
@@ -247,8 +248,7 @@ impl Stave {
                     should_be_visible = self.draw_track(
                         &key_ys,
                         &half_tone_step,
-                        &pitch_hovered,
-                        &time_hovered,
+                        &pointer_pos,
                         &mut note_hovered,
                         &painter,
                         &track,
@@ -292,8 +292,7 @@ impl Stave {
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<Time>,
+        pointer_pos: &Option<Pos2>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
         track: &Track,
@@ -312,10 +311,6 @@ impl Stave {
             }
             match &event.event {
                 TrackEventType::Note(note) => {
-                    if Self::event_hovered(&pitch_hovered, &time_hovered, &event, &note.pitch) {
-                        // Alternatively, can return known rect from draw_track_note and check that.
-                        *note_hovered = Some(event.id);
-                    }
                     if self.note_selection.contains(&event) {
                         if x_range.max < self.x_from_time(event.at) {
                             selection_hints_right.insert(note.pitch);
@@ -323,7 +318,21 @@ impl Stave {
                             selection_hints_left.insert(note.pitch);
                         }
                     }
-                    self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
+                    let note_rect =
+                        self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
+                    // Alternatively, can return the known rect from draw_track_note above and check that.
+                    if let Some(r) = note_rect {
+                        if let Some(&pointer_pos) = pointer_pos.as_ref() {
+                            if r.contains(pointer_pos) {
+                                *note_hovered = Some(event.id);
+                                painter.rect_stroke(
+                                    r,
+                                    Rounding::ZERO,
+                                    Stroke::new(2.0, COLOR_HOVERED),
+                                );
+                            }
+                        }
+                    }
                 }
                 TrackEventType::Controller(cc) => self.draw_track_cc(
                     &key_ys,
@@ -835,7 +844,7 @@ impl Stave {
                     let time_range = (draw.time.start, draw.time.end);
                     let id_seq = &self.history.borrow().id_seq.clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                        if draw.pitch == PIANO_DAMPER_LINE {
+                        if draw.pitch == PIANO_DAMPER_LANE {
                             set_damper(id_seq, track, &time_range, !modifiers.alt)
                         } else {
                             add_new_note(id_seq, &time_range, &draw.pitch)
@@ -878,15 +887,17 @@ impl Stave {
         painter: &Painter,
         event: &TrackEvent,
         note: &Note,
-    ) {
+    ) -> Option<Rect> {
         if let Some(y) = key_ys.get(&note.pitch) {
-            self.draw_note(
+            Some(self.draw_note(
                 &painter,
                 (event.at, event.at + note.duration),
                 *y,
                 *half_tone_step,
                 note_color(&note.velocity, self.note_selection.contains(&event)),
-            );
+            ))
+        } else {
+            None
         }
     }
 
@@ -933,7 +944,7 @@ impl Stave {
         y: Pix,
         height: Pix,
         color: Color32,
-    ) {
+    ) -> Rect {
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(time_range.0),
@@ -945,6 +956,7 @@ impl Stave {
             },
         };
         painter.rect_filled(paint_rect, Rounding::ZERO, color);
+        paint_rect
     }
 
     fn draw_point_accent(
@@ -1012,7 +1024,7 @@ impl Stave {
         b: Option<(Time, Level)>,
     ) {
         assert!(a.is_some() || b.is_some());
-        if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+        if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
             let (t1, v1) = a.or(b).unwrap();
             let (t2, v2) = b.or(a).unwrap();
 
@@ -1040,7 +1052,7 @@ impl Stave {
         cc: &ControllerSetValue,
     ) {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            if let Some(y) = key_ys.get(&PIANO_DAMPER_LINE) {
+            if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
                 // TODO (visuals, improvement) The time range here is not right: is shown up to the event,
                 //   should be from the event to the next one instead.
                 self.draw_note(
