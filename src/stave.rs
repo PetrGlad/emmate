@@ -247,8 +247,8 @@ impl Stave {
                     should_be_visible = self.draw_track(
                         &key_ys,
                         &half_tone_step,
-                        &mut pitch_hovered,
-                        &mut time_hovered,
+                        &pitch_hovered,
+                        &time_hovered,
                         &mut note_hovered,
                         &painter,
                         &track,
