@@ -281,7 +281,7 @@ impl Stave {
                     response: egui_response,
                     pitch_hovered,
                     time_hovered,
-                    note_hovered: note_hovered,
+                    note_hovered,
                     modifiers: ui.input(|i| i.modifiers),
                 }
             })
@@ -445,13 +445,10 @@ impl Stave {
     ) -> bool {
         if let Some(t) = &time_hovered {
             if let Some(p) = pitch_hovered {
-                event.is_active(*t) && p == pitch
-            } else {
-                false
+                return event.is_active(*t) && p == pitch;
             }
-        } else {
-            false
         }
+        false
     }
 
     const KEYBOARD_TIME_STEP: Time = 10_000;
@@ -861,7 +858,7 @@ impl Stave {
             x,
             painter.clip_rect().y_range(),
             Stroke { width: 2.0, color },
-        )
+        );
     }
 
     fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
@@ -1114,7 +1111,7 @@ impl Stave {
                 width: 1.0,
                 color: color.gamma_multiply(2.0),
             },
-        )
+        );
     }
 
     fn ensure_visible(&mut self, at: Time) {

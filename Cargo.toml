@@ -1,25 +1,29 @@
 [package]
 name = "emmate"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
+authors = ["Petr <petrglad@gmail.com>"]
+description = "A MIDI editor."
+homepage = "https://github.com/PetrGlad/emmate"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# See also https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.dev]
 panic = 'abort'
 
+[profile.release]
+debug = true
+
 [dependencies]
-
-ordered-float = "4.1.0"
-
-eframe = { version = "0.23.0" }
-egui_extras = { version = "0.23.0" }
+ordered-float = "4.5.0"
+eframe = { version = "0.29.1" }
+egui_extras = { version = "0.29.1" }
 
 # https://github.com/negamartin/midly
 midly = { version = "0.5.3", features = ["alloc"] }
 
 # https://github.com/RustAudio/wmidi
-wmidi = "4.0.8"
+wmidi = "4.0.10"
 
 # https://github.com/Fluhzar/WAV
 # wav = "1.0.0"
@@ -38,21 +42,27 @@ wmidi = "4.0.8"
 # cpal = "0.15.2"
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
-midir = "0.9.1"
+midir = "0.10.0"
 
-log = "0.4.20"
-stderrlog = "0.5.4"
+log = "0.4.22"
+env_logger = "0.11.5"
 
-toml = "0.8.6"
-serde = "1.0.191"
-rmp = "0.8.12"
-rmp-serde = "1.1.2"
-clap = "4.4.6"
-chrono = "0.4.31"
+toml = "0.8.19"
+serde = "1.0.209"
+rmp = "0.8.14"
+rmp-serde = "1.3.0"
+clap = { version = "4.5.16", features = ["cargo"] }
+chrono = "0.4.38"
 glob = "0.3.1"
-regex = "1.10.2"
-flate2 = "1.0.28"
+regex = "1.10.6"
+flate2 = "1.0.33"
 sync_cow = "0.1.1"
+strum_macros = "0.26.4"
+clap_complete = "4.5.24"
+indoc = "2"
+dirs = "5"
+
+num = "0.4.3"
 # rhai = "1.19.0"
 
 # These may be useful
@@ -64,4 +74,4 @@ sync_cow = "0.1.1"
 # rand = "0.8.5"
 
 [dev-dependencies]
-proptest = "1.3.1"
+proptest = "1.5.0"

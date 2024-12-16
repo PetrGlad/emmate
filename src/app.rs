@@ -17,6 +17,7 @@ enum Message {
 }
 
 pub struct EmApp {
+    title: String,
     home_path: PathBuf,
     stave: Stave,
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
@@ -33,6 +34,7 @@ impl EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
 
         let app = EmApp {
+            title: project.title,
             home_path: project.home_path,
             stave: Stave::new(project.history),
             engine_command_send,
@@ -103,8 +105,6 @@ impl eframe::App for EmApp {
                 }
             }
         }
-
-        ctx.set_pixels_per_point(1.5);
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -139,7 +139,7 @@ impl eframe::App for EmApp {
 
             {
                 let h = self.stave.history.borrow();
-                ui.heading(format!("🌲 {} [{}]", h.directory.display(), h.version()));
+                ui.heading(format!("🌲 {} [{}]", self.title, h.version()));
             }
             StripBuilder::new(ui)
                 .size(Size::remainder())
@@ -149,11 +149,11 @@ impl eframe::App for EmApp {
                     strip.cell(|ui| {
                         let response = self.stave.show(ui);
                         if let Some(hover_pos) = response.ui_response.hover_pos() {
-                            let zoom_factor = ui.input(|i| i.zoom_delta());
-                            if zoom_factor != 1.0 {
-                                self.stave.zoom(zoom_factor, hover_pos.x);
+                            let dz = ui.input(|i| i.zoom_delta());
+                            if dz != 1.0 {
+                                self.stave.zoom(dz, hover_pos.x);
                             }
-                            let scroll_delta = ui.input(|i| i.scroll_delta);
+                            let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
                             if scroll_delta != Vec2::ZERO {
                                 self.stave.scroll_by(scroll_delta.x);
                             }
