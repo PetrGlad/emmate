@@ -148,6 +148,7 @@ impl eframe::App for EmApp {
                 .vertical(|mut strip| {
                     strip.cell(|ui| {
                         let response = self.stave.show(ui);
+
                         if let Some(hover_pos) = response.ui_response.hover_pos() {
                             let dz = ui.input(|i| i.zoom_delta());
                             if dz != 1.0 {

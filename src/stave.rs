@@ -1,8 +1,3 @@
-use std::cell::{LazyCell, RefCell};
-use std::collections::{BTreeMap, HashSet};
-use std::ops::Range;
-use std::path::PathBuf;
-
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::track::{
@@ -16,12 +11,18 @@ use crate::track_edit::{
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{track, util, Pix};
+use chrono::Duration;
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Rounding, Sense, Stroke, Ui,
 };
+use eframe::emath;
 use egui::Rgba;
 use ordered_float::OrderedFloat;
+use std::cell::{LazyCell, RefCell};
+use std::collections::{BTreeMap, HashSet};
+use std::ops::Range;
+use std::path::PathBuf;
 use wmidi::Velocity;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
@@ -203,11 +204,16 @@ impl Stave {
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
-        // Zoom so that position under mouse pointer stays put.
+        // Zoom so that time position under mouse pointer stays put.
         // TODO (cleanup) Consider using emath::remap
         let at = self.time_from_x(mouse_x);
         self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time;
         self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time;
+    }
+
+    pub fn zoom_to_fit(&mut self, time_margin: Time) {
+        self.time_left = -time_margin;
+        self.time_right = self.history.borrow().with_track(|tr| tr.max_time()) + time_margin;
     }
 
     pub fn scroll(&mut self, dt: Time) {
@@ -627,6 +633,12 @@ impl Stave {
             self.do_edit_command(&response.ctx, response.id, |stave, track| {
                 accent_selected_notes(track, &stave.note_selection.selected, -1)
             });
+        }
+
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::ALT, egui::Key::A))
+        }) {
+            self.zoom_to_fit(Duration::seconds(3).num_microseconds().unwrap_or_default());
         }
 
         // Undo/redo

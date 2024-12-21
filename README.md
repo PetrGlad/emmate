@@ -70,16 +70,13 @@ I use Pianoteq, but that is a commercial product.
 
 ## TODO
 
-- [ ] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
-  of note ranges.
 - [ ] (refactoring) Reduce number of range types (prefer util::Range?)
 - [ ] Adjust tempo for a selection.
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs?
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
-- [ ] Zoom to fit whole composition.
-- [ ] The sustain lane is left in an inconsistent state sometines (needs investigation).
+- [ ] After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
@@ -88,6 +85,9 @@ I use Pianoteq, but that is a commercial product.
 - [ ] "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
+- [x] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
+  of note ranges. -- Decided not to. See latest working version of this revamp at `events-revamp` branch.
+- [x] Zoom to fit whole composition.
 - [x] (refactoring) Minimize use of unwrap. The biggest contention currently is event data shared between
   engine and stave. Maybe can do this with async or sending update commands to the engine thread (e.g. can just swap to
   new track copy in the engine's events source after edits).
