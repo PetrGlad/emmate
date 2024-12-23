@@ -18,6 +18,7 @@ use crate::track_source::TrackSource;
 mod app;
 mod audio_setup;
 mod changeset;
+mod clipboard;
 mod common;
 mod config;
 mod engine;
@@ -72,9 +73,9 @@ pub fn main() {
     log::info!("MIDI file name {:?}", midi_file_path);
     let project = Project::open_file(midi_file_path);
 
-    let midi_output = MidiOutput::new("emmate")
+    let midi_output = MidiOutput::new(common::APP_NAME)
         .expect("MIDI sequencer client")
-        .create_virtual("emmate")
+        .create_virtual(common::APP_NAME)
         .expect("MIDI sequencer out");
 
     // Stream and engine references keep them open.
@@ -107,7 +108,7 @@ pub fn main() {
         ..Default::default()
     };
     eframe::run_native(
-        "emmate",
+        common::APP_NAME,
         native_options,
         Box::new(|ctx| {
             ctx.egui_ctx.set_visuals(egui::Visuals::light());
