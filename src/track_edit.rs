@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-
+use eframe::emath;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
@@ -137,32 +137,51 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
 
 /// `ratio` - 1.0 no change, <1.0 srink/sped-up, >1.0 extend/slow-down.
 pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<AppliedCommand> {
+    debug_assert!(
+        0.1 < ratio && ratio < 10.0,
+        "tempo adjustment is unexpectedly large {ratio}"
+    );
     if ratio == 1.0 {
         return None;
     }
     let mut patch = vec![];
     for ev in &track.events {
         if ev.intersects(&range) {
-            todo!("stretch time here")
-            // patch.push(EventAction::Delete(ev.clone()));
+            let mut updated = ev.clone();
+            updated.at = range.0 + ((updated.at - range.0) as f32 * ratio) as Time;
+            patch.push(EventAction::Update(ev.clone(), updated));
         }
     }
-
-    let delta = ((range.1 - range.0) as f32 * ratio) as Time;
+    let delta = ((range.1 - range.0) as f32 * (ratio - 1.0)) as Time;
     assert!(delta >= 0);
-    checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
-        (
-            EditCommandId::TapeStretch,
-            vec![CommandDiff::ChangeList { patch }, tail_shift],
-        )
-    })
+    // FIXME (editing, implementation) Keep the tail shift undoable.
+    // checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
+    //     (
+    //         EditCommandId::TapeStretch,
+    //         vec![CommandDiff::ChangeList { patch }, tail_shift],
+    //     )
+    // })
+    log::warn!("<NOT IMPLEMENTED> Not checking shift constraints.");
+    Some((
+        EditCommandId::TapeStretch,
+        vec![
+            CommandDiff::ChangeList { patch },
+            CommandDiff::TailShift {
+                at: range.1,
+                delta: delta,
+            },
+        ],
+    ))
 }
 
+/// `at` A "current" position that limits how far tail can be shifted earlier/to the left.
+/// `after` Start of the tail to be shifted.
+/// `delta` How far to shift events, can be negative.
 fn checked_tail_shift(track: &Track, at: &Time, after: &Time, delta: &Time) -> Option<CommandDiff> {
     // Ensure that when applied, the command will still be undoable.
     // If we allow events to move earlier than 'at' time, then on undo we should somehow
     // find them still while not confusing them with unchanged events in (at - delta, at]
-    // range (when if delta > 0). Track events are expected to be in sorted order.
+    // range (when if delta > 0). Track events are expected to be already in sorted order.
     let idx = track.events.partition_point(|x| x.at < *after);
     if idx < track.events.len() {
         let ev_at = track.events[idx].at;
@@ -170,7 +189,8 @@ fn checked_tail_shift(track: &Track, at: &Time, after: &Time, delta: &Time) -> O
             return None;
         }
     }
-    // TODO (usability) When shifting earlier adjust last delta so the events will start exactly at 'at'.
+    // TODO (usability) When shifting earlier adjust last delta so the
+    //      events will start exactly at 'at'.
     Some(CommandDiff::TailShift {
         at: *at,
         delta: *delta,

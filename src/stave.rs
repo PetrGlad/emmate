@@ -6,7 +6,7 @@ use crate::track::{
 };
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
-    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
     transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
@@ -499,6 +499,33 @@ impl Stave {
             self.note_selection.clear();
         }
 
+        // Tempo adjustment
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::SHIFT,
+                egui::Key::CloseBracket,
+            ))
+        }) {
+            if let Some(time_selection) = &self.time_selection.clone() {
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                    // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
+                    tape_stretch(track, &(time_selection.start, time_selection.end), 1.01)
+                });
+            }
+        }
+        if response.ctx.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                Modifiers::SHIFT,
+                egui::Key::OpenBracket,
+            ))
+        }) {
+            if let Some(time_selection) = &self.time_selection.clone() {
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                    // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
+                    tape_stretch(track, &(time_selection.start, time_selection.end), 0.99)
+                });
+            }
+        }
         // Tape insert/remove
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
