@@ -9,8 +9,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 /// Half-open range [a, b).
-/// My favorite implementation I wish were in std.
-/// The trait impl should be enough, this type alias helps to clarify intent.
+/// My favorite implementation that I wish were in std.
+/// The trait impl and a tuple should be enough, this type alias helps to clarify intent.
 pub type Range<T> = (T, T);
 
 pub trait RangeLike<T> {

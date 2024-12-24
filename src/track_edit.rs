@@ -16,6 +16,7 @@ pub enum EditCommandId {
     ShiftTail,
     TapeInsert,
     TapeDelete,
+    TapeStretch,
     AddNote,
     DeleteEvents,
     SetDamper,
@@ -129,6 +130,29 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
             EditCommandId::TapeInsert,
+            vec![CommandDiff::ChangeList { patch }, tail_shift],
+        )
+    })
+}
+
+/// `ratio` - 1.0 no change, <1.0 srink/sped-up, >1.0 extend/slow-down.
+pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<AppliedCommand> {
+    if ratio == 1.0 {
+        return None;
+    }
+    let mut patch = vec![];
+    for ev in &track.events {
+        if ev.intersects(&range) {
+            todo!("stretch time here")
+            // patch.push(EventAction::Delete(ev.clone()));
+        }
+    }
+
+    let delta = ((range.1 - range.0) as f32 * ratio) as Time;
+    assert!(delta >= 0);
+    checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
+        (
+            EditCommandId::TapeStretch,
             vec![CommandDiff::ChangeList { patch }, tail_shift],
         )
     })
