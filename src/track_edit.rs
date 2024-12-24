@@ -9,7 +9,6 @@ use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
-use crate::track_edit::CommandDiff::ChangeList;
 use crate::util::{range_contains, IdSeq, Range};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -123,7 +122,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     assert!(delta >= 0);
     let mut patch = vec![];
     for ev in &track.events {
-        if range_contains(range, ev.at) {
+        if ev.intersects(&range) {
             patch.push(EventAction::Delete(ev.clone()));
         }
     }

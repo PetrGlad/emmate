@@ -476,7 +476,7 @@ impl Stave {
     ) -> bool {
         if let Some(t) = &time_hovered {
             if let Some(p) = pitch_hovered {
-                return event.is_active(*t) && p == pitch;
+                return event.is_active_at(*t) && p == pitch;
             }
         }
         false

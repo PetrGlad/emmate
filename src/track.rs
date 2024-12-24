@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::midi;
-use crate::util::{is_ordered, IdSeq};
+use crate::util::{is_ordered, range_contains, ranges_intersect, IdSeq, Range};
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -58,10 +58,21 @@ pub struct TrackEvent {
 }
 
 impl TrackEvent {
-    pub fn is_active(&self, at: Time) -> bool {
+    pub fn is_active_at(&self, at: Time) -> bool {
         match &self.event {
-            TrackEventType::Note(n) => (self.at..(self.at + n.duration)).contains(&at),
+            TrackEventType::Note(n) => range_contains(&(self.at, self.at + n.duration), at),
             _ => false,
+        }
+    }
+
+    pub fn intersects(&self, time_range: &Range<Time>) -> bool {
+        match &self.event {
+            TrackEventType::Note(n) => {
+                ranges_intersect(&time_range, &(self.at, self.at + n.duration))
+            }
+            TrackEventType::Bookmark | TrackEventType::Controller(_) => {
+                range_contains(&time_range, self.at)
+            }
         }
     }
 }
