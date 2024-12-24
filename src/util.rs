@@ -8,17 +8,29 @@ use flate2::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-// Half-open range [a, b).
+/// Half-open range [a, b).
+/// My favorite implementation I wish were in std.
+/// The trait impl should be enough, this type alias helps to clarify intent.
 pub type Range<T> = (T, T);
 
-// Could not find a simple library for this.
-#[allow(dead_code)]
-pub fn ranges_intersect<T: Ord>(a: &Range<T>, b: &Range<T>) -> bool {
-    a.0 < b.1 && b.0 < a.1
+pub trait RangeLike<T> {
+    fn intersects(&self, other: &Self) -> bool;
+    fn contains(&self, x: &T) -> bool;
+    fn is_empty(&self) -> bool;
 }
 
-pub fn range_contains<T: Ord>(r: &Range<T>, x: T) -> bool {
-    r.0 <= x && x < r.1
+impl<T: Ord> RangeLike<T> for (T, T) {
+    fn intersects(&self, other: &Self) -> bool {
+        self.0 <= other.1 && other.0 < self.1
+    }
+
+    fn contains(&self, x: &T) -> bool {
+        self.0 <= *x && *x < self.1
+    }
+
+    fn is_empty(&self) -> bool {
+        self.1 <= self.0
+    }
 }
 
 pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
@@ -78,11 +90,26 @@ mod tests {
 
     #[test]
     fn check_range_contains() {
-        assert!(!range_contains(&(0, -1), 0));
-        assert!(!range_contains(&(0, 0), 0));
-        assert!(range_contains(&(0, 1), 0));
-        assert!(!range_contains(&(0, 1), 1));
-        assert!(!range_contains(&(0, 1), 2));
+        assert!(!(0, -1).contains(&0));
+        assert!(!(0, 0).contains(&0));
+        assert!((0, 1).contains(&0));
+        assert!(!(0, 1).contains(&1));
+        assert!(!(0, 1).contains(&2));
+    }
+
+    #[test]
+    fn check_ranges_intersect() {
+        assert!((0, 0).is_empty());
+        assert!(!(0, 1).is_empty());
+        assert!(!(0, 0).intersects(&(0, 1))); // Empty
+        assert!(!(0, 1).intersects(&(1, 2))); // End is not included
+
+        assert!((0, 1).intersects(&(0, 1)));
+        assert!((0, 1).intersects(&(0, 2)));
+        assert!((0, 1).intersects(&(-1, 0))); // Start is not included
+        assert!((0, 1).intersects(&(-1, 1)));
+        assert!((0, 1).intersects(&(-1, 2)));
+        assert!((-1, 2).intersects(&(0, 1)));
     }
 
     #[test]

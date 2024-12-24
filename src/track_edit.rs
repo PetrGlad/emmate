@@ -9,7 +9,7 @@ use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
-use crate::util::{range_contains, IdSeq, Range};
+use crate::util::{IdSeq, Range, RangeLike};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
@@ -338,7 +338,7 @@ fn clear_cc_events(
     patch: &mut Vec<EventAction>,
 ) {
     for ev in &track.events {
-        if range_contains(range, ev.at) {
+        if range.contains(&ev.at) {
             if let TrackEventType::Controller(cc) = &ev.event {
                 if cc.controller_id == cc_id {
                     patch.push(EventAction::Delete(ev.clone()));
@@ -377,7 +377,7 @@ pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedC
     }
     Some((
         EditCommandId::SetBookmark,
-        vec![ChangeList {
+        vec![CommandDiff::ChangeList {
             patch: vec![EventAction::Insert(TrackEvent {
                 id: id_seq.next(),
                 at: *at,
@@ -391,7 +391,7 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     if let Some(bm) = bookmark_at(track, at) {
         Some((
             EditCommandId::ClearBookmark,
-            vec![ChangeList {
+            vec![CommandDiff::ChangeList {
                 patch: vec![EventAction::Delete(bm.clone())],
             }],
         ))
