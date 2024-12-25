@@ -153,7 +153,9 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
     }
     let mut patch = vec![];
     for ev in &track.events {
-        if ev.intersects(&range) {
+        // Do not know what to do with notes that start before the range yet.
+        // Filtering them out for now.
+        if ev.intersects(&range) && range.0 <= ev.at {
             let mut updated = ev.clone();
             let offset = ((updated.at - range.0) as f64 * ratio as f64) as Time;
             assert!(offset >= 0);
@@ -173,28 +175,32 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
         }
     }
     if ratio < 1.0 {
-        tail_shift = checked_tail_shift(&track, &range.0, &range.1, &delta);
+        // FIXME Set the right value for `after`.
+        tail_shift = checked_tail_shift(&track, &range.1, &range.1, &delta);
     }
     tail_shift.map(|tail_shift| {
-        (
-            EditCommandId::TapeStretch,
-            vec![CommandDiff::ChangeList { patch }, tail_shift],
-        )
+        // First should free space with shift then scale events' time
+        let mut diffs = vec![tail_shift, CommandDiff::ChangeList { patch }];
+        if ratio < 1.0 {
+            diffs.reverse()
+        };
+        (EditCommandId::TapeStretch, diffs)
     })
 }
 
-/// `at` A "current" position that limits how far tail can be shifted earlier/to the left.
-/// `after` Start of the tail to be shifted.
+/// `at` Start of the tail to be shifted.
+/// `after` A position that limits how far tail can be shifted earlier/to the left.
 /// `delta` How far to shift events, can be negative.
 fn checked_tail_shift(track: &Track, at: &Time, after: &Time, delta: &Time) -> Option<CommandDiff> {
     // Ensure that when applied, the command will still be undoable.
     // If we allow events to move earlier than 'at' time, then on undo we should somehow
-    // find them still while not confusing them with unchanged events in (at - delta, at]
-    // range (when if delta > 0). Track events are expected to be already in sorted order.
+    // find them still while not confusing them with unchanged events in (at-delta, at]
+    // range (when if delta > 0).
+    // Track events are expected to be already in sorted order.
     let idx = track.events.partition_point(|x| x.at < *after);
     if idx < track.events.len() {
-        let ev_at = track.events[idx].at;
-        if ev_at + delta < *at {
+        if track.events[idx].at + delta < *at {
+            log::debug!("Tail shift bump at t={}.", &at);
             return None;
         }
     }
