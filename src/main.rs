@@ -24,6 +24,7 @@ mod config;
 mod engine;
 mod midi;
 mod project;
+mod range;
 mod stave;
 mod track;
 mod track_edit;

@@ -1,5 +1,6 @@
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
+use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
     export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
     MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
@@ -10,20 +11,17 @@ use crate::track_edit::{
     transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{track, util, Pix};
+use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Rounding, Sense, Stroke, Ui,
 };
-use eframe::emath;
 use egui::Rgba;
 use ordered_float::OrderedFloat;
-use std::cell::{LazyCell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
-use std::ops::Range;
 use std::path::PathBuf;
-use wmidi::Velocity;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -31,15 +29,15 @@ const PIANO_KEY_COUNT: Pitch = 88;
 /// Reserve this ley lane for damper display.
 const PIANO_DAMPER_LANE: Pitch = PIANO_LOWEST_KEY - 1;
 pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
-    PIANO_LOWEST_KEY..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+    (PIANO_LOWEST_KEY, PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 // Lines including controller values placeholder.
-const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1)..(PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1, PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
     let mut lines = BTreeMap::new();
     let step = view_y_range.span() / pitches.len() as Pix;
     let mut y = view_y_range.max - step / 2.0;
-    for p in pitches {
+    for p in pitches.range() {
         lines.insert(p, y);
         y -= step;
     }
@@ -232,7 +230,7 @@ impl Stave {
         );
     }
 
-    const NOTHING_ZONE: Range<Time> = Time::MIN..0;
+    const NOTHING_ZONE: Range<Time> = (Time::MIN, 0);
 
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
         Frame::none()
@@ -286,7 +284,7 @@ impl Stave {
                     self.default_draw_note(
                         &painter,
                         64,
-                        (new_note.time.start, new_note.time.end),
+                        (new_note.time.0, new_note.time.1),
                         *key_ys.get(&new_note.pitch).unwrap(),
                         half_tone_step,
                         true,
@@ -318,7 +316,7 @@ impl Stave {
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
         track: &Track,
-    ) -> Option<util::Range<Time>> {
+    ) -> Option<range::Range<Time>> {
         let mut last_damper_value: (Time, Level) = (0, 0);
         let x_range = painter.clip_rect().x_range();
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
@@ -509,7 +507,7 @@ impl Stave {
             if let Some(time_selection) = &self.time_selection.clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
-                    tape_stretch(track, &(time_selection.start, time_selection.end), 1.01)
+                    tape_stretch(track, &(time_selection.0, time_selection.1), 1.01)
                 });
             }
         }
@@ -522,7 +520,7 @@ impl Stave {
             if let Some(time_selection) = &self.time_selection.clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
-                    tape_stretch(track, &(time_selection.start, time_selection.end), 0.99)
+                    tape_stretch(track, &(time_selection.0, time_selection.1), 0.99)
                 });
             }
         }
@@ -535,7 +533,7 @@ impl Stave {
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    tape_delete(track, &(time_selection.start, time_selection.end))
+                    tape_delete(track, &(time_selection.0, time_selection.1))
                 });
             }
             if !self.note_selection.selected.is_empty() {
@@ -553,7 +551,7 @@ impl Stave {
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
-                    tape_insert(&(time_selection.start, time_selection.end))
+                    tape_insert(&(time_selection.0, time_selection.1))
                 });
             }
         }
@@ -859,14 +857,14 @@ impl Stave {
             self.time_selection = None;
         } else if response.drag_started_by(drag_button) {
             if let Some(time) = time {
-                self.time_selection = Some(*time..*time);
+                self.time_selection = Some((*time, *time));
             }
         } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
                 if let Some(selection) = &mut self.time_selection {
-                    selection.end = *time;
+                    selection.1 = *time;
                 }
             }
         }
@@ -888,7 +886,7 @@ impl Stave {
             if let Some(time) = time {
                 if let Some(pitch) = pitch {
                     self.note_draw = Some(NoteDraw {
-                        time: *time..*time,
+                        time: (*time, *time),
                         pitch: *pitch,
                     });
                 }
@@ -896,7 +894,7 @@ impl Stave {
         } else if response.drag_stopped_by(drag_button) {
             if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
-                    let time_range = (draw.time.start, draw.time.end);
+                    let time_range = (draw.time.0, draw.time.1);
                     let id_seq = &self.history.borrow().id_seq.clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                         if draw.pitch == PIANO_DAMPER_LANE {
@@ -911,7 +909,7 @@ impl Stave {
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
                 if let Some(draw) = &mut self.note_draw {
-                    draw.time.end = *time;
+                    draw.time.1 = *time;
                 }
             }
         }
@@ -969,7 +967,7 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
-        should_be_visible: &mut Option<util::Range<Time>>,
+        should_be_visible: &mut Option<range::Range<Time>>,
         coeff: f32,
         is_selected: bool,
         a: Option<((Time, Time), Pitch, Level)>,
@@ -1087,7 +1085,7 @@ impl Stave {
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         painter: &Painter,
-        should_be_visible: &mut Option<util::Range<Time>>,
+        should_be_visible: &mut Option<range::Range<Time>>,
         coeff: f32,
         a: Option<(Time, Level)>,
         b: Option<(Time, Level)>,
@@ -1168,11 +1166,11 @@ impl Stave {
         let clip = painter.clip_rect();
         let area = Rect {
             min: Pos2 {
-                x: self.x_from_time(selection.start),
+                x: self.x_from_time(selection.0),
                 y: clip.min.y,
             },
             max: Pos2 {
-                x: self.x_from_time(selection.end),
+                x: self.x_from_time(selection.1),
                 y: clip.max.y,
             },
         };
@@ -1239,6 +1237,4 @@ fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}

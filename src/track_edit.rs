@@ -1,15 +1,15 @@
-use eframe::emath;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
+use crate::range::{Range, RangeLike};
 use crate::stave::PIANO_KEY_LINES;
 use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
-use crate::util::{IdSeq, Range, RangeLike};
+use crate::util::IdSeq;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
@@ -153,7 +153,6 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
         }
     }
     let delta = ((range.1 - range.0) as f32 * (ratio - 1.0)) as Time;
-    assert!(delta >= 0);
     // FIXME (editing, implementation) Keep the tail shift undoable.
     // checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
     //     (

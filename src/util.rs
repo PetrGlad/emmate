@@ -8,31 +8,6 @@ use flate2::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-/// Half-open range [a, b).
-/// My favorite implementation that I wish were in std.
-/// The trait impl and a tuple should be enough, this type alias helps to clarify intent.
-pub type Range<T> = (T, T);
-
-pub trait RangeLike<T> {
-    fn intersects(&self, other: &Self) -> bool;
-    fn contains(&self, x: &T) -> bool;
-    fn is_empty(&self) -> bool;
-}
-
-impl<T: Ord> RangeLike<T> for (T, T) {
-    fn intersects(&self, other: &Self) -> bool {
-        self.0 <= other.1 && other.0 < self.1
-    }
-
-    fn contains(&self, x: &T) -> bool {
-        self.0 <= *x && *x < self.1
-    }
-
-    fn is_empty(&self) -> bool {
-        self.1 <= self.0
-    }
-}
-
 pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
     for (a, b) in seq.iter().zip(seq.iter().skip(1)) {
         if a > b {
@@ -87,30 +62,6 @@ pub fn store<T: Serialize>(x: &T, file_path: &PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn check_range_contains() {
-        assert!(!(0, -1).contains(&0));
-        assert!(!(0, 0).contains(&0));
-        assert!((0, 1).contains(&0));
-        assert!(!(0, 1).contains(&1));
-        assert!(!(0, 1).contains(&2));
-    }
-
-    #[test]
-    fn check_ranges_intersect() {
-        assert!((0, 0).is_empty());
-        assert!(!(0, 1).is_empty());
-        assert!(!(0, 0).intersects(&(0, 1))); // Empty
-        assert!(!(0, 1).intersects(&(1, 2))); // End is not included
-
-        assert!((0, 1).intersects(&(0, 1)));
-        assert!((0, 1).intersects(&(0, 2)));
-        assert!((0, 1).intersects(&(-1, 0))); // Start is not included
-        assert!((0, 1).intersects(&(-1, 1)));
-        assert!((0, 1).intersects(&(-1, 2)));
-        assert!((-1, 2).intersects(&(0, 1)));
-    }
 
     #[test]
     fn check_is_ordered() {

@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::midi;
-use crate::util::{is_ordered, IdSeq, Range, RangeLike};
+use crate::range::{Range, RangeLike};
+use crate::util::{is_ordered, IdSeq};
 
 pub type Pitch = u8;
 pub type ControllerId = u8;

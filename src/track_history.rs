@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
