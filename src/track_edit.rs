@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
-use crate::range::{Range, RangeLike};
+use crate::range::{Range, RangeLike, RangeSpan};
 use crate::stave::PIANO_KEY_LINES;
 use crate::track::{
     is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
@@ -101,8 +101,9 @@ fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changes: &mut EventActi
         if *at < ev.at {
             assert!(
                 *at < (ev.at + delta),
-                "the shift_tail is not undoable at={}, delta={}",
+                "the shift_tail is not undoable at={}, ev.at={}, delta={}",
                 at,
+                ev.at,
                 delta
             );
             changes.push(shift_event(&ev, delta));
@@ -135,8 +136,9 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     })
 }
 
-/// `ratio` - 1.0 no change, <1.0 srink/sped-up, >1.0 extend/slow-down.
+/// `ratio` 1.0 no change, `<1.0 srink/sped-up, >1.0 extend/slow-down.
 pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<AppliedCommand> {
+    // TODO (implementation) After this action the time selection length should also be adjusted accordingly.
     debug_assert!(
         0.1 < ratio && ratio < 10.0,
         "tempo adjustment is unexpectedly large {ratio}"
@@ -144,33 +146,41 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
     if ratio == 1.0 {
         return None;
     }
+    let delta = (range.len() as f32 * (ratio - 1.0)) as Time;
+    let mut tail_shift = None;
+    if ratio > 1.0 {
+        tail_shift = checked_tail_shift(&track, &range.1, &range.1, &delta);
+    }
     let mut patch = vec![];
     for ev in &track.events {
         if ev.intersects(&range) {
             let mut updated = ev.clone();
-            updated.at = range.0 + ((updated.at - range.0) as f32 * ratio) as Time;
+            let offset = ((updated.at - range.0) as f64 * ratio as f64) as Time;
+            assert!(offset >= 0);
+            updated.at = range.0 + offset;
+            match &mut updated.event {
+                TrackEventType::Note(n) => {
+                    n.duration = (n.duration as f32 * ratio) as Time;
+                    debug_assert!(
+                        n.duration > 0,
+                        "tape_stretch: Note duration underflow (event id={}. Do not know how to handle it yet.",
+                        ev.id
+                    )
+                }
+                _ => {}
+            }
             patch.push(EventAction::Update(ev.clone(), updated));
         }
     }
-    let delta = ((range.1 - range.0) as f32 * (ratio - 1.0)) as Time;
-    // FIXME (editing, implementation) Keep the tail shift undoable.
-    // checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
-    //     (
-    //         EditCommandId::TapeStretch,
-    //         vec![CommandDiff::ChangeList { patch }, tail_shift],
-    //     )
-    // })
-    log::warn!("<NOT IMPLEMENTED> Not checking shift constraints.");
-    Some((
-        EditCommandId::TapeStretch,
-        vec![
-            CommandDiff::ChangeList { patch },
-            CommandDiff::TailShift {
-                at: range.1,
-                delta: delta,
-            },
-        ],
-    ))
+    if ratio < 1.0 {
+        tail_shift = checked_tail_shift(&track, &range.0, &range.1, &delta);
+    }
+    tail_shift.map(|tail_shift| {
+        (
+            EditCommandId::TapeStretch,
+            vec![CommandDiff::ChangeList { patch }, tail_shift],
+        )
+    })
 }
 
 /// `at` A "current" position that limits how far tail can be shifted earlier/to the left.

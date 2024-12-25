@@ -37,12 +37,12 @@ impl<T: Ord + Copy> RangeLike<T> for Range<T> {
 }
 
 pub trait RangeSpan<T> {
-    fn len(&self) -> usize;
+    fn len(&self) -> T;
 }
 
-impl<T: Num + Copy + Into<usize>> RangeSpan<T> for Range<T> {
-    fn len(&self) -> usize {
-        (self.1 - self.0).into()
+impl<T: Num + Copy> RangeSpan<T> for Range<T> {
+    fn len(&self) -> T {
+        self.1 - self.0
     }
 }
 
