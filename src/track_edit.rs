@@ -12,7 +12,7 @@ use crate::track::{
 use crate::util::IdSeq;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-pub enum EditCommandId {
+pub enum EditCommandType {
     ShiftTail,
     TapeInsert,
     TapeDelete,
@@ -52,8 +52,8 @@ pub enum CommandDiff {
     TailShift { at: Time, delta: Time },
 }
 
-// TODO (refactoring) make this a struct in order to have named fields.
-pub type AppliedCommand = (EditCommandId, Vec<CommandDiff>);
+// TODO (refactoring) Make this a struct in order to have named fields.
+pub type AppliedCommand = (EditCommandType, Vec<CommandDiff>);
 
 pub fn apply_diffs(track: &mut Track, diffs: &Vec<CommandDiff>, changes: &mut EventActionsList) {
     for d in diffs {
@@ -93,7 +93,7 @@ pub fn revert_diff(track: &Track, diff: &CommandDiff, changes: &mut EventActions
 
 pub fn shift_tail(track: &Track, at: &Time, delta: &Time) -> Option<AppliedCommand> {
     checked_tail_shift(&track, &at, &at, &delta)
-        .map(|tail_shift| (EditCommandId::ShiftTail, vec![tail_shift]))
+        .map(|tail_shift| (EditCommandType::ShiftTail, vec![tail_shift]))
 }
 
 fn do_shift_tail(track: &Track, at: &Time, delta: &Time, changes: &mut EventActionsList) {
@@ -116,7 +116,7 @@ pub fn tape_insert(range: &Range<Time>) -> Option<AppliedCommand> {
     assert!(delta >= 0);
     let mut diffs = vec![];
     diffs.push(CommandDiff::TailShift { at: range.0, delta });
-    Some((EditCommandId::TapeInsert, diffs))
+    Some((EditCommandType::TapeInsert, diffs))
 }
 
 pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand> {
@@ -130,7 +130,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     }
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
-            EditCommandId::TapeInsert,
+            EditCommandType::TapeInsert,
             vec![CommandDiff::ChangeList { patch }, tail_shift],
         )
     })
@@ -138,7 +138,8 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
 
 /// `ratio` 1.0 no change, `<1.0 srink/sped-up, >1.0 extend/slow-down.
 pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<AppliedCommand> {
-    // TODO (implementation) After this action the time selection length should also be adjusted accordingly.
+    // TODO (implementation) After this action the time selection length should also be
+    //      adjusted accordingly.
     debug_assert!(
         0.1 < ratio && ratio < 10.0,
         "tempo adjustment is unexpectedly large {ratio}"
@@ -150,6 +151,8 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
     let mut diffs = vec![];
     let shift_tail = || checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
 
+    // Have to free space first and then shift tail to fill it.
+    // Therefore, this procedure separates these 2 cases.
     if ratio > 1.0 {
         assert!(delta > 0);
         let Some(tshift) = shift_tail() else {
@@ -191,7 +194,7 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
         diffs.push(tshift);
     }
 
-    Some((EditCommandId::TapeStretch, diffs))
+    Some((EditCommandType::TapeStretch, diffs))
 }
 
 /// `at` Start of the tail to be shifted.
@@ -261,7 +264,7 @@ pub fn delete_selected(track: &Track, selection: &HashSet<EventId>) -> Option<Ap
     let diff = edit_selected(track, selection, &|ev| {
         Some(EventAction::Delete(ev.clone()))
     });
-    Some((EditCommandId::DeleteEvents, diff))
+    Some((EditCommandType::DeleteEvents, diff))
 }
 
 fn shift_event(ev: &TrackEvent, delta: &Time) -> EventAction {
@@ -276,7 +279,7 @@ pub fn shift_selected(
     delta: &Time,
 ) -> Option<AppliedCommand> {
     let diff = edit_selected(track, selection, &|ev| Some(shift_event(ev, delta)));
-    Some((EditCommandId::EventsShift, diff))
+    Some((EditCommandType::EventsShift, diff))
 }
 
 pub fn stretch_selected_notes(
@@ -289,7 +292,7 @@ pub fn stretch_selected_notes(
         note.duration += delta;
         Some(note)
     });
-    Some((EditCommandId::NotesStretch, diff))
+    Some((EditCommandType::NotesStretch, diff))
 }
 
 pub fn transpose_selected_notes(
@@ -307,7 +310,7 @@ pub fn transpose_selected_notes(
         }
         None
     });
-    Some((EditCommandId::NotesTranspose, diff))
+    Some((EditCommandType::NotesTranspose, diff))
 }
 
 pub fn accent_selected_notes(
@@ -324,7 +327,7 @@ pub fn accent_selected_notes(
             None
         }
     });
-    Some((EditCommandId::NotesAccent, diff))
+    Some((EditCommandType::NotesAccent, diff))
 }
 
 pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Option<AppliedCommand> {
@@ -341,7 +344,7 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
             }),
         })],
     });
-    Some((EditCommandId::AddNote, diff))
+    Some((EditCommandType::AddNote, diff))
 }
 
 fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
@@ -391,7 +394,7 @@ pub fn set_damper(
     }
 
     Some((
-        EditCommandId::SetDamper,
+        EditCommandType::SetDamper,
         vec![CommandDiff::ChangeList { patch }],
     ))
 }
@@ -441,7 +444,7 @@ pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedC
         return None;
     }
     Some((
-        EditCommandId::SetBookmark,
+        EditCommandType::SetBookmark,
         vec![CommandDiff::ChangeList {
             patch: vec![EventAction::Insert(TrackEvent {
                 id: id_seq.next(),
@@ -455,7 +458,7 @@ pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedC
 pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     if let Some(bm) = bookmark_at(track, at) {
         Some((
-            EditCommandId::ClearBookmark,
+            EditCommandType::ClearBookmark,
             vec![CommandDiff::ChangeList {
                 patch: vec![EventAction::Delete(bm.clone())],
             }],

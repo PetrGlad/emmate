@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::track::{import_smf, Track};
-use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
+use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandType};
 use crate::util;
 use crate::util::IdSeq;
 use glob::glob;
@@ -68,7 +68,7 @@ impl TrackHistory {
         }
     }
 
-    fn update(&mut self, applied_command: &(EditCommandId, Vec<CommandDiff>)) {
+    fn update(&mut self, applied_command: &(EditCommandType, Vec<CommandDiff>)) {
         let (command_id, diff) = applied_command;
         if diff.is_empty() {
             log::trace!("No changes.");
@@ -253,7 +253,10 @@ impl TrackHistory {
                     patch.push(EventAction::Insert(ev));
                 }
                 util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
-                Some((EditCommandId::Load, vec![CommandDiff::ChangeList { patch }]))
+                Some((
+                    EditCommandType::Load,
+                    vec![CommandDiff::ChangeList { patch }],
+                ))
             });
         }
         self.write_meta();

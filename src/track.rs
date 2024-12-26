@@ -45,10 +45,17 @@ pub struct ControllerSetValue {
 }
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+pub enum MarkerType {
+    TimeSelectionStart,
+    TimeSelectionEnd,
+}
+
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub enum TrackEventType {
     Note(Note),
     Controller(ControllerSetValue),
     Bookmark,
+    Marker(MarkerType),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -69,9 +76,9 @@ impl TrackEvent {
     pub fn intersects(&self, time_range: &Range<Time>) -> bool {
         match &self.event {
             TrackEventType::Note(n) => time_range.intersects(&(self.at, self.at + n.duration)),
-            TrackEventType::Bookmark | TrackEventType::Controller(_) => {
-                time_range.contains(&self.at)
-            }
+            TrackEventType::Bookmark
+            | TrackEventType::Controller(_)
+            | TrackEventType::Marker(_) => time_range.contains(&self.at),
         }
     }
 }
@@ -138,6 +145,7 @@ impl Track {
 
     pub fn commit(&mut self) {
         assert!(is_ordered(&self.events));
+        todo!("update cached indices here")
     }
 
     pub fn insert_event(&mut self, ev: TrackEvent) {
@@ -154,6 +162,7 @@ impl Track {
                 TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
                 TrackEventType::Controller(_) => ev.at,
                 TrackEventType::Bookmark => ev.at,
+                TrackEventType::Marker(_) => ev.at,
             };
             result = Time::max(result, end_time);
         }
@@ -270,7 +279,9 @@ pub fn to_midi_events(
                     },
                 ));
             }
-            TrackEventType::Bookmark => (), // Not a MIDI event.
+            // Non MIDI events.
+            TrackEventType::Bookmark => (),
+            TrackEventType::Marker(_) => (),
         }
     }
     buffer.sort_by_key(|(at, _)| at.to_owned());

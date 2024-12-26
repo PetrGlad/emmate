@@ -106,7 +106,8 @@ impl EventSource for TrackSource {
                         ),
                     });
                 }
-                TrackEventType::Bookmark => (), // Not an audible event.
+                // Non audible events.
+                TrackEventType::Bookmark | TrackEventType::Marker(_) => (),
             }
             self.current_idx += 1;
         }

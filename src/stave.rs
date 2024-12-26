@@ -2,13 +2,13 @@ use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
-    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
-    MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    export_smf, ControllerSetValue, EventId, Level, MarkerType, Note, Pitch, Track, TrackEvent,
+    TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
     shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
-    transpose_selected_notes, AppliedCommand, EditCommandId,
+    transpose_selected_notes, AppliedCommand, EditCommandType,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
@@ -20,7 +20,7 @@ use eframe::egui::{
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
@@ -80,7 +80,7 @@ impl NotesSelection {
 #[derive(Debug)]
 pub struct EditTransition {
     pub animation_id: egui::Id,
-    pub command_id: EditCommandId,
+    pub command_id: EditCommandType,
     pub changeset: Changeset,
     pub coeff: f32,
 }
@@ -89,7 +89,7 @@ impl EditTransition {
     pub fn start(
         ctx: &Context,
         animation_id: egui::Id,
-        command_id: EditCommandId,
+        command_id: EditCommandType,
         changeset: Changeset,
     ) -> Self {
         let coeff = ctx.animate_bool(animation_id, false);
@@ -128,6 +128,7 @@ pub struct Stave {
 
     pub cursor_position: Time,
     pub time_selection: Option<Range<Time>>,
+    pub index_cache: HashMap<MarkerType, usize>,
     /// Currently drawn note.
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
@@ -175,6 +176,7 @@ impl Stave {
             view_rect: Rect::NOTHING,
             cursor_position: 0,
             time_selection: None,
+            index_cache: HashMap::new(),
             note_draw: None,
             note_selection: NotesSelection::default(),
             transition: None,
@@ -367,6 +369,9 @@ impl Stave {
                     self.x_from_time(event.at),
                     Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
                 ),
+                TrackEventType::Marker(_marker_type) => {
+                    todo!("new time selection is not drawn yet")
+                }
             }
         }
         if let Some(trans) = &self.transition {
@@ -672,7 +677,7 @@ impl Stave {
         }) {
             let mut changes = vec![];
             let edit_state = if self.history.borrow_mut().undo(&mut changes) {
-                Some((EditCommandId::Undo, changes))
+                Some((EditCommandType::Undo, changes))
             } else {
                 None
             };
@@ -687,7 +692,7 @@ impl Stave {
         }) {
             let mut changes = vec![];
             let edit_state = if self.history.borrow_mut().redo(&mut changes) {
-                Some((EditCommandId::Redo, changes))
+                Some((EditCommandType::Redo, changes))
             } else {
                 None
             };
@@ -813,7 +818,7 @@ impl Stave {
     fn animate_edit(
         context: &Context,
         transition_id: egui::Id,
-        diff: Option<(EditCommandId, EventActionsList)>,
+        diff: Option<(EditCommandType, EventActionsList)>,
     ) -> Option<EditTransition> {
         if let Some((command_id, changes)) = diff {
             let mut changeset = Changeset::empty();

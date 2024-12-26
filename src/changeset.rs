@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::VersionId;
 use crate::track::{EventId, Track, TrackEvent};
-use crate::track_edit::{CommandDiff, EditCommandId};
+use crate::track_edit::{CommandDiff, EditCommandType};
 
 /// Simplest track edit operation. See [Changeset] for uses.
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -130,7 +130,7 @@ impl Changeset {
 pub struct HistoryLogEntry {
     pub base_version: VersionId,
     pub version: VersionId,
-    pub command_id: EditCommandId,
+    pub command_id: EditCommandType,
     pub diff: Vec<CommandDiff>,
 }
 
