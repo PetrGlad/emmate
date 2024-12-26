@@ -147,11 +147,17 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
         return None;
     }
     let delta = (range.len() as f32 * (ratio - 1.0)) as Time;
-    let mut tail_shift = None;
+    let mut diffs = vec![];
+    let shift_tail = || checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
+
     if ratio > 1.0 {
         assert!(delta > 0);
-        tail_shift = checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
+        let Some(tshift) = shift_tail() else {
+            return None;
+        };
+        diffs.push(tshift);
     }
+
     let mut patch = vec![];
     for ev in &track.events {
         // Do not know what to do with notes that start before the range yet.
@@ -175,18 +181,17 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
             patch.push(EventAction::Update(ev.clone(), updated));
         }
     }
+    diffs.push(CommandDiff::ChangeList { patch });
+
     if ratio < 1.0 {
         assert!(delta < 0);
-        tail_shift = checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
-    }
-    tail_shift.map(|tail_shift| {
-        // First should free space with shift then scale events' time
-        let mut diffs = vec![tail_shift, CommandDiff::ChangeList { patch }];
-        if ratio < 1.0 {
-            diffs.reverse()
+        let Some(tshift) = shift_tail() else {
+            return None;
         };
-        (EditCommandId::TapeStretch, diffs)
-    })
+        diffs.push(tshift);
+    }
+
+    Some((EditCommandId::TapeStretch, diffs))
 }
 
 /// `at` Start of the tail to be shifted.
