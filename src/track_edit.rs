@@ -149,7 +149,8 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
     let delta = (range.len() as f32 * (ratio - 1.0)) as Time;
     let mut tail_shift = None;
     if ratio > 1.0 {
-        tail_shift = checked_tail_shift(&track, &range.1, &range.1, &delta);
+        assert!(delta > 0);
+        tail_shift = checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
     }
     let mut patch = vec![];
     for ev in &track.events {
@@ -175,8 +176,8 @@ pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<Ap
         }
     }
     if ratio < 1.0 {
-        // FIXME Set the right value for `after`.
-        tail_shift = checked_tail_shift(&track, &range.1, &range.1, &delta);
+        assert!(delta < 0);
+        tail_shift = checked_tail_shift(&track, &range.1, &(range.1 + delta), &delta);
     }
     tail_shift.map(|tail_shift| {
         // First should free space with shift then scale events' time
