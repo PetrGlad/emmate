@@ -31,20 +31,22 @@ pub enum EditCommandId {
     // Workspace-related changes that are tied to the stave.
     SetBookmark,
     ClearBookmark,
+    SetTimeSelection,
+    ClearTimeSelection,
 }
 
 /**
- Want to track the changed events for each command to have visual feedback on undo/redo and
- to minimize amount of data stored in the edit history. Change list allows to have this in
- most cases. However, there are commands that may generate very large changesets and can be
- repeated by holding the hotkey combination, so in this struct we have a special case
- supporting custom logic for these. This complicates the implementation a lot, but I do
- not see a better solution at the moment.
+Want to track the changed events for each command to have visual feedback on undo/redo and
+to minimize amount of data stored in the edit history. Change list allows to have this in
+most cases. However, there are commands that may generate very large changesets and can be
+repeated by holding the hotkey combination, so in this struct we have a special case
+supporting custom logic for these. This complicates the implementation a lot, but I do
+not see a better solution at the moment.
 
- Commands that do not usually generate large patches can use generic Changeset,
- this is the default. Commands that cannot be stored efficiently should use custom diffs.
- Note to support undo/redo, custom event updates must be unambiguously reversible and replayable
- (change lists always are).
+Commands that do not usually generate large patches can use generic Changeset,
+this is the default. Commands that cannot be stored efficiently should use custom diffs.
+Note to support undo/redo, custom event updates must be unambiguously reversible and replayable
+(change lists always are).
 */
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CommandDiff {
@@ -428,6 +430,7 @@ fn cc_value_at(events: &Vec<TrackEvent>, at: &Time, cc_id: &ControllerId) -> Lev
     return 0; // default
 }
 
+/// Lookup a bookmark at the exact given time.
 pub fn bookmark_at(track: &Track, at: &Time) -> Option<TrackEvent> {
     track
         .events
