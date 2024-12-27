@@ -87,7 +87,7 @@ impl TrackHistory {
         self.discard_tail(self.max_version);
     }
 
-    /// Save current version into history.
+    /// Save the current version into history.
     pub fn push(&mut self, log_entry: HistoryLogEntry) {
         util::store(&log_entry, &self.diff_path(log_entry.version));
         self.set_version(log_entry.version);
@@ -291,12 +291,14 @@ impl TrackHistory {
             current_version: self.version,
             max_version: self.max_version,
         };
-        dbg!(&meta);
+        log::debug!("Storing history metadata {:?}", &meta);
         util::store(&meta, &self.make_meta_path());
     }
 
     fn load_meta(&self) -> Meta {
-        util::load(&self.make_meta_path())
+        let meta = util::load(&self.make_meta_path());
+        log::info!("Loaded history metadata {:?}", &meta);
+        meta
     }
 
     fn list_snapshots(&self) -> impl Iterator<Item = (VersionId, PathBuf)> {

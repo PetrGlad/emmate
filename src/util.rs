@@ -8,15 +8,6 @@ use flate2::Compression;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-pub fn is_ordered<T: Ord>(seq: &Vec<T>) -> bool {
-    for (a, b) in seq.iter().zip(seq.iter().skip(1)) {
-        if a > b {
-            return false;
-        }
-    }
-    true
-}
-
 #[derive(Debug, Default)]
 pub struct IdSeq(atomic::AtomicU64);
 
@@ -60,17 +51,4 @@ pub fn store<T: Serialize>(x: &T, file_path: &PathBuf) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn check_is_ordered() {
-        assert!(is_ordered::<u64>(&vec![]));
-        assert!(is_ordered(&vec![0]));
-        assert!(!is_ordered(&vec![3, 2]));
-        assert!(is_ordered(&vec![2, 3]));
-        assert!(is_ordered(&vec![2, 2]));
-        assert!(!is_ordered(&vec![2, 3, 1]));
-        assert!(is_ordered(&vec![2, 3, 3]));
-    }
-}
+mod tests {}

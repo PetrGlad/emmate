@@ -11,7 +11,7 @@ use crate::changeset::{EventAction, EventActionsList, Snapshot};
 use crate::common::Time;
 use crate::midi;
 use crate::range::{Range, RangeLike};
-use crate::util::{is_ordered, IdSeq};
+use crate::util::IdSeq;
 
 pub type Pitch = u8;
 pub type ControllerId = u8;
@@ -144,8 +144,8 @@ impl Track {
     }
 
     pub fn commit(&mut self) {
-        assert!(is_ordered(&self.events));
-        todo!("update cached indices here")
+        assert!(self.events.is_sorted());
+        log::warn!("update cached indices here")
     }
 
     pub fn insert_event(&mut self, ev: TrackEvent) {
