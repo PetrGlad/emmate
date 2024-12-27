@@ -6,9 +6,10 @@ use crate::track::{
     TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
-    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
-    transpose_selected_notes, AppliedCommand, EditCommandType,
+    accent_selected_notes, add_new_note, clear_bookmark, clear_time_selection, delete_selected,
+    set_bookmark, set_damper, set_time_selection, shift_selected, shift_tail,
+    stretch_selected_notes, tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
+    AppliedCommand, EditCommandType,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
@@ -127,8 +128,10 @@ pub struct Stave {
     pub view_rect: Rect,
 
     pub cursor_position: Time,
+
     pub time_selection: Option<Range<Time>>,
     pub index_cache: HashMap<MarkerType, usize>,
+
     /// Currently drawn note.
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
@@ -860,9 +863,16 @@ impl Stave {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
             self.time_selection = None;
+            self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                clear_time_selection(track)
+            });
         } else if response.drag_started_by(drag_button) {
             if let Some(time) = time {
                 self.time_selection = Some((*time, *time));
+                let id_seq = &self.history.borrow().id_seq.clone();
+                self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                    set_time_selection(track, id_seq, &(*time, *time))
+                });
             }
         } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
@@ -870,6 +880,10 @@ impl Stave {
             if let Some(time) = time {
                 if let Some(selection) = &mut self.time_selection {
                     selection.1 = *time;
+                    self.do_edit_command(&response.ctx, response.id, |stave, track| {
+                        todo!("adjust time selection while dragging")
+                        // set_time_selection(track, id_seq, &(*time, *time))
+                    });
                 }
             }
         }

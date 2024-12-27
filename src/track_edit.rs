@@ -6,8 +6,8 @@ use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::stave::PIANO_KEY_LINES;
 use crate::track::{
-    is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
-    TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, MarkerType, Note, Pitch,
+    Track, TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::util::IdSeq;
 
@@ -469,6 +469,51 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     } else {
         None
     }
+}
+
+pub fn lookup_markers<'a>(track: &'a Track) -> impl Iterator<Item = &'a TrackEvent> {
+    track
+        .events
+        .iter()
+        .filter(|ev| matches!(ev.event, TrackEventType::Marker(_)))
+}
+
+pub fn set_time_selection(
+    track: &Track,
+    id_seq: &IdSeq,
+    range: &Range<Time>,
+) -> Option<AppliedCommand> {
+    debug_assert!(!range.is_empty());
+    let mut diffs = vec![];
+    if let Some((_, clear_actions)) = clear_time_selection(track) {
+        // Only supporting at most one selected time range for now.
+        diffs.extend(clear_actions);
+    }
+    diffs.push(CommandDiff::ChangeList {
+        patch: vec![
+            EventAction::Insert(TrackEvent {
+                id: id_seq.next(),
+                at: range.0,
+                event: TrackEventType::Marker(MarkerType::TimeSelectionStart),
+            }),
+            EventAction::Insert(TrackEvent {
+                id: id_seq.next(),
+                at: range.1,
+                event: TrackEventType::Marker(MarkerType::TimeSelectionEnd),
+            }),
+        ],
+    });
+    Some((EditCommandType::SetTimeSelection, diffs))
+}
+
+pub fn clear_time_selection(track: &Track) -> Option<AppliedCommand> {
+    let patch = lookup_markers(track)
+        .map(|m| EventAction::Delete(m.clone()))
+        .collect();
+    Some((
+        EditCommandType::ClearTimeSelection,
+        vec![CommandDiff::ChangeList { patch }],
+    ))
 }
 
 #[cfg(test)]
