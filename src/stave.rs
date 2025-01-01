@@ -6,10 +6,9 @@ use crate::track::{
     TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, clear_time_selection, delete_selected,
-    set_bookmark, set_damper, set_time_selection, shift_selected, shift_tail,
-    stretch_selected_notes, tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
-    AppliedCommand, EditCommandType,
+    accent_selected_notes, add_new_note, clear_marker, clear_markers, delete_selected, set_damper,
+    set_marker, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandType,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
@@ -129,8 +128,7 @@ pub struct Stave {
 
     pub cursor_position: Time,
 
-    pub time_selection: Option<Range<Time>>,
-    pub index_cache: HashMap<MarkerType, usize>,
+    pub positions: HashMap<MarkerType, usize>,
 
     /// Currently drawn note.
     pub note_draw: Option<NoteDraw>,
@@ -178,8 +176,7 @@ impl Stave {
             time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
             view_rect: Rect::NOTHING,
             cursor_position: 0,
-            time_selection: None,
-            index_cache: HashMap::new(),
+            positions: HashMap::new(),
             note_draw: None,
             note_selection: NotesSelection::default(),
             transition: None,
@@ -204,6 +201,31 @@ impl Stave {
 
     pub fn time_from_x(&self, x: Pix) -> Time {
         self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as Time
+    }
+
+    fn event_start(&self, position: &usize) -> Option<Time> {
+        // TODO Maybe map all events with this and cache that.
+        self.history
+            .borrow()
+            .with_track(|track| track.events.get(*position).map(|ev| ev.at))
+    }
+
+    pub fn time_selection(&self) -> Option<Range<Time>> {
+        let Some(start) = self
+            .positions
+            .get(&MarkerType::TimeSelectionStart)
+            .map(|i| self.event_start(&i))
+        else {
+            return None;
+        };
+        let Some(end) = self
+            .positions
+            .get(&MarkerType::TimeSelectionEnd)
+            .map(|i| self.event_start(&i))
+        else {
+            return None;
+        };
+        Some((start.unwrap(), end.unwrap()))
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
@@ -257,7 +279,7 @@ impl Stave {
 
                 Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
                 let selection_color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
-                if let Some(s) = &self.time_selection {
+                if let Some(s) = &self.time_selection() {
                     self.draw_time_selection(&painter, &s, &selection_color);
                 }
                 self.draw_time_selection(
@@ -367,7 +389,7 @@ impl Stave {
                     &event,
                     &cc,
                 ),
-                TrackEventType::Bookmark => self.draw_cursor(
+                TrackEventType::Marker(MarkerType::Bookmark) => self.draw_cursor(
                     &painter,
                     self.x_from_time(event.at),
                     Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
@@ -512,7 +534,7 @@ impl Stave {
                 egui::Key::CloseBracket,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
+            if let Some(time_selection) = &self.time_selection().clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
                     tape_stretch(track, &(time_selection.0, time_selection.1), 1.01)
@@ -525,7 +547,7 @@ impl Stave {
                 egui::Key::OpenBracket,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
+            if let Some(time_selection) = &self.time_selection().clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
                     tape_stretch(track, &(time_selection.0, time_selection.1), 0.99)
@@ -539,7 +561,7 @@ impl Stave {
                 egui::Key::Delete,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
+            if let Some(time_selection) = &self.time_selection().clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     tape_delete(track, &(time_selection.0, time_selection.1))
                 });
@@ -557,7 +579,7 @@ impl Stave {
                 egui::Key::Insert,
             ))
         }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
+            if let Some(time_selection) = &self.time_selection().clone() {
                 self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
                     tape_insert(&(time_selection.0, time_selection.1))
                 });
@@ -709,7 +731,7 @@ impl Stave {
             let at = self.cursor_position;
             let id_seq = &self.history.borrow().id_seq.clone();
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                set_bookmark(track, id_seq, &at)
+                set_marker(track, id_seq, &at, &MarkerType::Bookmark)
             });
         }
         if response.ctx.input_mut(|i| {
@@ -717,7 +739,7 @@ impl Stave {
         }) {
             let at = self.cursor_position;
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                clear_bookmark(track, &at)
+                clear_marker(track, &at, &MarkerType::Bookmark)
             });
         }
         // Previous bookmark
@@ -732,6 +754,7 @@ impl Stave {
                 .history
                 .borrow()
                 .with_track(|track| {
+                    // TODO (cleanup) Add "find marker".
                     track
                         .events
                         .iter()
@@ -862,27 +885,25 @@ impl Stave {
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
-            self.time_selection = None;
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                clear_time_selection(track)
+                clear_markers(track, &MarkerType::TimeSelectionStart);
+                clear_markers(track, &MarkerType::TimeSelectionEnd);
             });
         } else if response.drag_started_by(drag_button) {
             if let Some(time) = time {
-                self.time_selection = Some((*time, *time));
                 let id_seq = &self.history.borrow().id_seq.clone();
                 self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                    set_time_selection(track, id_seq, &(*time, *time))
+                    set_marker(track, id_seq, &time, &MarkerType::TimeSelectionStart)
                 });
             }
         } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
-                if let Some(selection) = &mut self.time_selection {
-                    selection.1 = *time;
+                if let Some(selection) = &mut self.time_selection() {
+                    let id_seq = &self.history.borrow().id_seq.clone();
                     self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                        todo!("adjust time selection while dragging")
-                        // set_time_selection(track, id_seq, &(*time, *time))
+                        set_marker(track, id_seq, &time, &MarkerType::TimeSelectionStart)
                     });
                 }
             }

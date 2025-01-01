@@ -44,8 +44,9 @@ pub struct ControllerSetValue {
     pub value: Level,
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize, Hash)]
 pub enum MarkerType {
+    Bookmark,
     TimeSelectionStart,
     TimeSelectionEnd,
 }
@@ -54,7 +55,6 @@ pub enum MarkerType {
 pub enum TrackEventType {
     Note(Note),
     Controller(ControllerSetValue),
-    Bookmark,
     Marker(MarkerType),
 }
 

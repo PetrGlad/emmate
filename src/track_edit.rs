@@ -29,10 +29,9 @@ pub enum EditCommandType {
     Redo,
     Load,
     // Workspace-related changes that are tied to the stave.
-    SetBookmark,
-    ClearBookmark,
-    SetTimeSelection,
-    ClearTimeSelection,
+    SetMarker,
+    ClearMarker,
+    ClearMarkersOfType,
 }
 
 /**
@@ -434,36 +433,57 @@ fn cc_value_at(events: &Vec<TrackEvent>, at: &Time, cc_id: &ControllerId) -> Lev
 }
 
 /// Lookup a bookmark at the exact given time.
-pub fn bookmark_at(track: &Track, at: &Time) -> Option<TrackEvent> {
+pub fn marker_at(track: &Track, at: &Time, marker_type: &MarkerType) -> Option<TrackEvent> {
     track
         .events
         .iter()
-        .find(|ev| ev.at == *at && ev.event == TrackEventType::Bookmark)
+        .find(|ev| ev.at == *at && &ev.event == marker_type)
         .cloned()
 }
 
-pub fn set_bookmark(track: &Track, id_seq: &IdSeq, at: &Time) -> Option<AppliedCommand> {
-    if bookmark_at(track, at).is_some() {
+/// Set marker at given time avoiding exact duplicates.
+pub fn set_marker(
+    track: &Track,
+    id_seq: &IdSeq,
+    at: &Time,
+    marker_type: &MarkerType,
+) -> Option<AppliedCommand> {
+    if marker_at(track, at, marker_type).is_some() {
         return None;
     }
     Some((
-        EditCommandType::SetBookmark,
+        EditCommandType::SetMarker,
         vec![CommandDiff::ChangeList {
             patch: vec![EventAction::Insert(TrackEvent {
                 id: id_seq.next(),
                 at: *at,
-                event: TrackEventType::Bookmark,
+                event: TrackEventType::Marker(marker_type.clone()),
             })],
         }],
     ))
 }
 
-pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
-    if let Some(bm) = bookmark_at(track, at) {
+pub fn clear_marker(track: &Track, at: &Time, marker_type: &MarkerType) -> Option<AppliedCommand> {
+    let Some(bm) = marker_at(track, at, marker_type) else {
+        return None;
+    };
+    Some((
+        EditCommandType::ClearMarker,
+        vec![CommandDiff::ChangeList {
+            patch: vec![EventAction::Delete(bm.clone())],
+        }],
+    ))
+}
+
+pub fn clear_markers(track: &Track, marker_type: &MarkerType) -> Option<AppliedCommand> {
+    let event_actions : EventActionsList= track.events.iter().filter(
+        |ev| matches!(&ev.event, TrackEventType::Marker(marker_type) if marker_type == marker_type),
+    ).map(|ev| EventAction::Delete(ev.clone())).collect();
+    if !event_actions.is_empty() {
         Some((
-            EditCommandType::ClearBookmark,
+            EditCommandType::ClearMarkersOfType,
             vec![CommandDiff::ChangeList {
-                patch: vec![EventAction::Delete(bm.clone())],
+                patch: event_actions,
             }],
         ))
     } else {
@@ -471,49 +491,11 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
     }
 }
 
-pub fn lookup_markers<'a>(track: &'a Track) -> impl Iterator<Item = &'a TrackEvent> {
+pub fn list_markers<'a>(track: &'a Track) -> impl Iterator<Item = &'a TrackEvent> {
     track
         .events
         .iter()
         .filter(|ev| matches!(ev.event, TrackEventType::Marker(_)))
-}
-
-pub fn set_time_selection(
-    track: &Track,
-    id_seq: &IdSeq,
-    range: &Range<Time>,
-) -> Option<AppliedCommand> {
-    debug_assert!(!range.is_empty());
-    let mut diffs = vec![];
-    if let Some((_, clear_actions)) = clear_time_selection(track) {
-        // Only supporting at most one selected time range for now.
-        diffs.extend(clear_actions);
-    }
-    diffs.push(CommandDiff::ChangeList {
-        patch: vec![
-            EventAction::Insert(TrackEvent {
-                id: id_seq.next(),
-                at: range.0,
-                event: TrackEventType::Marker(MarkerType::TimeSelectionStart),
-            }),
-            EventAction::Insert(TrackEvent {
-                id: id_seq.next(),
-                at: range.1,
-                event: TrackEventType::Marker(MarkerType::TimeSelectionEnd),
-            }),
-        ],
-    });
-    Some((EditCommandType::SetTimeSelection, diffs))
-}
-
-pub fn clear_time_selection(track: &Track) -> Option<AppliedCommand> {
-    let patch = lookup_markers(track)
-        .map(|m| EventAction::Delete(m.clone()))
-        .collect();
-    Some((
-        EditCommandType::ClearTimeSelection,
-        vec![CommandDiff::ChangeList { patch }],
-    ))
 }
 
 #[cfg(test)]
