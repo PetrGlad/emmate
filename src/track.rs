@@ -76,9 +76,9 @@ impl TrackEvent {
     pub fn intersects(&self, time_range: &Range<Time>) -> bool {
         match &self.event {
             TrackEventType::Note(n) => time_range.intersects(&(self.at, self.at + n.duration)),
-            TrackEventType::Bookmark
-            | TrackEventType::Controller(_)
-            | TrackEventType::Marker(_) => time_range.contains(&self.at),
+            TrackEventType::Controller(_) | TrackEventType::Marker(_) => {
+                time_range.contains(&self.at)
+            }
         }
     }
 }
@@ -161,7 +161,6 @@ impl Track {
             let end_time = match &ev.event {
                 TrackEventType::Note(Note { duration, .. }) => ev.at + duration,
                 TrackEventType::Controller(_) => ev.at,
-                TrackEventType::Bookmark => ev.at,
                 TrackEventType::Marker(_) => ev.at,
             };
             result = Time::max(result, end_time);
@@ -280,7 +279,6 @@ pub fn to_midi_events(
                 ));
             }
             // Non MIDI events.
-            TrackEventType::Bookmark => (),
             TrackEventType::Marker(_) => (),
         }
     }

@@ -1,14 +1,16 @@
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
+use crate::track::MarkerType::Bookmark;
 use crate::track::{
     export_smf, ControllerSetValue, EventId, Level, MarkerType, Note, Pitch, Track, TrackEvent,
     TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_marker, clear_markers, delete_selected, set_damper,
-    set_marker, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
-    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandType,
+    accent_selected_notes, add_new_note, clear_marker, clear_markers, delete_selected,
+    markers_of_type, reset_marker, set_damper, set_marker, shift_selected, shift_tail,
+    stretch_selected_notes, tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
+    AppliedCommand, EditCommandType,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
@@ -394,8 +396,23 @@ impl Stave {
                     self.x_from_time(event.at),
                     Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
                 ),
-                TrackEventType::Marker(_marker_type) => {
-                    todo!("new time selection is not drawn yet")
+                TrackEventType::Marker(MarkerType::TimeSelectionStart) => {
+                    // Time selection is drawn separately.
+                    // DEBUG:
+                    self.draw_cursor(
+                        &painter,
+                        self.x_from_time(event.at),
+                        Rgba::from_rgba_unmultiplied(0.0, 0.1, 0.8, 0.3).into(),
+                    );
+                }
+                TrackEventType::Marker(MarkerType::TimeSelectionEnd) => {
+                    // Time selection is drawn separately.
+                    // DEBUG:
+                    self.draw_cursor(
+                        &painter,
+                        self.x_from_time(event.at),
+                        Rgba::from_rgba_unmultiplied(0.8, 0.1, 0.3, 0.3).into(),
+                    );
                 }
             }
         }
@@ -758,7 +775,7 @@ impl Stave {
                     track
                         .events
                         .iter()
-                        .rfind(|ev| ev.at < at && ev.event == TrackEventType::Bookmark)
+                        .rfind(|ev| ev.at < at && ev.event == TrackEventType::Marker(Bookmark))
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -779,7 +796,7 @@ impl Stave {
                     track
                         .events
                         .iter()
-                        .find(|ev| ev.at > at && ev.event == TrackEventType::Bookmark)
+                        .find(|ev| ev.at > at && ev.event == TrackEventType::Marker(Bookmark))
                         .cloned()
                 })
                 .map(|ev| ev.at)
@@ -886,26 +903,44 @@ impl Stave {
         let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                clear_markers(track, &MarkerType::TimeSelectionStart);
-                clear_markers(track, &MarkerType::TimeSelectionEnd);
+                clear_markers(track, &|t| {
+                    *t == MarkerType::TimeSelectionStart || *t == MarkerType::TimeSelectionEnd
+                })
             });
+            self.positions.remove(&MarkerType::TimeSelectionStart);
+            self.positions.remove(&MarkerType::TimeSelectionEnd);
         } else if response.drag_started_by(drag_button) {
             if let Some(time) = time {
                 let id_seq = &self.history.borrow().id_seq.clone();
-                self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                    set_marker(track, id_seq, &time, &MarkerType::TimeSelectionStart)
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                    reset_marker(track, id_seq, &time, &MarkerType::TimeSelectionStart)
                 });
+                // TODO (cleanup) Maybe we can do the other way around, insert markers
+                //      only after selection is complete. The following assumes
+                //      that the event inserted will be the same...
+                // TODO (cleanup) Also maybe stave can keep a read-only copy of the track
+                //      which should be updated after any edit.
+                // TODO Track edits/changes should be reflected in self.positions, currently
+                //      it gets stale content after undo.
+                self.history.borrow().with_track(|track| {
+                    for (i, _ev) in markers_of_type(track, &MarkerType::TimeSelectionStart) {
+                        self.positions.insert(MarkerType::TimeSelectionStart, i);
+                    }
+                })
             }
         } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
         } else if response.dragged_by(drag_button) {
             if let Some(time) = time {
-                if let Some(selection) = &mut self.time_selection() {
-                    let id_seq = &self.history.borrow().id_seq.clone();
-                    self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                        set_marker(track, id_seq, &time, &MarkerType::TimeSelectionStart)
-                    });
-                }
+                let id_seq = &self.history.borrow().id_seq.clone();
+                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
+                    reset_marker(track, id_seq, &time, &MarkerType::TimeSelectionEnd)
+                });
+                self.history.borrow().with_track(|track| {
+                    for (i, _ev) in markers_of_type(track, &MarkerType::TimeSelectionEnd) {
+                        self.positions.insert(MarkerType::TimeSelectionEnd, i);
+                    }
+                })
             }
         }
     }

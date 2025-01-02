@@ -31,6 +31,7 @@ pub enum EditCommandType {
     // Workspace-related changes that are tied to the stave.
     SetMarker,
     ClearMarker,
+    ResetMarker,
     ClearMarkersOfType,
 }
 
@@ -437,8 +438,21 @@ pub fn marker_at(track: &Track, at: &Time, marker_type: &MarkerType) -> Option<T
     track
         .events
         .iter()
-        .find(|ev| ev.at == *at && &ev.event == marker_type)
+        .find(|ev| {
+            ev.at == *at && matches!(&ev.event, TrackEventType::Marker(t) if t == marker_type)
+        })
         .cloned()
+}
+
+pub fn markers_of_type<'a>(
+    track: &'a Track,
+    marker_type: &'a MarkerType,
+) -> impl Iterator<Item = (usize, &'a TrackEvent)> {
+    track
+        .events
+        .iter()
+        .enumerate()
+        .filter(move |(_i, ev)| matches!(&ev.event, TrackEventType::Marker(t) if t == marker_type))
 }
 
 /// Set marker at given time avoiding exact duplicates.
@@ -475,10 +489,40 @@ pub fn clear_marker(track: &Track, at: &Time, marker_type: &MarkerType) -> Optio
     ))
 }
 
-pub fn clear_markers(track: &Track, marker_type: &MarkerType) -> Option<AppliedCommand> {
-    let event_actions : EventActionsList= track.events.iter().filter(
-        |ev| matches!(&ev.event, TrackEventType::Marker(marker_type) if marker_type == marker_type),
-    ).map(|ev| EventAction::Delete(ev.clone())).collect();
+/// Insert new or move existing marker to the new position.
+pub fn reset_marker(
+    track: &Track,
+    id_seq: &IdSeq,
+    at: &Time,
+    marker_type: &MarkerType,
+) -> Option<AppliedCommand> {
+    let mut diffs = vec![];
+    for (_i, m) in markers_of_type(track, marker_type) {
+        diffs.push(CommandDiff::ChangeList {
+            patch: vec![EventAction::Delete(m.clone())],
+        });
+    }
+    diffs.push(CommandDiff::ChangeList {
+        patch: vec![EventAction::Insert(TrackEvent {
+            id: id_seq.next(),
+            at: *at,
+            event: TrackEventType::Marker(marker_type.clone()),
+        })],
+    });
+
+    Some((EditCommandType::ResetMarker, diffs))
+}
+
+pub fn clear_markers<P: Fn(&MarkerType) -> bool>(
+    track: &Track,
+    marker_type_filter: &P,
+) -> Option<AppliedCommand> {
+    let event_actions: EventActionsList = track
+        .events
+        .iter()
+        .filter(|ev| matches!(&ev.event, TrackEventType::Marker(t) if marker_type_filter(&t)))
+        .map(|ev| EventAction::Delete(ev.clone()))
+        .collect();
     if !event_actions.is_empty() {
         Some((
             EditCommandType::ClearMarkersOfType,
