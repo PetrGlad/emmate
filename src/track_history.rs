@@ -13,6 +13,9 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sync_cow::SyncCow;
 
+// Persistence format version
+const PROJECT_FORMAT_ID: u16 = 1;
+
 // Undo/redo history and snapshots.
 // #[derive(Debug)]
 pub struct TrackHistory {
@@ -89,7 +92,7 @@ impl TrackHistory {
 
     /// Save the current version into history.
     pub fn push(&mut self, log_entry: HistoryLogEntry) {
-        util::store(&log_entry, &self.diff_path(log_entry.version));
+        util::store(&log_entry, &self.diff_path(log_entry.version), true);
         self.set_version(log_entry.version);
         self.max_version = self.version;
         self.write_meta();
@@ -252,7 +255,11 @@ impl TrackHistory {
                 for ev in import_smf(&id_seq, source_file) {
                     patch.push(EventAction::Insert(ev));
                 }
-                util::store(&Snapshot::of_track(version, track), &starting_snapshot_path);
+                util::store(
+                    &Snapshot::of_track(version, track),
+                    &starting_snapshot_path,
+                    true,
+                );
                 Some((EditCommandId::Load, vec![CommandDiff::ChangeList { patch }]))
             });
         }
@@ -284,17 +291,27 @@ impl TrackHistory {
 
     fn write_meta(&self) {
         let meta = Meta {
+            format_id: PROJECT_FORMAT_ID,
+            git_revision: env!("GIT_HASH").into(),
             next_id: self.id_seq.current(),
             current_version: self.version,
             max_version: self.max_version,
         };
         log::debug!("Storing history metadata {:?}", &meta);
-        util::store(&meta, &self.make_meta_path());
+        util::store(&meta, &self.make_meta_path(), false);
     }
 
     fn load_meta(&self) -> Meta {
-        let meta = util::load(&self.make_meta_path());
+        let meta: Meta = util::load(&self.make_meta_path());
         log::info!("Loaded history metadata {:?}", &meta);
+        if &meta.format_id != &PROJECT_FORMAT_ID {
+            log::error!(
+                "Incompatible project format. Supported {}, got {}. Refusing to overwrite.",
+                PROJECT_FORMAT_ID,
+                &meta.format_id
+            );
+            std::process::abort();
+        }
         meta
     }
 
@@ -374,6 +391,8 @@ impl TrackHistory {
 /// Additional history data that should be persisted.
 #[derive(Debug, Serialize, Deserialize)]
 struct Meta {
+    format_id: u16,
+    git_revision: String,
     next_id: u64,
     current_version: VersionId,
     max_version: VersionId,

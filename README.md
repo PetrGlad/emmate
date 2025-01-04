@@ -10,7 +10,7 @@ Grid-less MIDI editor with following goals:
   best.
 * Playing/editing very long (at elast up to about 25K of playable events) files. Those files are usually recordings of
   real performances (e.g. from a MIDI keyboard).
-* Comfortable workflow with keyboard.
+* Comfortable keyboard workflow.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
 * Flight recorder (always-on MIDI recording).
@@ -21,7 +21,10 @@ Ardour DAW can more or less do the trick, however inconveniently, but losing hou
 ## Current status
 
 Somewhat usable, no documentation yet (e.g. hot-keys, launching need to be described). The code still needs major
-revamps and polishing. No backward compatibility guarantees. See TODO list below to se missing or planned parts.
+revamps and polishing. No backward compatibility guarantees. If you want to keep working with a new emmate version
+that has an incompatible format, export a midi file and open that as a new project.
+
+See TODO list below to se missing or planned parts.
 
 ## Requirements
 

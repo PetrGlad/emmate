@@ -137,7 +137,7 @@ impl Track {
     }
 
     pub fn commit(&mut self) {
-        assert!(self.events.is_sorted());        
+        assert!(self.events.is_sorted());
     }
 
     pub fn insert_event(&mut self, ev: TrackEvent) {

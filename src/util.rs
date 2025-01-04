@@ -33,15 +33,18 @@ pub fn load<T: DeserializeOwned>(file_path: &PathBuf) -> T {
     rmp_serde::from_slice(&binary).expect("deserialize")
 }
 
-pub fn store<T: Serialize>(x: &T, file_path: &PathBuf) {
+pub fn store<T: Serialize>(x: &T, file_path: &PathBuf, compact: bool) {
+    // TODO (improvement) When using compact representation (without field names),
+    //   add some format version info in the data and/or in file names. Consider using protobuf.
     let mut binary = Vec::new();
-    x.serialize(
-        // TODO If using compact representation (without field names), add some format version info
-        //  in the data and/or in file names.
-        //  Consider using protobuf.
-        &mut rmp_serde::Serializer::new(&mut binary), /*.with_struct_map()*/
-    )
+    let mut serializer = rmp_serde::Serializer::new(&mut binary);
+    if compact {
+        x.serialize(&mut serializer)
+    } else {
+        x.serialize(&mut serializer.with_struct_map())
+    }
     .expect("serialize");
+
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder
         .write_all(&binary.as_slice())
