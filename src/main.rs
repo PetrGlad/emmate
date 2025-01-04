@@ -6,6 +6,7 @@ use midir::os::unix::VirtualOutput;
 use midir::MidiOutput;
 use std::io;
 use std::path::PathBuf;
+use std::process::exit;
 use std::sync::mpsc::Sender;
 
 use crate::app::EmApp;
@@ -63,16 +64,22 @@ pub fn main() {
     }
 
     // No configurable values at the moment, keeping it here to keep config loader compilable.
-    let _config = Config::load(arg_matches.get_one::<std::path::PathBuf>("config-file"));
+    let _config = Config::load(arg_matches.get_one::<PathBuf>("config-file"));
 
-    let midi_file_path = arg_matches
-        .get_one::<std::path::PathBuf>("midi-file")
-        .unwrap_or_else(|| {
-            log::error!("Missing argument 'midi-file'");
-            std::process::exit(1);
-        });
-    log::info!("MIDI file name {:?}", midi_file_path);
-    let project = Project::open_file(midi_file_path);
+    let project_dir;
+
+    // TODO (improvement) Use positional argument instead  and auto-detect how to open the path (midi or project).
+    if let Some(midi_file_path) = arg_matches.get_one::<PathBuf>("midi-file") {
+        log::info!("Opening MIDI file {:?}", midi_file_path);
+        project_dir = Project::init_from_midi_file(midi_file_path);
+    } else if let Some(path) = arg_matches.get_one::<PathBuf>("project") {
+        project_dir = path.clone();
+        log::info!("Opening project {:?}", &project_dir);
+    } else {
+        log::error!("No MIDI file or project dir to opne is given.");
+        exit(1);
+    }
+    let project = Project::open(&project_dir);
 
     let midi_output = MidiOutput::new(common::APP_NAME)
         .expect("MIDI sequencer client")
@@ -137,6 +144,11 @@ fn build_cli() -> Command {
         )
         .arg(
             clap::arg!(--"midi-file" <FILE>)
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            clap::arg!(--"project" <FILE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
                 .value_hint(clap::ValueHint::FilePath),
         )

@@ -25,6 +25,7 @@ impl IdSeq {
     }
 }
 
+// TODO (cleanup) Return Result.
 pub fn load<T: DeserializeOwned>(file_path: &PathBuf) -> T {
     let binary = std::fs::read(file_path).expect(&*format!("load from {}", &file_path.display()));
     let mut decoder = GzDecoder::new(binary.as_slice());
@@ -33,6 +34,7 @@ pub fn load<T: DeserializeOwned>(file_path: &PathBuf) -> T {
     rmp_serde::from_slice(&binary).expect("deserialize")
 }
 
+// TODO (cleanup) Return a Result.
 pub fn store<T: Serialize>(x: &T, file_path: &PathBuf, compact: bool) {
     // TODO (improvement) When using compact representation (without field names),
     //   add some format version info in the data and/or in file names. Consider using protobuf.

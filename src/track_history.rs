@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
+use crate::project::PROJECT_FORMAT_ID;
 use crate::track::{import_smf, Track};
 use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
 use crate::util;
@@ -12,9 +13,6 @@ use glob::glob;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sync_cow::SyncCow;
-
-// Persistence format version
-const PROJECT_FORMAT_ID: u16 = 1;
 
 // Undo/redo history and snapshots.
 // #[derive(Debug)]
@@ -292,12 +290,11 @@ impl TrackHistory {
     fn write_meta(&self) {
         let meta = Meta {
             format_id: PROJECT_FORMAT_ID,
-            git_revision: env!("GIT_HASH").into(),
             next_id: self.id_seq.current(),
             current_version: self.version,
             max_version: self.max_version,
         };
-        log::debug!("Storing history metadata {:?}", &meta);
+        log::trace!("Writing history metadata {:?}", &meta);
         util::store(&meta, &self.make_meta_path(), false);
     }
 
@@ -306,7 +303,7 @@ impl TrackHistory {
         log::info!("Loaded history metadata {:?}", &meta);
         if &meta.format_id != &PROJECT_FORMAT_ID {
             log::error!(
-                "Incompatible project format. Supported {}, got {}. Refusing to overwrite.",
+                "Incompatible history format. Supported {}, got {}. Refusing to overwrite.",
                 PROJECT_FORMAT_ID,
                 &meta.format_id
             );
@@ -392,7 +389,6 @@ impl TrackHistory {
 #[derive(Debug, Serialize, Deserialize)]
 struct Meta {
     format_id: u16,
-    git_revision: String,
     next_id: u64,
     current_version: VersionId,
     max_version: VersionId,
