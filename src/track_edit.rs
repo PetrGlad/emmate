@@ -138,9 +138,8 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     })
 }
 
-/// `ratio` 1.0 no change, `<1.0 srink/sped-up, >1.0 extend/slow-down.
+/// `ratio` 1.0 no change, `<1.0 srink/sped-up, >1.0 expand/slow-down.
 pub fn tape_stretch(track: &Track, range: &Range<Time>, ratio: f32) -> Option<AppliedCommand> {
-    // TODO (implementation) After this action the time selection length should also be adjusted accordingly.
     debug_assert!(
         0.1 < ratio && ratio < 10.0,
         "tempo adjustment is unexpectedly large {ratio}"

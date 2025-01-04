@@ -15,7 +15,7 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
-    Rounding, Sense, Stroke, Ui,
+    Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -505,10 +505,7 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
-                    tape_stretch(track, &(time_selection.0, time_selection.1), 1.01)
-                });
+                self.adjust_tempo(&response, &time_selection, 1.01);
             }
         }
         if response.ctx.input_mut(|i| {
@@ -518,10 +515,7 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    // FIXME (editing, implementation) shrink time selection accordingly (should it be an event also?)
-                    tape_stretch(track, &(time_selection.0, time_selection.1), 0.99)
-                });
+                self.adjust_tempo(&response, &time_selection, 1.0 / 1.01);
             }
         }
         // Tape insert/remove
@@ -808,6 +802,22 @@ impl Stave {
         }
 
         None
+    }
+
+    fn adjust_tempo(&mut self, response: &Response, time_selection: &Range<Time>, ratio: f32) {
+        if self
+            .do_edit_command(&response.ctx, response.id, |_stave, track| {
+                tape_stretch(track, &(time_selection.0, time_selection.1), ratio)
+            })
+            .is_some()
+        {
+            self.time_selection = self.time_selection.map(|r| {
+                (
+                    r.0,
+                    r.1 + ((ratio - 1.0) * time_selection.len() as f32) as Time,
+                )
+            });
+        }
     }
 
     fn animate_edit(
