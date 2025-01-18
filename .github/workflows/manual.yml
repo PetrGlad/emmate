@@ -2,7 +2,9 @@ on: workflow_dispatch
 
 jobs:
   print-tag:
-    runs-on: ubuntu-latest    
+    runs-on: ubuntu-latest
     steps:
       - name: Print something to STDOUT
-        run: echo Hello world
+        run: |
+          echo Hello world
+          echo "The Cargo project version is $(yq '.package.version' Cargo.toml)"
