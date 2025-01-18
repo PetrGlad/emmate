@@ -1,0 +1,8 @@
+on: workflow_dispatch
+
+jobs:
+  print-tag:
+    runs-on: ubuntu-latest    
+    steps:
+      - name: Print something to STDOUT
+        run: echo Hello world
