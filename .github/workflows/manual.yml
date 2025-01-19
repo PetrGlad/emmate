@@ -4,7 +4,11 @@ jobs:
   print-tag:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Print something to STDOUT
         run: |
           echo Hello world
+          echo "Current directory is $(pwd)"
           echo "The Cargo project version is $(yq '.package.version' Cargo.toml)"
+          false
