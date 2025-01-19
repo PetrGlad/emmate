@@ -1,14 +1,18 @@
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        type: string
+        required: true
+        description: A git tag.
 
 jobs:
-  print-tag:
+  manual:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Print something to STDOUT
         run: |
-          echo Hello world
+          echo "The input tag is ${{ inputs.version_tag }}"
           echo "Current directory is $(pwd)"
           echo "The Cargo project version is $(yq '.package.version' Cargo.toml)"
-          false
