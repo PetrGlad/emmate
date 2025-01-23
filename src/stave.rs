@@ -13,6 +13,7 @@ use crate::track_edit::{
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
 use chrono::Duration;
+use eframe::egui::TextStyle::Body;
 use eframe::egui::{
     self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
     Response, Rounding, Sense, Stroke, Ui,
@@ -237,7 +238,22 @@ impl Stave {
             .inner_margin(Margin::symmetric(4.0, 4.0))
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
-                let bounds = ui.available_rect_before_wrap();
+                let mut bounds = ui.available_rect_before_wrap().clone();
+
+                // // // Ruler
+
+                let mut ruler_rect = bounds.clone();
+                let style = ui.ctx().style();
+                let ruler_height = style.text_styles[&Body].size;
+                *bounds.top_mut() += ruler_height;
+                ruler_rect.set_height(ruler_height);
+                // FIXME (implementation) See which markers should be visible in the range, draw each.
+                //       Mark minute and half minute intervals. Minutes should have text.
+                ui.painter()
+                    .rect_filled(ruler_rect, Rounding::ZERO, COLOR_SELECTED);
+
+                // // // END Ruler
+
                 let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
                 self.view_rect = bounds;
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);

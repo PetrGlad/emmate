@@ -72,12 +72,11 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 
 ## TODO
 
-- [ ] Adjust tempo for a selection.
+- [ ] After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
 - [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
-  tabs?
+  tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
-- [ ] After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
 - [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
@@ -86,6 +85,7 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 - [ ] "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
+- [x] Adjust tempo for a tape selection.
 - [x] (refactoring) Reduce number of range types (prefer range::Range, maybe)
 - [x] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
   of note ranges. -- Decided not to. It simplifies some parts while complicates others, no clear win. See latest working
