@@ -15,8 +15,8 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, Color32, Context, Frame, Margin, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect,
-    Response, Rounding, Sense, Stroke, Ui,
+    self, Align, Align2, Color32, Context, FontId, Frame, Margin, Modifiers, Painter,
+    PointerButton, Pos2, Rangef, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -191,14 +191,17 @@ impl Stave {
 
     /// Pixel/uSec, can be cached.
     pub fn time_scale(&self) -> f32 {
+        debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.width() / (self.time_right - self.time_left) as f32
     }
 
     pub fn x_from_time(&self, at: Time) -> Pix {
+        debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x + (at as f32 - self.time_left as f32) * self.time_scale()
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
+        debug_assert!(self.view_rect.width() > 0.0);
         self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as Time
     }
 
@@ -240,22 +243,21 @@ impl Stave {
             .show(ui, |ui| {
                 let mut bounds = ui.available_rect_before_wrap().clone();
 
-                // // // Ruler
+                {
+                    // TODO (cleanup) Use stack layout instead?
+                    let mut ruler_rect = bounds.clone();
+                    let style = ui.ctx().style();
+                    let ruler_height = style.text_styles[&Body].size;
+                    *bounds.top_mut() += ruler_height;
+                    self.view_rect = bounds;
 
-                let mut ruler_rect = bounds.clone();
-                let style = ui.ctx().style();
-                let ruler_height = style.text_styles[&Body].size;
-                *bounds.top_mut() += ruler_height;
-                ruler_rect.set_height(ruler_height);
-                // FIXME (implementation) See which markers should be visible in the range, draw each.
-                //       Mark minute and half minute intervals. Minutes should have text.
-                ui.painter()
-                    .rect_filled(ruler_rect, Rounding::ZERO, COLOR_SELECTED);
-
-                // // // END Ruler
+                    ruler_rect.set_height(ruler_height);
+                    // TODO (cleanup) Use painter_at instead.
+                    self.draw_time_ruler(&ui.painter(), ruler_rect);
+                }
 
                 let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
-                self.view_rect = bounds;
+
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
@@ -264,8 +266,8 @@ impl Stave {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
                     time_hovered = Some(self.time_from_x(pointer_pos.x));
                 }
-                let painter = ui.painter_at(bounds);
 
+                let painter = ui.painter_at(bounds);
                 Self::draw_grid(&painter, bounds, &key_ys, &pitch_hovered);
                 let selection_color = Color32::from_rgba_unmultiplied(64, 80, 100, 60);
                 if let Some(s) = &self.time_selection {
@@ -322,6 +324,69 @@ impl Stave {
                 }
             })
             .inner
+    }
+
+    fn draw_time_ruler(&mut self, painter: &Painter, ruler_rect: Rect) {
+        let tick_durations_s = [
+            60.0f32 * 60.0 * 3.0,
+            60.0f32 * 60.0,
+            30.0 * 60.0,
+            10.0 * 60.0,
+            5.0 * 60.0,
+            60.0,
+            30.0,
+            15.0,
+            10.0,
+            5.0,
+            1.0,
+            0.1,
+            0.05,
+        ];
+        let time_width = ruler_rect.width() / self.time_scale();
+        let tick_duration = tick_durations_s
+            .iter()
+            .rfind(|td| 2.0 < time_width / *td && time_width / *td < 100.0)
+            .map(|x| x * 1_000_000.0)
+            .unwrap_or(time_width / 3.0)
+            .round() as Time;
+        assert!(tick_duration > 0);
+        let start_tick = self.time_from_x(ruler_rect.min.x) / tick_duration;
+        let end_tick = self.time_from_x(ruler_rect.max.x) / tick_duration;
+        // FIXME (bug) Tick times are arbitrary, not multiples of tick duration.
+        let last_x = start_tick * tick_duration;
+        for tick in start_tick..end_tick + 1 {
+            // FIXME Omit labels that do not fit
+            self.draw_time_tick(painter, ruler_rect, tick * tick_duration);
+        }
+    }
+
+    fn draw_time_tick(&mut self, painter: &Painter, ruler_rect: Rect, at: Time) -> Rect {
+        let x = self.x_from_time(at);
+        painter.rect_filled(
+            Rect::from_x_y_ranges(
+                Rangef::new(x, x + 1.0),
+                Rangef::new(ruler_rect.min.y, ruler_rect.max.y),
+            ),
+            Rounding::from(1.0),
+            Color32::GRAY,
+        );
+
+        let time = Duration::microseconds(at);
+        painter.text(
+            Pos2::new(x + 4.0, ruler_rect.min.y),
+            Align2::LEFT_TOP,
+            if time.num_minutes() == 0 {
+                "0".into()
+            } else {
+                format!(
+                    "{}'{}",
+                    time.num_minutes(),
+                    (time.num_seconds() % time.num_minutes()).abs()
+                )
+            },
+            FontId::proportional(14.0),
+            Color32::DARK_GRAY,
+        )
     }
 
     fn draw_events(
