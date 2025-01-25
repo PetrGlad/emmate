@@ -156,6 +156,11 @@ pub struct StaveResponse {
 }
 
 impl Stave {
+    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
+    /// World record playing piano seems to be 130 hours, so some might find this limiting.
+    // I would like to use Duration but that is not "const compatible" yet.
+    const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
+
     pub fn new(history: RefCell<TrackHistory>) -> Stave {
         let mut note_colors = vec![];
         assert_eq!(Level::MIN, 0); // Otherwise need to adjust lookups.
@@ -209,8 +214,13 @@ impl Stave {
         // Zoom so that time position under mouse pointer stays put.
         // TODO (cleanup) Consider using emath::remap
         let at = self.time_from_x(mouse_x);
-        self.time_left = at - ((at - self.time_left) as f32 / zoom_factor) as Time;
-        self.time_right = at + ((self.time_right - at) as f32 / zoom_factor) as Time;
+        self.time_left = (at - ((at - self.time_left) as f32 / zoom_factor) as Time)
+            .max(-Self::ZOOM_TIME_LIMIT)
+            - 1;
+        self.time_right = (at + ((self.time_right - at) as f32 / zoom_factor) as Time)
+            .min(Self::ZOOM_TIME_LIMIT)
+            + 1;
+        assert!(self.time_left < self.time_right)
     }
 
     pub fn zoom_to_fit(&mut self, time_margin: Time) {
