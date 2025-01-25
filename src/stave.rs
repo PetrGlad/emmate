@@ -338,34 +338,43 @@ impl Stave {
 
     fn draw_time_ruler(&mut self, painter: &Painter, ruler_rect: Rect) {
         let tick_durations_s = [
-            60.0f32 * 60.0 * 3.0,
-            60.0f32 * 60.0,
-            30.0 * 60.0,
-            10.0 * 60.0,
-            5.0 * 60.0,
-            60.0,
-            30.0,
-            15.0,
-            10.0,
-            5.0,
-            1.0,
-            0.1,
+            0.005,
+            0.01,
             0.05,
+            0.1,
+            1.0,
+            5.0,
+            10.0,
+            15.0,
+            30.0,
+            60.0,
+            5.0 * 60.0,
+            10.0 * 60.0,
+            30.0 * 60.0,
+            60.0f32 * 60.0,
+            60.0f32 * 60.0 * 4.0,
+            60.0f32 * 60.0 * 6.0,
         ];
         let time_width = ruler_rect.width() / self.time_scale();
         let tick_duration = tick_durations_s
             .iter()
-            .rfind(|td| 2.0 < time_width / *td && time_width / *td < 100.0)
-            .map(|x| x * 1_000_000.0)
-            .unwrap_or(time_width / 3.0)
+            .find_map(|td| {
+                let x = td * 1_000_000.0; // From seconds
+                let nticks = time_width / x;
+                if 2.0 < nticks && nticks < 20.0 {
+                    Some(x)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(time_width / 5.0)
             .round() as Time;
         assert!(tick_duration > 0);
         let start_tick = self.time_from_x(ruler_rect.min.x) / tick_duration;
         let end_tick = self.time_from_x(ruler_rect.max.x) / tick_duration;
         // FIXME (bug) Tick times are arbitrary, not multiples of tick duration.
-        let last_x = start_tick * tick_duration;
+        // let last_x = start_tick * tick_duration; // FIXME Omit labels that do not fit
         for tick in start_tick..end_tick + 1 {
-            // FIXME Omit labels that do not fit
             self.draw_time_tick(painter, ruler_rect, tick * tick_duration);
         }
     }
@@ -385,6 +394,8 @@ impl Stave {
         painter.text(
             Pos2::new(x + 4.0, ruler_rect.min.y),
             Align2::LEFT_TOP,
+            // TODO (improvement) Format the time with precision that depends on zoom
+            //      (hours, minutes, seconds, millis), omit millis if those at null.
             if time.num_minutes() == 0 {
                 "0".into()
             } else {
