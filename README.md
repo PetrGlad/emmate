@@ -72,7 +72,10 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 
 ## TODO
 
-- [ ] After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
+- [ ] BUG After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
+- [ ] Use intermediate state snapshots in edit history (currently diffs also include previous state).
+  Need also logic to decide when the snapshot should be made.
+- [ ] Stop for confirmation to undo beyond the manual snapshot (can be set on export).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
