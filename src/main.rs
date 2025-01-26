@@ -119,7 +119,11 @@ pub fn main() {
         common::APP_NAME,
         native_options,
         Box::new(|ctx| {
-            ctx.egui_ctx.set_visuals(egui::Visuals::light());
+            ctx.egui_ctx.style_mut(|style| {
+                style.visuals = egui::Visuals::light();
+                style.animation_time = 0.2;
+            });
+
             Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))
         }),
     )
