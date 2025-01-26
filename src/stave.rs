@@ -229,6 +229,11 @@ impl Stave {
     }
 
     pub fn scroll(&mut self, dt: Time) {
+        if self.time_left + dt < -Self::ZOOM_TIME_LIMIT
+            || self.time_right + dt > Self::ZOOM_TIME_LIMIT
+        {
+            return;
+        }
         self.time_left += dt;
         self.time_right += dt;
     }
