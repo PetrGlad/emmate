@@ -73,7 +73,6 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 ## TODO
 
 - [ ] After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
-- [ ] Time marks on stave ("minute:second" from the beginning).
 - [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
 - [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
@@ -85,6 +84,7 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 - [ ] "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
+- [x] Time marks on stave ("minute:second" from the beginning).
 - [x] Adjust tempo for a tape selection.
 - [x] (refactoring) Reduce number of range types (prefer range::Range, maybe)
 - [x] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead

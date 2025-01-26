@@ -377,11 +377,35 @@ impl Stave {
         assert!(tick_duration > 0);
         let start_tick = self.time_from_x(ruler_rect.min.x) / tick_duration;
         let end_tick = self.time_from_x(ruler_rect.max.x) / tick_duration;
-        // FIXME (bug) Tick times are arbitrary, not multiples of tick duration.
-        // let last_x = start_tick * tick_duration; // FIXME Omit labels that do not fit
+        let mut last_x = self.x_from_time(-1);
         for tick in start_tick..end_tick + 1 {
-            self.draw_time_tick(painter, ruler_rect, tick * tick_duration);
+            let at = tick * tick_duration;
+            // Avoids labels overlapping.
+            if last_x < self.x_from_time(at) {
+                last_x = self.draw_time_tick(painter, ruler_rect, at).max.x;
+            }
         }
+    }
+
+    fn split_time(t: Time) -> (u16, u16, u16, u16) {
+        let t = t / 1_000;
+        let (t, millis) = (t / 1000, t % 1000);
+        let (t, seconds) = (t / 60, t % 60);
+        let (hours, minutes) = (t / 60, t % 60);
+        (hours as u16, minutes as u16, seconds as u16, millis as u16)
+    }
+
+    fn format_time(t: Time) -> String {
+        let (hours, minutes, seconds, millis) = Self::split_time(t);
+        let mut result: String = "".into();
+        if hours > 0 {
+            result.push_str(&format!("{}:", hours));
+        }
+        result.push_str(&format!("{}'{}", minutes, seconds));
+        if millis > 0 {
+            result.push_str(&format!(".{}", millis));
+        }
+        result
     }
 
     fn draw_time_tick(&mut self, painter: &Painter, ruler_rect: Rect, at: Time) -> Rect {
@@ -395,21 +419,10 @@ impl Stave {
             Color32::GRAY,
         );
 
-        let time = Duration::microseconds(at);
         painter.text(
             Pos2::new(x + 4.0, ruler_rect.min.y),
             Align2::LEFT_TOP,
-            // TODO (improvement) Format the time with precision that depends on zoom
-            //      (hours, minutes, seconds, millis), omit millis if those at null.
-            if time.num_minutes() == 0 {
-                "0".into()
-            } else {
-                format!(
-                    "{}'{}",
-                    time.num_minutes(),
-                    (time.num_seconds() % time.num_minutes()).abs()
-                )
-            },
+            Self::format_time(at),
             FontId::proportional(14.0),
             Color32::DARK_GRAY,
         )
