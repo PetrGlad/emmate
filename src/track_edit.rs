@@ -130,6 +130,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
             patch.push(EventAction::Delete(ev.clone()));
         }
     }
+    // FIXME (implementation) Cleanup the CC lane here? It looks like CC lane edits are not always sound.
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
             EditCommandId::TapeDelete,
