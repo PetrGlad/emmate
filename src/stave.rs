@@ -15,9 +15,10 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, Align, Align2, Color32, Context, FontId, Frame, Margin, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Rounding, Sense, Stroke, Ui,
+    self, Align2, Color32, Context, FontId, Frame, Margin, Modifiers, Painter, PointerButton, Pos2,
+    Rangef, Rect, Response, Rounding, Sense, Stroke, Ui,
 };
+use eframe::epaint::StrokeKind;
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
@@ -252,8 +253,8 @@ impl Stave {
     const NOTHING_ZONE: Range<Time> = (Time::MIN, 0);
 
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
-        Frame::none()
-            .inner_margin(Margin::symmetric(4.0, 4.0))
+        Frame::new()
+            .inner_margin(Margin::symmetric(4.0 as i8, 4.0 as i8))
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
                 let mut bounds = ui.available_rect_before_wrap().clone();
@@ -469,6 +470,7 @@ impl Stave {
                                     r,
                                     Rounding::ZERO,
                                     Stroke::new(2.0, COLOR_HOVERED),
+                                    StrokeKind::Inside,
                                 );
                             }
                         }
