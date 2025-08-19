@@ -15,8 +15,8 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, Align2, Color32, Context, FontId, Frame, Margin, Modifiers, Painter, PointerButton, Pos2,
-    Rangef, Rect, Response, Rounding, Sense, Stroke, Ui,
+    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Modifiers, Painter,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui,
 };
 use eframe::epaint::StrokeKind;
 use egui::Rgba;
@@ -416,7 +416,7 @@ impl Stave {
                 Rangef::new(x, x + 1.0),
                 Rangef::new(ruler_rect.min.y, ruler_rect.max.y),
             ),
-            Rounding::from(1.0),
+            CornerRadius::from(1.0),
             Color32::GRAY,
         );
 
@@ -468,7 +468,7 @@ impl Stave {
                                 *note_hovered = Some(event.id);
                                 painter.rect_stroke(
                                     r,
-                                    Rounding::ZERO,
+                                    CornerRadius::ZERO,
                                     Stroke::new(2.0, COLOR_HOVERED),
                                     StrokeKind::Inside,
                                 );
@@ -1148,7 +1148,7 @@ impl Stave {
                 y: y + height * 0.45,
             },
         };
-        painter.rect_filled(paint_rect, Rounding::ZERO, color);
+        painter.rect_filled(paint_rect, CornerRadius::ZERO, color);
         paint_rect
     }
 
@@ -1306,7 +1306,7 @@ impl Stave {
                 y: clip.max.y,
             },
         };
-        painter.rect_filled(area, Rounding::ZERO, *color);
+        painter.rect_filled(area, CornerRadius::ZERO, *color);
         painter.vline(
             area.min.x,
             clip.y_range(),
