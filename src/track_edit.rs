@@ -1,6 +1,3 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-
 use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
@@ -10,6 +7,8 @@ use crate::track::{
     TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::util::IdSeq;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
@@ -131,12 +130,34 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
         }
     }
     // FIXME (implementation) Cleanup the CC lane here? It looks like CC lane edits are not always sound.
+    patch.append(&mut clean_cc_lane(&track.events, MIDI_CC_SUSTAIN_ID));
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
             EditCommandId::TapeDelete,
             vec![CommandDiff::ChangeList { patch }, tail_shift],
         )
     })
+}
+
+// fn cc_value_before(events: &Vec<TrackEvent>, cc_id: ControllerId, at:) -> Option<EventAction> {
+//     todo!()
+// }
+
+fn clean_cc_lane(events: &Vec<TrackEvent>, cc_id: ControllerId) -> Vec<EventAction> {
+    let mut patch = vec![];
+    let mut last_val = 0;
+    for ev in events {
+        if let TrackEventType::Controller(set_value) = &ev.event {
+            if set_value.controller_id == cc_id {
+                if set_value.value == last_val {
+                    log::debug!("Duplicate CC event {:?}", ev);
+                    patch.push(EventAction::Delete(ev.clone()));
+                }
+                last_val = set_value.value;
+            }
+        }
+    }
+    patch
 }
 
 /// `ratio` 1.0 no change, `<1.0 srink/sped-up, >1.0 expand/slow-down.
@@ -364,12 +385,12 @@ pub fn set_damper(
     on: bool,
 ) -> Option<AppliedCommand> {
     let mut patch = vec![];
-    let on_before = is_cc_switch_on(cc_value_at(&track.events, &range.0, &MIDI_CC_SUSTAIN_ID));
-    let on_after = is_cc_switch_on(cc_value_at(
+    let on_before = is_cc_switch_on(cc_value_up_to(
         &track.events,
-        &(range.1 + 1),
-        &MIDI_CC_SUSTAIN_ID,
+        range.0 - 1,
+        MIDI_CC_SUSTAIN_ID,
     ));
+    let on_after = is_cc_switch_on(cc_value_up_to(&track.events, range.1, MIDI_CC_SUSTAIN_ID));
 
     clear_cc_events(track, range, MIDI_CC_SUSTAIN_ID, &mut patch);
     if on {
@@ -415,19 +436,19 @@ fn clear_cc_events(
     }
 }
 
-fn cc_value_at(events: &Vec<TrackEvent>, at: &Time, cc_id: &ControllerId) -> Level {
-    let mut idx = events.partition_point(|x| x.at < *at);
+fn cc_value_up_to(events: &Vec<TrackEvent>, at: Time, cc_id: ControllerId) -> Level {
+    let mut idx = events.partition_point(|x| x.at < at);
     while idx > 0 {
         idx -= 1;
         if let Some(ev) = events.get(idx) {
             if let TrackEventType::Controller(cc) = &ev.event {
-                if cc.controller_id == *cc_id {
+                if cc.controller_id == cc_id {
                     return cc.value;
                 }
             }
         }
     }
-    return 0; // default
+    0 // default starting value
 }
 
 /// Lookup a bookmark at the exact given time.
@@ -516,11 +537,11 @@ mod tests {
     fn check_cc_value_at() {
         let track = make_test_track();
 
-        assert_eq!(55, cc_value_at(&track.events, &20, &13));
-        assert_eq!(66, cc_value_at(&track.events, &21, &13));
-        assert_eq!(60, cc_value_at(&track.events, &21, &44));
-        assert_eq!(0, cc_value_at(&track.events, &21, &99));
-        assert_eq!(0, cc_value_at(&track.events, &0, &99));
+        assert_eq!(55, cc_value_up_to(&track.events, 20, 13));
+        assert_eq!(66, cc_value_up_to(&track.events, 21, 13));
+        assert_eq!(60, cc_value_up_to(&track.events, 21, 44));
+        assert_eq!(0, cc_value_up_to(&track.events, 21, 99));
+        assert_eq!(0, cc_value_up_to(&track.events, 0, 99));
     }
 
     #[test]
