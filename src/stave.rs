@@ -258,6 +258,7 @@ impl Stave {
             .stroke(Stroke::NONE)
             .show(ui, |ui| {
                 let mut bounds = ui.available_rect_before_wrap().clone();
+                let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
 
                 {
                     // TODO (cleanup) Use stack layout instead?
@@ -272,7 +273,6 @@ impl Stave {
                     self.draw_time_ruler(&ui.painter(), ruler_rect);
                 }
 
-                let egui_response = ui.allocate_response(bounds.size(), Sense::click_and_drag());
 
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
                 let mut pitch_hovered = None;
