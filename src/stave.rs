@@ -29,11 +29,15 @@ use std::path::PathBuf;
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 /// Reserve this ley lane for damper display.
+const CONTROL_LANES_COUNT: Pitch = 1;
 const PIANO_DAMPER_LANE: Pitch = PIANO_LOWEST_KEY - 1;
 pub(crate) const PIANO_KEY_LINES: Range<Pitch> =
     (PIANO_LOWEST_KEY, PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
-// Lines including controller values placeholder.
-const STAVE_KEY_LINES: Range<Pitch> = (PIANO_LOWEST_KEY - 1, PIANO_LOWEST_KEY + PIANO_KEY_COUNT);
+// Lanes including controller values placeholder.
+const STAVE_KEY_LANES: Range<Pitch> = (
+    PIANO_DAMPER_LANE,
+    PIANO_DAMPER_LANE + PIANO_KEY_COUNT + CONTROL_LANES_COUNT,
+);
 
 fn key_line_ys(view_y_range: &Rangef, pitches: Range<Pitch>) -> (BTreeMap<Pitch, Pix>, Pix) {
     let mut lines = BTreeMap::new();
@@ -273,8 +277,7 @@ impl Stave {
                     self.draw_time_ruler(&ui.painter(), ruler_rect);
                 }
 
-
-                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LINES);
+                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LANES);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());

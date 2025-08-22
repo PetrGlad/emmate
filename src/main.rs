@@ -123,7 +123,6 @@ pub fn main() {
                 style.visuals = egui::Visuals::light();
                 style.animation_time = 0.2;
             });
-
             Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))
         }),
     )
