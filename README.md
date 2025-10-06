@@ -72,21 +72,24 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 
 ## TODO
 
-- [ ] BUG After edits the sustain lane is left in an inconsistent state sometimes (needs investigation).
-- [ ] Use intermediate state snapshots in edit history (currently diffs also include previous state).
-  Need also logic to decide when the snapshot should be made.
-- [ ] Stop for confirmation to undo beyond the manual snapshot (can be set on export).
-- [ ] Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
+- [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
+- [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
-- [ ] Copy/cut/paste notes and time ranges (should also be supported between tracks).
-- [ ] Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
+- [ ] (workflow) Copy/cut/paste notes and time ranges (should also be supported between tracks).
+- [ ] (improvement) Use intermediate state snapshots in edit history (currently diffs also include previous state).
+  Need also logic to decide when the snapshot should be made. This change should produce more compact on-disk files 
+  without duplication.
+- [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (can be set on export).
+- [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
-- [ ] Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
+- [ ] (workflow) Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
   now).
-- [ ] "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
+- [ ] (workflow) "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
+- [x] BUG After edits the sustain lane is left in an inconsistent state sometimes (needs investigation). -> Pane 
+  size did not match the CC lane drawn, so the mouse was not properly registered.
 - [x] Time marks on stave ("minute:second" from the beginning).
 - [x] Adjust tempo for a tape selection.
 - [x] (refactoring) Reduce number of range types (prefer range::Range, maybe)
