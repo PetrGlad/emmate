@@ -72,6 +72,7 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 
 ## TODO
 
+- [ ] (bug) Tape delete does not stitch CC line properly (leaves unmatched events).
 - [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
 - [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
   tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.

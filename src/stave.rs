@@ -625,7 +625,7 @@ impl Stave {
         // Tempo adjustment
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::SHIFT,
+                Modifiers::NONE,
                 egui::Key::CloseBracket,
             ))
         }) {
@@ -635,7 +635,7 @@ impl Stave {
         }
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::SHIFT,
+                Modifiers::NONE,
                 egui::Key::OpenBracket,
             ))
         }) {
