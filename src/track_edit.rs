@@ -125,7 +125,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     assert!(delta >= 0);
     let mut patch = vec![];
     for ev in &track.events {
-        if ev.intersects(&range) {
+        if ev.intersects(&range) { // FIXME (bug) This condition misses CC events (always false for CC).
             patch.push(EventAction::Delete(ev.clone()));
         }
     }
