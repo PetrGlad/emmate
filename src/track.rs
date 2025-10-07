@@ -20,14 +20,15 @@ pub type ChannelId = u8;
 pub type EventId = u64;
 
 pub const MAX_LEVEL: Level = 127; // Should be equal to u7::max_value().as_int();
+pub const DEFAULT_CC_LEVEL: Level = 0;
 
 #[allow(dead_code)]
 pub const MIDI_CC_MODWHEEL_ID: ControllerId = 1;
-// Damper pedal
+// Damper pedal MIDI number.
 pub const MIDI_CC_SUSTAIN_ID: ControllerId = 64;
 
 pub fn is_cc_switch_on(x: Level) -> bool {
-    // Not using crappy SLP3-D anyway.
+    // Not using crappy SLP3-D anyway :(
     x >= 64
 }
 

@@ -1,10 +1,7 @@
 use crate::changeset::{Changeset, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
-use crate::track::{
-    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
-    MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
-};
+use crate::track::{export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
     shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
@@ -441,7 +438,7 @@ impl Stave {
         painter: &Painter,
         track: &Track,
     ) -> Option<range::Range<Time>> {
-        let mut last_damper_value: (Time, Level) = (0, 0);
+        let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
         let x_range = painter.clip_rect().x_range();
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
@@ -651,8 +648,9 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
+                let id_seq = &self.history.borrow().id_seq.clone();
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    tape_delete(track, &(time_selection.0, time_selection.1))
+                    tape_delete(id_seq, track, &(time_selection.0, time_selection.1))
                 });
             }
             if !self.note_selection.selected.is_empty() {
@@ -1255,14 +1253,12 @@ impl Stave {
     ) {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
             if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-                // TODO (visuals, improvement) The time range here is not right: is shown up to the event,
-                //   should be from the event to the next one instead.
                 self.draw_note(
                     painter,
                     (last_damper_value.0, event.at),
                     *y,
                     *half_tone_step,
-                    self.note_color(&cc.value, false),
+                    self.note_color(&last_damper_value.1, false),
                 );
                 *last_damper_value = (event.at, cc.value);
             }

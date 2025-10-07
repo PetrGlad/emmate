@@ -2,13 +2,11 @@ use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::stave::PIANO_KEY_LINES;
-use crate::track::{
-    is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track,
-    TrackEvent, TrackEventType, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
-};
+use crate::track::{is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
 use crate::util::IdSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use log::log;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
@@ -120,17 +118,22 @@ pub fn tape_insert(range: &Range<Time>) -> Option<AppliedCommand> {
     Some((EditCommandId::TapeInsert, diffs))
 }
 
-pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand> {
+pub fn tape_delete(id_seq: &IdSeq, track: &Track, range: &Range<Time>) -> Option<AppliedCommand> {
     let delta = range.1 - range.0;
     assert!(delta >= 0);
+    let value_before = cc_value_up_to(&track.events, range.0, MIDI_CC_SUSTAIN_ID);
+    let value_after = cc_value_up_to(&track.events, range.1, MIDI_CC_SUSTAIN_ID);
+
     let mut patch = vec![];
     for ev in &track.events {
-        if ev.intersects(&range) { // FIXME (bug) This condition misses CC events (always false for CC).
+        if ev.intersects(&range) {
             patch.push(EventAction::Delete(ev.clone()));
         }
     }
-    // FIXME (implementation) Cleanup the CC lane here? It looks like CC lane edits are not always sound.
-    patch.append(&mut clean_cc_lane(&track.events, MIDI_CC_SUSTAIN_ID));
+    // patch.append(&mut clean_cc_lane(&track.events, MIDI_CC_SUSTAIN_ID));
+    if value_before != value_after {
+        patch.push(EventAction::Insert(cc_event(id_seq, &range.0, value_after)));
+    }
     checked_tail_shift(&track, &range.0, &range.1, &-delta).map(|tail_shift| {
         (
             EditCommandId::TapeDelete,
@@ -139,10 +142,7 @@ pub fn tape_delete(track: &Track, range: &Range<Time>) -> Option<AppliedCommand>
     })
 }
 
-// fn cc_value_before(events: &Vec<TrackEvent>, cc_id: ControllerId, at:) -> Option<EventAction> {
-//     todo!()
-// }
-
+/// Remove duplicate (idempotent) CC events.
 fn clean_cc_lane(events: &Vec<TrackEvent>, cc_id: ControllerId) -> Vec<EventAction> {
     let mut patch = vec![];
     let mut last_val = 0;
@@ -367,17 +367,23 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
     Some((EditCommandId::AddNote, diff))
 }
 
-fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
+fn cc_event(id_seq: &IdSeq, at: &Time, value: Level) -> TrackEvent {
     TrackEvent {
         id: id_seq.next(),
         at: *at,
         event: TrackEventType::Controller(ControllerSetValue {
             controller_id: MIDI_CC_SUSTAIN_ID,
-            value: if on { MAX_LEVEL } else { 0 },
+            value,
         }),
     }
 }
 
+fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
+    cc_event(id_seq, at, if on { MAX_LEVEL } else { 0 })
+}
+
+
+/// Set damper CC value.
 pub fn set_damper(
     id_seq: &IdSeq,
     track: &Track,
@@ -436,6 +442,7 @@ fn clear_cc_events(
     }
 }
 
+/// Find effective CC value just before given moment.
 fn cc_value_up_to(events: &Vec<TrackEvent>, at: Time, cc_id: ControllerId) -> Level {
     let mut idx = events.partition_point(|x| x.at < at);
     while idx > 0 {
@@ -448,7 +455,7 @@ fn cc_value_up_to(events: &Vec<TrackEvent>, at: Time, cc_id: ControllerId) -> Le
             }
         }
     }
-    0 // default starting value
+    DEFAULT_CC_LEVEL
 }
 
 /// Lookup a bookmark at the exact given time.

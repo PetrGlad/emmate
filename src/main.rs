@@ -76,7 +76,7 @@ pub fn main() {
         project_dir = path.clone();
         log::info!("Opening project {:?}", &project_dir);
     } else {
-        log::error!("No MIDI file or project dir to opne is given.");
+        log::error!("No MIDI file or project dir to open is given.");
         exit(1);
     }
     let project = Project::open(&project_dir);
