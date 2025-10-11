@@ -201,7 +201,7 @@ impl eframe::App for EmApp {
                         ui.horizontal(|ui| {
                             // Status line
                             ui.label(format!(
-                                "track_len={}  n_sel={}  t_sel={}  at={}s ",
+                                "track_len={}  n_sel={}  t_sel={}  at={}s  fps={}",
                                 self.stave.history.borrow().with_track(|t| t.events.len()),
                                 self.stave.note_selection.count(),
                                 self.stave.time_selection.as_ref().map_or(
@@ -216,7 +216,8 @@ impl eframe::App for EmApp {
                                         )
                                     },
                                 ),
-                                Duration::from_micros(self.stave.cursor_position as u64).as_secs()
+                                Duration::from_micros(self.stave.cursor_position as u64).as_secs(),
+                                ui.input(|i| (1.0 / i.stable_dt) as u32)
                             ));
                         });
                     })
