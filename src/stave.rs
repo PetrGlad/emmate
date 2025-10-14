@@ -1,7 +1,10 @@
 use crate::changeset::{Changeset, EventActionsList};
-use crate::common::Time;
+use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
-use crate::track::{export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
+use crate::track::{
+    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
+    DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+};
 use crate::track_edit::{
     accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
     shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
@@ -11,11 +14,8 @@ use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
-use eframe::egui::{
-    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui,
-};
-use eframe::epaint::StrokeKind;
+use eframe::egui::{self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui};
+use eframe::epaint::{ClippedShape, RectShape, StrokeKind, Tessellator};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
@@ -305,6 +305,7 @@ impl Stave {
                         &pointer_pos,
                         &mut note_hovered,
                         &painter,
+                        history.version(),
                         &track,
                     );
                 }
@@ -366,8 +367,8 @@ impl Stave {
             .iter()
             .find_map(|td| {
                 let x = td * 1_000_000.0; // From seconds
-                let nticks = time_width / x;
-                if 2.0 < nticks && nticks < 20.0 {
+                let n_ticks = time_width / x;
+                if 2.0 < n_ticks && n_ticks < 20.0 {
                     Some(x)
                 } else {
                     None
@@ -436,6 +437,7 @@ impl Stave {
         pointer_pos: &Option<Pos2>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
+        version_id: VersionId,
         track: &Track,
     ) -> Option<range::Range<Time>> {
         let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
@@ -443,6 +445,15 @@ impl Stave {
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         let mut should_be_visible = None;
+
+
+        // FIXME // Experimental
+        let mut mesh = Mesh::default();
+
+        let font_tex_size = [1024, 1024]; // unused
+        let prepared_discs = vec![]; // unused
+        let mut tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
+
         for i in 0..track.events.len() {
             let event = &track.events[i];
             if let Some(trans) = &self.transition {
@@ -459,10 +470,12 @@ impl Stave {
                             selection_hints_left.insert(note.pitch);
                         }
                     }
-                    let note_rect =
+                    let note_shape =
                         self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
                     // Alternatively, can return the known rect from draw_track_note above and check that.
-                    if let Some(r) = note_rect {
+                    if let Some(shape) = note_shape {
+                        let r = shape.visual_bounding_rect();
+                        tessellator.tessellate_shape(shape, &mut mesh);
                         if let Some(&pointer_pos) = pointer_pos.as_ref() {
                             if r.contains(pointer_pos) {
                                 *note_hovered = Some(event.id);
@@ -491,6 +504,8 @@ impl Stave {
                 ),
             }
         }
+        painter.add(mesh);
+
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
                 // TODO (cleanup) Restrict actions to not change event types,
@@ -1081,7 +1096,7 @@ impl Stave {
         painter: &Painter,
         event: &TrackEvent,
         note: &Note,
-    ) -> Option<Rect> {
+    ) -> Option<Shape> {
         if let Some(y) = key_ys.get(&note.pitch) {
             Some(self.draw_note(
                 &painter,
@@ -1138,7 +1153,7 @@ impl Stave {
         y: Pix,
         height: Pix,
         color: Color32,
-    ) -> Rect {
+    ) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.x_from_time(time_range.0),
@@ -1149,8 +1164,7 @@ impl Stave {
                 y: y + height * 0.45,
             },
         };
-        painter.rect_filled(paint_rect, CornerRadius::ZERO, color);
-        paint_rect
+        Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
     }
 
     fn draw_point_accent(
