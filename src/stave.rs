@@ -14,13 +14,17 @@ use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
-use eframe::egui::{self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter, PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui};
+use eframe::egui::{
+    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui,
+};
 use eframe::epaint::{ClippedShape, RectShape, StrokeKind, Tessellator};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -120,7 +124,7 @@ impl EditTransition {
 
 // #[derive(Debug)]
 pub struct Stave {
-    pub history: RefCell<TrackHistory>,
+    pub history: Arc<RwLock<TrackHistory>>,
 
     /// Starting moment of visible time range.
     pub time_left: Time,
@@ -163,7 +167,7 @@ impl Stave {
     // I would like to use Duration but that is not "const compatible" yet.
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
-    pub fn new(history: RefCell<TrackHistory>) -> Stave {
+    pub fn new(history: Arc<RwLock<TrackHistory>>) -> Stave {
         let mut note_colors = vec![];
         assert_eq!(Level::MIN, 0); // Otherwise need to adjust lookups.
         for velocity in Level::MIN..Level::MAX {
@@ -192,7 +196,8 @@ impl Stave {
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
         self.history
-            .borrow()
+            .read()
+            .expect("Read stave.history.")
             .with_track(|track| export_smf(&track.events, file_path));
     }
 
@@ -227,7 +232,12 @@ impl Stave {
 
     pub fn zoom_to_fit(&mut self, time_margin: Time) {
         self.time_left = -time_margin;
-        self.time_right = self.history.borrow().with_track(|tr| tr.max_time()) + time_margin;
+        self.time_right = self
+            .history
+            .read()
+            .expect("Read stave.history.")
+            .with_track(|tr| tr.max_time())
+            + time_margin;
     }
 
     pub fn scroll(&mut self, dt: Time) {
@@ -297,7 +307,7 @@ impl Stave {
                 let mut note_hovered = None;
                 let should_be_visible;
                 {
-                    let history = self.history.borrow();
+                    let history = self.history.read().expect("Read stave.history.");
                     let track = history.track.read();
                     should_be_visible = self.draw_events(
                         &key_ys,
@@ -446,65 +456,87 @@ impl Stave {
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         let mut should_be_visible = None;
 
-
-        // FIXME // Experimental
-        let mut mesh = Mesh::default();
+        // -----------------------------------------------------------------------------------
+        // Experimental
 
         let font_tex_size = [1024, 1024]; // unused
         let prepared_discs = vec![]; // unused
-        let mut tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
+        let mut tessellator =
+            Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
 
-        for i in 0..track.events.len() {
-            let event = &track.events[i];
-            if let Some(trans) = &self.transition {
-                if trans.changeset.changes.contains_key(&event.id) {
-                    continue;
-                }
-            }
-            match &event.event {
-                TrackEventType::Note(note) => {
-                    if self.note_selection.contains(&event) {
-                        if x_range.max < self.x_from_time(event.at) {
-                            selection_hints_right.insert(note.pitch);
-                        } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                            selection_hints_left.insert(note.pitch);
+        use rayon::prelude::*;
+
+        let a = track
+            .events
+            .chunks(track.events.len() / 8)
+            .collect::<Vec<_>>();
+
+        a.iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .par_iter()
+            .map(|events| {
+                let mut mesh = Mesh::default();
+                for event in *events {
+                    if let Some(trans) = &self.transition {
+                        if trans.changeset.changes.contains_key(&event.id) {
+                            continue;
                         }
                     }
-                    let note_shape =
-                        self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
-                    // Alternatively, can return the known rect from draw_track_note above and check that.
-                    if let Some(shape) = note_shape {
-                        let r = shape.visual_bounding_rect();
-                        tessellator.tessellate_shape(shape, &mut mesh);
-                        if let Some(&pointer_pos) = pointer_pos.as_ref() {
-                            if r.contains(pointer_pos) {
-                                *note_hovered = Some(event.id);
-                                painter.rect_stroke(
-                                    r,
-                                    CornerRadius::ZERO,
-                                    Stroke::new(2.0, COLOR_HOVERED),
-                                    StrokeKind::Inside,
-                                );
+                    match &event.event {
+                    _ => (),
+                    TrackEventType::Note(note) => {
+                        if self.note_selection.contains(&event) {
+                            if x_range.max < self.x_from_time(event.at) {
+                                selection_hints_right.insert(note.pitch);
+                            } else if self.x_from_time(event.at + note.duration) < x_range.min {
+                                selection_hints_left.insert(note.pitch);
+                            }
+                        }
+                        let note_shape = self.draw_track_note(
+                            key_ys,
+                            half_tone_step,
+                            &painter,
+                            &event,
+                            &note,
+                        );
+                        // Alternatively, can return the known rect from draw_track_note above and check that.
+                        if let Some(shape) = note_shape {
+                            let r = shape.visual_bounding_rect();
+                            tessellator.tessellate_shape(shape, &mut mesh);
+                            if let Some(&pointer_pos) = pointer_pos.as_ref() {
+                                if r.contains(pointer_pos) {
+                                    *note_hovered = Some(event.id);
+                                    painter.rect_stroke(
+                                        r,
+                                        CornerRadius::ZERO,
+                                        Stroke::new(2.0, COLOR_HOVERED),
+                                        StrokeKind::Inside,
+                                    );
+                                }
                             }
                         }
                     }
+                    TrackEventType::Controller(cc) => self.draw_track_cc(
+                        &key_ys,
+                        half_tone_step,
+                        &painter,
+                        &mut last_damper_value,
+                        &event,
+                        &cc,
+                    ),
+                    TrackEventType::Bookmark => self.draw_cursor(
+                        &painter,
+                        self.x_from_time(event.at),
+                        Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                    ),
+                    }
                 }
-                TrackEventType::Controller(cc) => self.draw_track_cc(
-                    &key_ys,
-                    half_tone_step,
-                    &painter,
-                    &mut last_damper_value,
-                    &event,
-                    &cc,
-                ),
-                TrackEventType::Bookmark => self.draw_cursor(
-                    &painter,
-                    self.x_from_time(event.at),
-                    Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                ),
-            }
-        }
-        painter.add(mesh);
+                mesh
+            });
+        // .for_each(|mesh| {
+        //     painter.add(mesh);
+        // });
 
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
@@ -663,7 +695,12 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                let id_seq = &self.history.borrow().id_seq.clone();
+                let id_seq = &self
+                    .history
+                    .read()
+                    .expect("Read stave.history.")
+                    .id_seq
+                    .clone();
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     tape_delete(id_seq, track, &(time_selection.0, time_selection.1))
                 });
@@ -803,7 +840,12 @@ impl Stave {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
         }) {
             let mut changes = vec![];
-            let edit_state = if self.history.borrow_mut().undo(&mut changes) {
+            let edit_state = if self
+                .history
+                .write()
+                .expect("Write stave.history.")
+                .undo(&mut changes)
+            {
                 Some((EditCommandId::Undo, changes))
             } else {
                 None
@@ -818,7 +860,12 @@ impl Stave {
                 ))
         }) {
             let mut changes = vec![];
-            let edit_state = if self.history.borrow_mut().redo(&mut changes) {
+            let edit_state = if self
+                .history
+                .write()
+                .expect("Write stave.history.")
+                .redo(&mut changes)
+            {
                 Some((EditCommandId::Redo, changes))
             } else {
                 None
@@ -831,7 +878,12 @@ impl Stave {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
         }) {
             let at = self.cursor_position;
-            let id_seq = &self.history.borrow().id_seq.clone();
+            let id_seq = &self
+                .history
+                .read()
+                .expect("Read stave.history.")
+                .id_seq
+                .clone();
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                 set_bookmark(track, id_seq, &at)
             });
@@ -854,7 +906,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(|track| {
                     track
                         .events
@@ -875,7 +928,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(move |track| {
                     track
                         .events
@@ -896,7 +950,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(|track| track.events.iter().rfind(|ev| ev.at < at).cloned())
                 .map(|ev| ev.at)
                 .or(Some(0));
@@ -911,7 +966,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(move |track| track.events.iter().find(|ev| ev.at > at).cloned())
                 .map(|ev| ev.at)
                 .or(Some(self.max_time()));
@@ -985,7 +1041,8 @@ impl Stave {
     ) -> CommandApplication {
         let diff = self
             .history
-            .borrow_mut()
+            .write()
+            .expect("Write stave.history.")
             .update_track(|track| action(&self, track));
         self.transition = Self::animate_edit(
             context,
@@ -996,7 +1053,10 @@ impl Stave {
     }
 
     fn max_time(&self) -> Time {
-        self.history.borrow().with_track(|track| track.max_time())
+        self.history
+            .read()
+            .expect("Read stave.history.")
+            .with_track(|track| track.max_time())
     }
 
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
@@ -1043,7 +1103,12 @@ impl Stave {
             if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.0, draw.time.1);
-                    let id_seq = &self.history.borrow().id_seq.clone();
+                    let id_seq = &self
+                        .history
+                        .read()
+                        .expect("Read stave.history.")
+                        .id_seq
+                        .clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                         if draw.pitch == PIANO_DAMPER_LANE {
                             set_damper(id_seq, track, &time_range, !modifiers.alt)

@@ -16,8 +16,9 @@ debug = true
 
 [dependencies]
 ordered-float = "5.0.0"
-eframe = { version = "0.32.0" }
-egui_extras = { version = "0.32.0" }
+eframe = { version = "0.33.0"}
+egui_extras = { version = "0.33.0" }
+rayon = "1.11.0"
 
 # https://github.com/negamartin/midly
 midly = { version = "0.5.3", features = ["alloc"] }

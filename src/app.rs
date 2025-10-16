@@ -138,7 +138,7 @@ impl eframe::App for EmApp {
             }
 
             {
-                let h = self.stave.history.borrow();
+                let h = self.stave.history.read().expect("Read stave.history.");
                 ui.heading(format!("🌲 {} [{}]", self.title, h.version()));
             }
             StripBuilder::new(ui)
@@ -192,17 +192,17 @@ impl eframe::App for EmApp {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave.history.borrow_mut().undo(&mut vec![]);
+                                self.stave.history.write().expect("Write stave.history.").undo(&mut vec![]);
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave.history.borrow_mut().redo(&mut vec![]);
+                                self.stave.history.write().expect("Write stave.history.").redo(&mut vec![]);
                             }
                         });
                         ui.horizontal(|ui| {
                             // Status line
                             ui.label(format!(
                                 "track_len={}  n_sel={}  t_sel={}  at={}s ",
-                                self.stave.history.borrow().with_track(|t| t.events.len()),
+                                self.stave.history.read().expect("Read stave.history.").with_track(|t| t.events.len()),
                                 self.stave.note_selection.count(),
                                 self.stave.time_selection.as_ref().map_or(
                                     "()".to_string(),
