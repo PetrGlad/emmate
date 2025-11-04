@@ -146,6 +146,23 @@ pub struct Stave {
     note_colors: Vec<Color32>,
 
     // Experimental
+    // Using SyncCOW to support multithreaded mesh generation. Is not needed otherwise.
+    // TODO Multithreaded generation does help to offload from single cpu but is rather inefficient still.
+    //   Now I wan to experiment with on-demand mesh generation and using lerp on mesh itself for animation
+    //   (because I am curious, that is why):
+    //   * During transitions use 2 meshes "before" and "after" and generate the output by interpolation for animation.
+    //   * Only re-generate mesh when track changes.
+    //   * Scale the mesh itself to support zoom/scroll. Maybe this would look like:
+    //             out := lerp(before, after); zoom(&mut out)
+    //   * When showing and edit action, generate another mesh with the new state.
+    //      * Update "before" one with placeholders for insertions.
+    //      * After mesh would have placeholders for deletions.
+    //   This would require:
+    //   * To tessellate track at some default scale.
+    //   * Ensure size(before.vertices) == size(after.vertices), deleted state can be represented as completely transparent color.
+    //   * When animation finishes, before := after; discard_deleted(&mut before); truncate(&mut after).
+    //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
+    //   * No need to allocate meshes every time
     cached_mesh: SyncCow<Option<(VersionId, Arc<Mesh>)>>, // Can this be streamlined??? Need interior mutability here.
 }
 
@@ -471,7 +488,7 @@ impl Stave {
 
         use rayon::prelude::*;
 
-        // TODO Simplify?
+        // TODO Simplify? How?
         if self.cached_mesh.read().as_ref().clone().map(|(v, _)| v != version_id).unwrap_or(true) {
             self.cached_mesh.edit(|x| {*x = None;})
         }
