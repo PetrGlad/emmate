@@ -163,7 +163,15 @@ pub struct Stave {
     //   * When animation finishes, before := after; discard_deleted(&mut before); truncate(&mut after).
     //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
     //   * No need to allocate meshes every time
-    cached_mesh: SyncCow<Option<(VersionId, Arc<Mesh>)>>, // Can this be streamlined??? Need interior mutability here.
+    meshes: SyncCow<Meshes>,
+}
+
+#[derive(Default, Clone)]
+struct Meshes {
+    version_id: VersionId,
+    a: Mesh,
+    b: Mesh,
+    out: Arc<Mesh>
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -212,7 +220,7 @@ impl Stave {
             note_selection: NotesSelection::default(),
             transition: None,
             note_colors,
-            cached_mesh: SyncCow::new(None),
+            meshes: SyncCow::new(Meshes::default()),
         }
     }
 
@@ -483,96 +491,78 @@ impl Stave {
 
         let font_tex_size = [1024, 1024]; // unused
         let prepared_discs = vec![]; // unused
-        let tessellator =
-            Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
+        let tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
 
-        use rayon::prelude::*;
-
-        // TODO Simplify? How?
-        if self.cached_mesh.read().as_ref().clone().map(|(v, _)| v != version_id).unwrap_or(true) {
-            self.cached_mesh.edit(|x| {*x = None;})
-        }
-
-        if self.cached_mesh.read().is_none() {
-            let meshes = track
-                .events
-                .chunks(track.events.len() / 8)
-                .collect::<Vec<_>>()
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .par_iter()
-                .map(|events| {
-                    let mut tessellator = tessellator.clone();
-                    let mut mesh = Mesh::default();
-                    for event in *events {
-                        if let Some(trans) = &self.transition {
-                            if trans.changeset.changes.contains_key(&event.id) {
-                                continue;
-                            }
+        // FIXME Only using `a` side for now.
+        if self.meshes.read().version_id != version_id {
+            self.meshes.edit(|meshes: &mut Meshes| {
+                let mut tessellator = tessellator.clone();
+                let mut mesh = Mesh::default();
+                for event in &track.events {
+                    if let Some(trans) = &self.transition {
+                        if trans.changeset.changes.contains_key(&event.id) {
+                            continue;
                         }
-                        match &event.event {
-                            TrackEventType::Note(note) => {
-                                // if self.note_selection.contains(&event) {
-                                //     if x_range.max < self.x_from_time(event.at) {
-                                //         selection_hints_right.insert(note.pitch);
-                                //     } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                                //         selection_hints_left.insert(note.pitch);
-                                //     }
-                                // }
-                                let note_shape = self.draw_track_note(
-                                    key_ys,
-                                    half_tone_step,
-                                    &painter,
-                                    &event,
-                                    &note,
-                                );
-                                // Alternatively, can return the known rect from draw_track_note above and check that.
-                                if let Some(shape) = note_shape {
-                                    let r = shape.visual_bounding_rect();
-                                    tessellator.tessellate_shape(shape, &mut mesh);
-                                    if let Some(&pointer_pos) = pointer_pos.as_ref() {
-                                        if r.contains(pointer_pos) {
-                                            // *note_hovered = Some(event.id);
-                                            painter.rect_stroke(
-                                                r,
-                                                CornerRadius::ZERO,
-                                                Stroke::new(2.0, COLOR_HOVERED),
-                                                StrokeKind::Inside,
-                                            );
-                                        }
+                    }
+                    match &event.event {
+                        TrackEventType::Note(note) => {
+                            // TODO Restore edit animation display
+                            // if self.note_selection.contains(&event) {
+                            //     if x_range.max < self.x_from_time(event.at) {
+                            //         selection_hints_right.insert(note.pitch);
+                            //     } else if self.x_from_time(event.at + note.duration) < x_range.min {
+                            //         selection_hints_left.insert(note.pitch);
+                            //     }
+                            // }
+                            let note_shape = self.draw_track_note(
+                                key_ys,
+                                half_tone_step,
+                                &painter,
+                                &event,
+                                &note,
+                            );
+                            // Alternatively, can return the known rect from draw_track_note above and check that.
+                            if let Some(shape) = note_shape {
+                                let r = shape.visual_bounding_rect();
+                                tessellator.tessellate_shape(shape, &mut mesh);
+                                if let Some(&pointer_pos) = pointer_pos.as_ref() {
+                                    if r.contains(pointer_pos) {
+                                        // *note_hovered = Some(event.id);
+                                        painter.rect_stroke(
+                                            r,
+                                            CornerRadius::ZERO,
+                                            Stroke::new(2.0, COLOR_HOVERED),
+                                            StrokeKind::Inside,
+                                        );
                                     }
                                 }
                             }
-                            TrackEventType::Controller(cc) => (),
-                            // self.draw_track_cc(
-                            //     &key_ys,
-                            //     half_tone_step,
-                            //     &painter,
-                            //     &mut last_damper_value,
-                            //     &event,
-                            //     &cc,
-                            // ),
-                            TrackEventType::Bookmark => self.draw_cursor(
-                                &painter,
-                                self.x_from_time(event.at),
-                                Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                            ),
                         }
+                        TrackEventType::Controller(cc) => (),
+                        // TODO Restore CC display
+                        // self.draw_track_cc(
+                        //     &key_ys,
+                        //     half_tone_step,
+                        //     &painter,
+                        //     &mut last_damper_value,
+                        //     &event,
+                        //     &cc,
+                        // ),
+                        // TODO Draw cursors separately? I do not want to scale them.
+                        TrackEventType::Bookmark => self.draw_cursor(
+                            &painter,
+                            self.x_from_time(event.at),
+                            Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                        ),
                     }
-                    mesh
-                })
-                .collect::<Vec<_>>();
-            let mut mesh = Mesh::default();
-            for part in meshes {
-                mesh.append(part);
-            }
-            self.cached_mesh.edit(|x| {
-                (*x).replace((version_id, Arc::new(mesh)));
+                }
+
+                meshes.version_id = version_id;
+                meshes.out = Arc::new(mesh);
             });
         }
         painter.add(Shape::mesh(
-            self.cached_mesh.read().as_ref().clone().expect("mesh is initialized").1,
+            self.meshes.read().out.clone(),
         ));
 
         if let Some(trans) = &self.transition {
