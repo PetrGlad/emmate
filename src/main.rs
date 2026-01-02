@@ -98,7 +98,14 @@ pub fn main() {
     let (mut engine, engine_command_sender) = audio_setup::setup_audio_engine(midi_output);
 
     {
-        let track_midi_source = TrackSource::new(project.history.read().expect("Read stave.history.").track.clone());
+        let track_midi_source = TrackSource::new(
+            project
+                .history
+                .read()
+                .expect("Read stave.history.")
+                .track
+                .clone(),
+        );
         engine_command_sender
             .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
             .unwrap();
@@ -109,7 +116,6 @@ pub fn main() {
         "Digital Piano",
         &mut engine,
     ));
-    midi_inputs.push(audio_setup::midi_keyboard_input("XPIANOGT", &mut engine));
     midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &mut engine));
 
     // GUI

@@ -98,7 +98,7 @@ impl Engine {
         thread::spawn(move || {
             engine2.lock().unwrap().seek(0);
             loop {
-                thread::sleep(Duration::from_micros(3_000)); // TODO (improvement) Use async instead
+                thread::sleep(Duration::from_micros(3_000)); // TODO (improvement?) Use async instead.
                 let lock = engine2.lock();
                 if let Err(_) = lock {
                     continue; // Will try next time.

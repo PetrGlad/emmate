@@ -77,7 +77,7 @@ const DEFAULT_BEATS_PER_SEC: u32 = 120 / 60;
 fn usec_per_tick(timing: &Timing) -> u32 {
     let tick_per_beat = ticks_per_beat(timing);
     let usec_per_tick = 1_000_000 / (DEFAULT_BEATS_PER_SEC * tick_per_beat);
-    println!(
+    log::info!(
         "tick/beat {:#?}, beat/second  {:#?}, usec/tick {:#?}",
         tick_per_beat, DEFAULT_BEATS_PER_SEC, usec_per_tick
     );

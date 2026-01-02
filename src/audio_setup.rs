@@ -34,13 +34,14 @@ pub fn midi_keyboard_input(
         }
     }
     if port_idx == None {
-        log::warn!("WARN No midi input selected.");
+        log::warn!("No midi input port for \"{}*\".", name_prefix);
         return None;
     }
     let port = ports.get(port_idx.unwrap()).unwrap();
     let engine = engine.clone();
-    // TODO Probably we should have an input source for this case. It may need
-    //      special handling while the engine is paused.
+    // TODO Probably I should have an input source for this case. It may need
+    //      special handling while the engine is paused. Some events still have
+    //      to be played when transport paused for audition/pass-through.
     Some(
         input
             .connect(
@@ -48,9 +49,9 @@ pub fn midi_keyboard_input(
                 "midi-input",
                 move |t, ev, _data| {
                     let le = LiveEvent::parse(ev)
-                        .expect("Unparseable input controller event.")
+                        .expect(&format!("Unparseable input controller event {:?}.", ev))
                         .to_static();
-                    println!("Input MIDI event: {} {:?}", t, le);
+                    log::info!("Input MIDI event: {} {:?}.", t, le);
                     if ev[0] == 254 {
                         return; // Ignore keep-alives.
                     }
