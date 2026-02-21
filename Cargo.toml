@@ -34,6 +34,8 @@ midir = "0.10.0"
 
 log = "0.4.22"
 env_logger = "0.11.6"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.22"
 
 toml = "0.9.2"
 serde = "1.0.216"
@@ -51,6 +53,7 @@ indoc = "2"
 dirs = "6"
 
 num = "0.4.3"
+signal-hook = "0.4.3"
 # rhai = "1.20.1"
 
 # These may be useful
@@ -60,6 +63,10 @@ num = "0.4.3"
 # bytes = "1.4.0"
 # enum_dispatch = "0.3.12"
 # rand = "0.8.5"
+
+[[bin]]
+name = "midi-recorder"
+path = "src/bin/midi_recorder.rs"
 
 [dev-dependencies]
 proptest = "1.6.0"

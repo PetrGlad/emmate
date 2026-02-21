@@ -1,5 +1,11 @@
+use crate::app::EmApp;
+use crate::config::Config;
+use crate::engine::EngineCommand;
+use crate::midi::SmfSource;
+use crate::project::Project;
+use crate::track_source::TrackSource;
 use clap::Command;
-use clap_complete::aot as ccomplete;
+use clap_complete::aot as cli_complete;
 use eframe::egui;
 use indoc::indoc;
 use midir::os::unix::VirtualOutput;
@@ -8,13 +14,8 @@ use std::io;
 use std::path::PathBuf;
 use std::process::exit;
 use std::sync::mpsc::Sender;
-
-use crate::app::EmApp;
-use crate::config::Config;
-use crate::engine::EngineCommand;
-use crate::midi::SmfSource;
-use crate::project::Project;
-use crate::track_source::TrackSource;
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
 
 mod app;
 mod audio_setup;
@@ -36,6 +37,13 @@ mod util;
 pub type Pix = f32;
 
 pub fn main() {
+    tracing::subscriber::set_global_default(
+        FmtSubscriber::builder()
+            .with_max_level(Level::TRACE)
+            .finish(),
+    )
+    .expect("init tracing subscriber");
+
     let arg_matches = build_cli().get_matches();
     if arg_matches.get_flag("log") {
         env_logger::builder()
@@ -53,13 +61,13 @@ pub fn main() {
     );
 
     if let Some(generator) = arg_matches
-        .get_one::<ccomplete::Shell>("shell-completion-script")
+        .get_one::<cli_complete::Shell>("shell-completion-script")
         .copied()
     {
         log::info!("Generating shell completion file for {generator}...");
         let mut cli = build_cli();
         let command_name = cli.get_name().to_string();
-        ccomplete::generate(generator, &mut cli, command_name, &mut io::stdout());
+        cli_complete::generate(generator, &mut cli, command_name, &mut io::stdout());
         return;
     }
 
@@ -101,7 +109,6 @@ pub fn main() {
         "Digital Piano",
         &mut engine,
     ));
-    midi_inputs.push(audio_setup::midi_keyboard_input("XPIANOGT", &mut engine));
     midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &mut engine));
 
     // GUI
@@ -157,7 +164,7 @@ fn build_cli() -> Command {
         )
         .arg(
             clap::arg!(--"shell-completion-script" <SHELL_NAME>)
-                .value_parser(clap::value_parser!(ccomplete::Shell)),
+                .value_parser(clap::value_parser!(cli_complete::Shell)),
         )
         .arg(
             clap::arg!(--"log")
