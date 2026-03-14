@@ -123,20 +123,93 @@ impl EditTransition {
     }
 }
 
+// Selects viewable track range.
+type TimeRange = Range<Time>;
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct Viewport {
+    /// Starting and ending moment of track's visible time range.
+    pub time_range: TimeRange,
+    /// The widget's displayed rectangle coordinates.
+    pub view_rect: Rect,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            time_range: TimeRange::default(),
+            view_rect: Rect::NOTHING,
+        }
+    }
+}
+
+// Zoom and scroll parameters.
+impl Viewport {
+    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
+    /// World record playing piano seems to be 130 hours, so some might find this limiting.
+    // I would like to use Duration but that is not "const compatible" yet.
+    const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
+
+    /// Pixel/uSec, can be cached.
+    pub fn time_scale(&self) -> f32 {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.view_rect.width() / self.time_range.len() as f32
+    }
+
+    pub fn x_from_time(&self, at: Time) -> Pix {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.view_rect.min.x + (at as f32 - self.time_range.0 as f32) * self.time_scale()
+    }
+
+    pub fn time_from_x(&self, x: Pix) -> Time {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
+    }
+
+    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
+        // Zoom so that time position under mouse pointer stays put.
+        // TODO (cleanup) Consider using emath::remap
+        let at = self.time_from_x(mouse_x);
+        self.time_range.0 = (at - ((at - self.time_range.0) as f32 / zoom_factor) as Time)
+            .max(-Self::ZOOM_TIME_LIMIT)
+            - 1;
+        self.time_range.1 = (at + ((self.time_range.1 - at) as f32 / zoom_factor) as Time)
+            .min(Self::ZOOM_TIME_LIMIT)
+            + 1;
+        assert!(self.time_range.0 < self.time_range.1)
+    }
+
+    pub fn scroll(&mut self, dt: Time) {
+        if self.time_range.0 + dt < -Self::ZOOM_TIME_LIMIT
+            || self.time_range.1 + dt > Self::ZOOM_TIME_LIMIT
+        {
+            return;
+        }
+        self.time_range.0 += dt;
+        self.time_range.1 += dt;
+    }
+
+    pub fn scroll_by(&mut self, dx: Pix) {
+        self.scroll((dx / self.time_scale()) as Time);
+    }
+
+    pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
+        self.scroll(
+            at - ((self.time_range.1 - self.time_range.0) as f32 * view_fraction) as Time
+                - self.time_range.0,
+        );
+    }
+}
+
 // #[derive(Debug)]
 pub struct Stave {
     pub history: Arc<RwLock<TrackHistory>>,
 
-    /// Starting moment of visible time range.
-    pub time_left: Time,
-    /// End moment of visible time range.
-    pub time_right: Time,
-    /// The widget's displayed rectangle coordinates.
-    pub view_rect: Rect,
+    pub viewport: Viewport,
 
     pub cursor_position: Time,
     pub time_selection: Option<Range<Time>>,
-    /// Currently drawn note.
+    /// Currently drawn new note.
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
     /// Change animation parameters.
@@ -168,10 +241,13 @@ pub struct Stave {
 
 #[derive(Default, Clone)]
 struct Meshes {
+    // Tracks changes in events (edit changes).
     version_id: VersionId,
+    // Lets tracking changes in view (zoom, scroll).
+    viewport: Viewport,
     a: Mesh,
     b: Mesh,
-    out: Arc<Mesh>
+    out: Arc<Mesh>,
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -191,11 +267,6 @@ pub struct StaveResponse {
 }
 
 impl Stave {
-    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
-    /// World record playing piano seems to be 130 hours, so some might find this limiting.
-    // I would like to use Duration but that is not "const compatible" yet.
-    const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
-
     pub fn new(history: Arc<RwLock<TrackHistory>>) -> Stave {
         let mut note_colors = vec![];
         assert_eq!(Level::MIN, 0); // Otherwise need to adjust lookups.
@@ -211,9 +282,10 @@ impl Stave {
 
         Stave {
             history,
-            time_left: 0,
-            time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
-            view_rect: Rect::NOTHING,
+            viewport: Viewport {
+                time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
+                view_rect: Rect::NOTHING,
+            },
             cursor_position: 0,
             time_selection: None,
             note_draw: None,
@@ -231,63 +303,14 @@ impl Stave {
             .with_track(|track| export_smf(&track.events, file_path));
     }
 
-    /// Pixel/uSec, can be cached.
-    pub fn time_scale(&self) -> f32 {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.width() / (self.time_right - self.time_left) as f32
-    }
-
-    pub fn x_from_time(&self, at: Time) -> Pix {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.min.x + (at as f32 - self.time_left as f32) * self.time_scale()
-    }
-
-    pub fn time_from_x(&self, x: Pix) -> Time {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as Time
-    }
-
-    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
-        // Zoom so that time position under mouse pointer stays put.
-        // TODO (cleanup) Consider using emath::remap
-        let at = self.time_from_x(mouse_x);
-        self.time_left = (at - ((at - self.time_left) as f32 / zoom_factor) as Time)
-            .max(-Self::ZOOM_TIME_LIMIT)
-            - 1;
-        self.time_right = (at + ((self.time_right - at) as f32 / zoom_factor) as Time)
-            .min(Self::ZOOM_TIME_LIMIT)
-            + 1;
-        assert!(self.time_left < self.time_right)
-    }
-
     pub fn zoom_to_fit(&mut self, time_margin: Time) {
-        self.time_left = -time_margin;
-        self.time_right = self
-            .history
-            .read()
-            .expect("Read stave.history.")
-            .with_track(|tr| tr.max_time())
-            + time_margin;
-    }
-
-    pub fn scroll(&mut self, dt: Time) {
-        if self.time_left + dt < -Self::ZOOM_TIME_LIMIT
-            || self.time_right + dt > Self::ZOOM_TIME_LIMIT
-        {
-            return;
-        }
-        self.time_left += dt;
-        self.time_right += dt;
-    }
-
-    pub fn scroll_by(&mut self, dx: Pix) {
-        self.scroll((dx / self.time_scale()) as Time);
-    }
-
-    pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
-        self.scroll(
-            at - ((self.time_right - self.time_left) as f32 * view_fraction) as Time
-                - self.time_left,
+        self.viewport.time_range = (
+            -time_margin,
+            self.history
+                .read()
+                .expect("Read stave.history.")
+                .with_track(|tr| tr.max_time())
+                + time_margin,
         );
     }
 
@@ -307,7 +330,7 @@ impl Stave {
                     let style = ui.ctx().style();
                     let ruler_height = style.text_styles[&Body].size;
                     *bounds.top_mut() += ruler_height;
-                    self.view_rect = bounds;
+                    self.viewport.view_rect = bounds;
 
                     ruler_rect.set_height(ruler_height);
                     // TODO (cleanup) Use painter_at instead.
@@ -320,7 +343,7 @@ impl Stave {
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
                 if let Some(pointer_pos) = pointer_pos {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
-                    time_hovered = Some(self.time_from_x(pointer_pos.x));
+                    time_hovered = Some(self.viewport.time_from_x(pointer_pos.x));
                 }
 
                 let painter = ui.painter_at(bounds);
@@ -351,13 +374,12 @@ impl Stave {
                 }
                 self.draw_cursor(
                     &painter,
-                    self.x_from_time(self.cursor_position),
+                    self.viewport.x_from_time(self.cursor_position),
                     Rgba::from_rgba_unmultiplied(0.0, 0.5, 0.0, 0.7).into(),
                 );
 
                 if let Some(new_note) = &self.note_draw {
                     self.default_draw_note(
-                        &painter,
                         64,
                         (new_note.time.0, new_note.time.1),
                         *key_ys.get(&new_note.pitch).unwrap(),
@@ -383,27 +405,28 @@ impl Stave {
             .inner
     }
 
+    const TIME_RULER_TICK_DURATIONS_SECONDS: [f32; 16] = [
+        0.005,
+        0.01,
+        0.05,
+        0.1,
+        1.0,
+        5.0,
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        5.0 * 60.0,
+        10.0 * 60.0,
+        30.0 * 60.0,
+        60.0f32 * 60.0,
+        60.0f32 * 60.0 * 4.0,
+        60.0f32 * 60.0 * 6.0,
+    ];
+
     fn draw_time_ruler(&mut self, painter: &Painter, ruler_rect: Rect) {
-        let tick_durations_s = [
-            0.005,
-            0.01,
-            0.05,
-            0.1,
-            1.0,
-            5.0,
-            10.0,
-            15.0,
-            30.0,
-            60.0,
-            5.0 * 60.0,
-            10.0 * 60.0,
-            30.0 * 60.0,
-            60.0f32 * 60.0,
-            60.0f32 * 60.0 * 4.0,
-            60.0f32 * 60.0 * 6.0,
-        ];
-        let time_width = ruler_rect.width() / self.time_scale();
-        let tick_duration = tick_durations_s
+        let time_width = ruler_rect.width() / self.viewport.time_scale();
+        let tick_duration = Self::TIME_RULER_TICK_DURATIONS_SECONDS
             .iter()
             .find_map(|td| {
                 let x = td * 1_000_000.0; // From seconds
@@ -417,13 +440,13 @@ impl Stave {
             .unwrap_or(time_width / 5.0)
             .round() as Time;
         assert!(tick_duration > 0);
-        let start_tick = self.time_from_x(ruler_rect.min.x) / tick_duration;
-        let end_tick = self.time_from_x(ruler_rect.max.x) / tick_duration;
-        let mut last_x = self.x_from_time(-1);
+        let start_tick = self.viewport.time_from_x(ruler_rect.min.x) / tick_duration;
+        let end_tick = self.viewport.time_from_x(ruler_rect.max.x) / tick_duration;
+        let mut last_x = self.viewport.x_from_time(-1);
         for tick in start_tick..end_tick + 1 {
             let at = tick * tick_duration;
             // Avoids labels overlapping.
-            if last_x < self.x_from_time(at) {
+            if last_x < self.viewport.x_from_time(at) {
                 last_x = self.draw_time_tick(painter, ruler_rect, at).max.x;
             }
         }
@@ -451,7 +474,7 @@ impl Stave {
     }
 
     fn draw_time_tick(&mut self, painter: &Painter, ruler_rect: Rect, at: Time) -> Rect {
-        let x = self.x_from_time(at);
+        let x = self.viewport.x_from_time(at);
         painter.rect_filled(
             Rect::from_x_y_ranges(
                 Rangef::new(x, x + 1.0),
@@ -489,12 +512,14 @@ impl Stave {
         // -----------------------------------------------------------------------------------
         // Experimental
 
-        let font_tex_size = [1024, 1024]; // unused
+        let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
         let tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
 
-        // FIXME Only using `a` side for now.
-        if self.meshes.read().version_id != version_id {
+        // FIXME Only using `b` side for now (no transitions/interpolation).
+        if self.meshes.read().version_id != version_id
+            || self.meshes.read().viewport != self.viewport
+        {
             self.meshes.edit(|meshes: &mut Meshes| {
                 let mut tessellator = tessellator.clone();
                 let mut mesh = Mesh::default();
@@ -515,9 +540,9 @@ impl Stave {
                             //     }
                             // }
                             let note_shape = self.draw_track_note(
+                                // TODO (mesh caching) Pass viewport explicitly here?
                                 key_ys,
                                 half_tone_step,
-                                &painter,
                                 &event,
                                 &note,
                             );
@@ -527,7 +552,7 @@ impl Stave {
                                 tessellator.tessellate_shape(shape, &mut mesh);
                                 if let Some(&pointer_pos) = pointer_pos.as_ref() {
                                     if r.contains(pointer_pos) {
-                                        // *note_hovered = Some(event.id);
+                                        // TODO // *note_hovered = Some(event.id);
                                         painter.rect_stroke(
                                             r,
                                             CornerRadius::ZERO,
@@ -551,19 +576,20 @@ impl Stave {
                         // TODO Draw cursors separately? I do not want to scale them.
                         TrackEventType::Bookmark => self.draw_cursor(
                             &painter,
-                            self.x_from_time(event.at),
+                            self.viewport.x_from_time(event.at),
                             Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         ),
                     }
                 }
-
+                // for mut vertex in &mut mesh.vertices {
+                //     vertex.pos.x *= 5.0;
+                // }
                 meshes.version_id = version_id;
+                meshes.viewport = self.viewport.to_owned();
                 meshes.out = Arc::new(mesh);
             });
         }
-        painter.add(Shape::mesh(
-            self.meshes.read().out.clone(),
-        ));
+        painter.add(Shape::mesh(self.meshes.read().out.clone()));
 
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
@@ -576,7 +602,6 @@ impl Stave {
                     self.draw_note_transition(
                         key_ys,
                         half_tone_step,
-                        painter,
                         &mut should_be_visible,
                         trans.coeff,
                         false,
@@ -1017,7 +1042,7 @@ impl Stave {
         }
         if let Some(hover_pos) = response.hover_pos() {
             if response.middle_clicked() {
-                let at = self.time_from_x(hover_pos.x);
+                let at = self.viewport.time_from_x(hover_pos.x);
                 return Some(at);
             }
         }
@@ -1185,13 +1210,11 @@ impl Stave {
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        painter: &Painter,
         event: &TrackEvent,
         note: &Note,
     ) -> Option<Shape> {
         if let Some(y) = key_ys.get(&note.pitch) {
-            Some(self.draw_note(
-                &painter,
+            Some(self.paint_note(
                 (event.at, event.at + note.duration),
                 *y,
                 *half_tone_step,
@@ -1206,7 +1229,6 @@ impl Stave {
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        painter: &Painter,
         should_be_visible: &mut Option<range::Range<Time>>,
         coeff: f32,
         is_selected: bool,
@@ -1235,12 +1257,11 @@ impl Stave {
         let c_b = self.note_color(&v_b, is_selected);
         let color = Self::transition_color(c_a, c_b, coeff);
 
-        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
+        self.paint_note( (t1, t2), y, *half_tone_step, color);
     }
 
-    fn draw_note(
+    fn paint_note(
         &self,
-        painter: &Painter,
         time_range: (Time, Time),
         y: Pix,
         height: Pix,
@@ -1248,11 +1269,11 @@ impl Stave {
     ) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
-                x: self.x_from_time(time_range.0),
+                x: self.viewport.x_from_time(time_range.0),
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: self.x_from_time(time_range.1),
+                x: self.viewport.x_from_time(time_range.1),
                 y: y + height * 0.45,
             },
         };
@@ -1269,7 +1290,7 @@ impl Stave {
     ) {
         painter.circle_filled(
             Pos2 {
-                x: self.x_from_time(time),
+                x: self.viewport.x_from_time(time),
                 y,
             },
             height / 2.2,
@@ -1279,15 +1300,13 @@ impl Stave {
 
     fn default_draw_note(
         &self,
-        painter: &Painter,
         velocity: Level,
         x_range: (Time, Time),
         y: Pix,
         height: Pix,
         selected: bool,
     ) {
-        self.draw_note(
-            painter,
+        self.paint_note(
             x_range,
             y,
             height,
@@ -1359,8 +1378,7 @@ impl Stave {
     ) {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
             if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-                self.draw_note(
-                    painter,
+                self.paint_note(
                     (last_damper_value.0, event.at),
                     *y,
                     *half_tone_step,
@@ -1403,11 +1421,11 @@ impl Stave {
         let clip = painter.clip_rect();
         let area = Rect {
             min: Pos2 {
-                x: self.x_from_time(selection.0),
+                x: self.viewport.x_from_time(selection.0),
                 y: clip.min.y,
             },
             max: Pos2 {
-                x: self.x_from_time(selection.1),
+                x: self.viewport.x_from_time(selection.1),
                 y: clip.max.y,
             },
         };
@@ -1431,19 +1449,22 @@ impl Stave {
     }
 
     fn ensure_visible(&mut self, at: Time) {
-        let x_range = self.view_rect.x_range();
-        let x = self.x_from_time(at);
+        let x_range = self.viewport.view_rect.x_range();
+        let x = self.viewport.x_from_time(at);
         if !x_range.contains(x) {
             if x_range.max < x {
-                self.scroll_to(at, 0.7);
+                self.viewport.scroll_to(at, 0.7);
             } else {
-                self.scroll_to(at, 0.3);
+                self.viewport.scroll_to(at, 0.3);
             }
         }
     }
 
     fn is_visible(&self, at: Time) -> bool {
-        self.view_rect.x_range().contains(self.x_from_time(at))
+        self.viewport
+            .view_rect
+            .x_range()
+            .contains(self.viewport.x_from_time(at))
     }
 }
 

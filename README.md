@@ -86,6 +86,7 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 - [ ] (workflow) Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
   now).
 - [ ] (workflow) "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
+      Although not integrated, `midi-blackbox` project can be used as a partial solution.   
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
 - [x] (bug) Tape delete does not stitch CC line properly (leaves unmatched events).

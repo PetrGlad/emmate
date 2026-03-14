@@ -100,7 +100,7 @@ impl eframe::App for EmApp {
                     self.stave.cursor_position = t;
                     if self.follow_playback {
                         let at = self.stave.cursor_position;
-                        self.stave.scroll_to(at, 0.1);
+                        self.stave.viewport.scroll_to(at, 0.1);
                     }
                 }
             }
@@ -127,14 +127,14 @@ impl eframe::App for EmApp {
                     egui::Key::PageUp,
                 ))
             }) {
-                self.stave.scroll_by(ctx.available_rect().width() / -4.0);
+                self.stave.viewport.scroll_by(ctx.available_rect().width() / -4.0);
             } else if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     Modifiers::NONE,
                     egui::Key::PageDown,
                 ))
             }) {
-                self.stave.scroll_by(ctx.available_rect().width() / 4.0);
+                self.stave.viewport.scroll_by(ctx.available_rect().width() / 4.0);
             }
 
             {
@@ -152,11 +152,11 @@ impl eframe::App for EmApp {
                         if let Some(hover_pos) = response.ui_response.hover_pos() {
                             let dz = ui.input(|i| i.zoom_delta());
                             if dz != 1.0 {
-                                self.stave.zoom(dz, hover_pos.x);
+                                self.stave.viewport.zoom(dz, hover_pos.x);
                             }
                             let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
                             if scroll_delta != Vec2::ZERO {
-                                self.stave.scroll_by(scroll_delta.x);
+                                self.stave.viewport.scroll_by(scroll_delta.x);
                             }
                         }
                         if let Some(pos) = response.new_cursor_position {
@@ -167,17 +167,17 @@ impl eframe::App for EmApp {
                         ui.horizontal(|ui| {
                             let mouse_x = ui.painter().clip_rect().min.x;
                             if ui.button(" + ").clicked() {
-                                self.stave.zoom(1.05, mouse_x);
+                                self.stave.viewport.zoom(1.05, mouse_x);
                             }
                             if ui.button(" - ").clicked() {
-                                self.stave.zoom(1.0 / 1.05, mouse_x);
+                                self.stave.viewport.zoom(1.0 / 1.05, mouse_x);
                             }
                             let scroll_step = ui.painter().clip_rect().size().x * 0.15;
                             if ui.button(" << ").clicked() {
-                                self.stave.scroll_by(-scroll_step);
+                                self.stave.viewport.scroll_by(-scroll_step);
                             }
                             if ui.button(" >> ").clicked() {
-                                self.stave.scroll_by(scroll_step);
+                                self.stave.viewport.scroll_by(scroll_step);
                             }
                             ui.checkbox(&mut self.follow_playback, "Follow playback");
                             if ui.button(" ⏮ ").clicked() {

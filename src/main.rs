@@ -39,7 +39,7 @@ pub type Pix = f32;
 pub fn main() {
     tracing::subscriber::set_global_default(
         FmtSubscriber::builder()
-            .with_max_level(Level::TRACE)
+            .with_max_level(Level::DEBUG)
             .finish(),
     )
     .expect("init tracing subscriber");

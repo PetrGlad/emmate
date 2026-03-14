@@ -1,7 +1,7 @@
 use num::{Integer, Num};
 
 /// Half-open range [a, b).
-/// My favorite implementation until, maybe,
+/// This is my favorite range implementation until, maybe,
 /// https://github.com/rust-lang/rfcs/pull/3550 is implemented.
 /// The trait impl and a tuple should be enough, this type alias helps to clarify intent.
 pub type Range<T> = (T, T);

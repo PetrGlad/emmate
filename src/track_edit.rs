@@ -6,7 +6,6 @@ use crate::track::{is_cc_switch_on, ControllerId, ControllerSetValue, EventId, L
 use crate::util::IdSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use log::log;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
