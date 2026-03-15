@@ -159,6 +159,8 @@ impl Viewport {
     const DEFAULT_TIME_SCALE: Pix =
         1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
 
+    const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
+
     /// Pixel/uSec, can be cached.
     #[inline]
     pub fn time_scale(&self) -> f32 {
@@ -563,8 +565,11 @@ impl Stave {
                             //         selection_hints_left.insert(note.pitch);
                             //     }
                             // }
-                            let shape =
-                                self.paint_track_note_unscaled(half_tone_step, &event, &note);
+                            let shape = self.paint_track_note_unscaled(
+                                &Viewport::DEFAULT_HALF_TONE_STEP,
+                                &event,
+                                &note,
+                            );
                             tessellator.tessellate_shape(shape, &mut mesh);
                             event_vertices.push(event.id);
                         }
@@ -594,24 +599,30 @@ impl Stave {
         }
         if self.meshes.read().viewport != self.viewport {
             self.meshes.edit(|meshes: &mut Meshes| {
-                // FIXME Implement versical scaling for new rendering scheme.
-                //    Note that lowest pitches have highest y coordinates and highest
-                //    pitches are at the top (lowest Ys).
-                let y_range = painter.clip_rect().y_range();
-                let map_y = |y| {
-                    emath::remap(
-                        y,
-                        Rangef::new(PIANO_KEY_LINES.0 as f32, PIANO_KEY_LINES.1 as f32),
-                        Rangef::new(y_range.max, y_range.min),
-                    )
-                };
                 let mut mesh = Mesh::default();
                 mesh.clone_from(&meshes.unscaled);
+                // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
+                if meshes.viewport.y_range != self.viewport.y_range {
+                    let y_range = painter.clip_rect().y_range();
+                    // FIXME Adjust vertical note alignment. Refactor key_line_ys.
+                    let map_y = |y| {
+                        emath::remap(
+                            y,
+                            Rangef::new(
+                                0.0,
+                                Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32,
+                            ),
+                            Rangef::new(y_range.min, y_range.max),
+                        )
+                    };
+                    for v in &mut mesh.vertices {
+                        v.pos.y = map_y(v.pos.y);
+                    }
+                }
                 for v in &mut mesh.vertices {
                     v.pos.x = self
                         .viewport
                         .x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
-                    v.pos.y = map_y(v.pos.y);
                 }
                 meshes.viewport = self.viewport.to_owned();
                 meshes.out = Arc::new(mesh);
@@ -626,26 +637,19 @@ impl Stave {
                 if point_in_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(meshes.out_events[triangle]);
 
-                    painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED); // Stub
-                                                                             // TODO Implement hovered note highlighting
-                                                                             // Bug: probably hover overflows f32 in time calculations somewhere.
-                                                                             //      Hovers are found only at the beginning of the track.
-                                                                             // painter.rect_stroke(
-                                                                             //     r,
-                                                                             //     CornerRadius::ZERO,
-                                                                             //     Stroke::new(2.0, COLOR_HOVERED),
-                                                                             //     StrokeKind::Inside,
-                                                                             // );
+                    // Stub
+                    painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
+                    // TODO Implement hovered note highlighting
+                    // Bug: probably hover overflows f32 in time calculations somewhere.
+                    //      Hovers are found only at the beginning of the track.
+                    // painter.rect_stroke(
+                    //     r,
+                    //     CornerRadius::ZERO,
+                    //     Stroke::new(2.0, COLOR_HOVERED),
+                    //     StrokeKind::Inside,
+                    // );
                 }
             }
-            // TODO // let r = shape.visual_bounding_rect();
-            // TODO //
-            // if let Some(&pointer_pos) = pointer_pos.as_ref() {
-            //     if r.contains(pointer_pos) {
-            //         // TODO //
-
-            //     }
-            // }
         }
 
         if let Some(trans) = &self.transition {
@@ -1271,7 +1275,7 @@ impl Stave {
     ) -> Shape {
         Self::paint_note_unscaled(
             (event.at, event.at + note.duration),
-            note.pitch as Pix,
+            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - note.pitch) as Pix * half_tone_step,
             *half_tone_step,
             self.note_color(&note.velocity, self.note_selection.contains(&event)),
         )
