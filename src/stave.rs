@@ -15,9 +15,10 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui,
+    self, vec2, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers,
+    Painter, PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui,
 };
+use eframe::emath::TSTransform;
 use eframe::epaint::{ClippedShape, RectShape, StrokeKind, Tessellator};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
@@ -150,12 +151,17 @@ impl Viewport {
     // I would like to use Duration but that is not "const compatible" yet.
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
+    // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
+    const DEFAULT_TIME_SCALE: Pix = 1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
+
     /// Pixel/uSec, can be cached.
+    #[inline]
     pub fn time_scale(&self) -> f32 {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.width() / self.time_range.len() as f32
     }
 
+    #[inline]
     pub fn x_from_time(&self, at: Time) -> Pix {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x + (at as f32 - self.time_range.0 as f32) * self.time_scale()
@@ -195,8 +201,7 @@ impl Viewport {
 
     pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
         self.scroll(
-            at - ((self.time_range.1 - self.time_range.0) as f32 * view_fraction) as Time
-                - self.time_range.0,
+            at - (self.time_range.len() as f32 * view_fraction) as Time - self.time_range.0,
         );
     }
 }
@@ -239,14 +244,21 @@ pub struct Stave {
     meshes: SyncCow<Meshes>,
 }
 
+/*
+ Data flow (a, b) -> interpolate -> unscaled -> zoom-scroll -> out
+*/
 #[derive(Default, Clone)]
 struct Meshes {
     // Tracks changes in events (edit changes).
     version_id: VersionId,
-    // Lets tracking changes in view (zoom, scroll).
-    viewport: Viewport,
     a: Mesh,
     b: Mesh,
+    // Track drawn at some default scale that does not depend on current viewport
+    // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
+    // events have not changed.
+    unscaled: Mesh,
+    // Lets tracking changes in view (zoom, scroll).
+    viewport: Viewport,
     out: Arc<Mesh>,
 }
 
@@ -512,16 +524,15 @@ impl Stave {
         // -----------------------------------------------------------------------------------
         // Experimental
 
-        let font_tex_size = [0, 0]; // unused
-        let prepared_discs = vec![]; // unused
-        let tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
-
         // FIXME Only using `b` side for now (no transitions/interpolation).
-        if self.meshes.read().version_id != version_id
-            || self.meshes.read().viewport != self.viewport
-        {
+        if self.meshes.read().version_id != version_id {
             self.meshes.edit(|meshes: &mut Meshes| {
-                let mut tessellator = tessellator.clone();
+                let font_tex_size = [0, 0]; // unused
+                let prepared_discs = vec![]; // unused
+                                             // TODO // let tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
+                let mut tessellator =
+                    Tessellator::new(1.0, Default::default(), font_tex_size, prepared_discs);
+
                 let mut mesh = Mesh::default();
                 for event in &track.events {
                     if let Some(trans) = &self.transition {
@@ -539,8 +550,7 @@ impl Stave {
                             //         selection_hints_left.insert(note.pitch);
                             //     }
                             // }
-                            let note_shape = self.draw_track_note(
-                                // TODO (mesh caching) Pass viewport explicitly here?
+                            let note_shape = self.paint_track_note_unscaled(
                                 key_ys,
                                 half_tone_step,
                                 &event,
@@ -548,19 +558,22 @@ impl Stave {
                             );
                             // Alternatively, can return the known rect from draw_track_note above and check that.
                             if let Some(shape) = note_shape {
-                                let r = shape.visual_bounding_rect();
+                                // TODO // let r = shape.visual_bounding_rect();
+
                                 tessellator.tessellate_shape(shape, &mut mesh);
-                                if let Some(&pointer_pos) = pointer_pos.as_ref() {
-                                    if r.contains(pointer_pos) {
-                                        // TODO // *note_hovered = Some(event.id);
-                                        painter.rect_stroke(
-                                            r,
-                                            CornerRadius::ZERO,
-                                            Stroke::new(2.0, COLOR_HOVERED),
-                                            StrokeKind::Inside,
-                                        );
-                                    }
-                                }
+
+                                // TODO //
+                                // if let Some(&pointer_pos) = pointer_pos.as_ref() {
+                                //     if r.contains(pointer_pos) {
+                                //         // TODO // *note_hovered = Some(event.id);
+                                //         painter.rect_stroke(
+                                //             r,
+                                //             CornerRadius::ZERO,
+                                //             Stroke::new(2.0, COLOR_HOVERED),
+                                //             StrokeKind::Inside,
+                                //         );
+                                //     }
+                                // }
                             }
                         }
                         TrackEventType::Controller(cc) => (),
@@ -573,7 +586,7 @@ impl Stave {
                         //     &event,
                         //     &cc,
                         // ),
-                        // TODO Draw cursors separately? I do not want to scale them.
+                        // TODO Draw cursors separately? I would not want to scale them.
                         TrackEventType::Bookmark => self.draw_cursor(
                             &painter,
                             self.viewport.x_from_time(event.at),
@@ -581,14 +594,22 @@ impl Stave {
                         ),
                     }
                 }
-                // for mut vertex in &mut mesh.vertices {
-                //     vertex.pos.x *= 5.0;
-                // }
                 meshes.version_id = version_id;
+                meshes.unscaled = mesh;
+            });
+        }
+        if self.meshes.read().viewport != self.viewport {
+            self.meshes.edit(|meshes: &mut Meshes| {
+                let mut mesh = Mesh::default();
+                mesh.clone_from(&meshes.unscaled);
+                for v in &mut mesh.vertices {
+                    v.pos.x = self.viewport.x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
+                }
                 meshes.viewport = self.viewport.to_owned();
                 meshes.out = Arc::new(mesh);
             });
         }
+
         painter.add(Shape::mesh(self.meshes.read().out.clone()));
 
         if let Some(trans) = &self.transition {
@@ -1206,7 +1227,26 @@ impl Stave {
         }
     }
 
-    fn draw_track_note(
+    fn paint_track_note_unscaled(
+        &self,
+        key_ys: &BTreeMap<Pitch, Pix>,
+        half_tone_step: &Pix,
+        event: &TrackEvent,
+        note: &Note,
+    ) -> Option<Shape> {
+        if let Some(y) = key_ys.get(&note.pitch) {
+            Some(Self::paint_note_unscaled(
+                (event.at, event.at + note.duration),
+                *y,
+                *half_tone_step,
+                self.note_color(&note.velocity, self.note_selection.contains(&event)),
+            ))
+        } else {
+            None
+        }
+    }
+
+    fn paint_track_note(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
@@ -1257,16 +1297,24 @@ impl Stave {
         let c_b = self.note_color(&v_b, is_selected);
         let color = Self::transition_color(c_a, c_b, coeff);
 
-        self.paint_note( (t1, t2), y, *half_tone_step, color);
+        self.paint_note((t1, t2), y, *half_tone_step, color);
     }
 
-    fn paint_note(
-        &self,
-        time_range: (Time, Time),
-        y: Pix,
-        height: Pix,
-        color: Color32,
-    ) -> Shape {
+    fn paint_note_unscaled(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
+        let paint_rect = Rect {
+            min: Pos2 {
+                x: time_range.0 as f32 * Viewport::DEFAULT_TIME_SCALE,
+                y: y - height * 0.45,
+            },
+            max: Pos2 {
+                x: time_range.1 as f32 * Viewport::DEFAULT_TIME_SCALE,
+                y: y + height * 0.45,
+            },
+        };
+        Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
+    }
+
+    fn paint_note(&self, time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
                 x: self.viewport.x_from_time(time_range.0),
@@ -1306,12 +1354,7 @@ impl Stave {
         height: Pix,
         selected: bool,
     ) {
-        self.paint_note(
-            x_range,
-            y,
-            height,
-            self.note_color(&velocity, selected),
-        );
+        self.paint_note(x_range, y, height, self.note_color(&velocity, selected));
     }
 
     fn transition_color(color_a: Color32, color_b: Color32, coeff: f32) -> Color32 {
