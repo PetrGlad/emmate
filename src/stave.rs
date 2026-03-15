@@ -15,9 +15,10 @@ use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, vec2, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers,
-    Painter, PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui,
+    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
 };
+use eframe::emath;
 use eframe::emath::TSTransform;
 use eframe::epaint::{ClippedShape, RectShape, StrokeKind, Tessellator};
 use egui::Rgba;
@@ -27,6 +28,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use sync_cow::SyncCow;
+use tracing::Event;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -127,12 +129,13 @@ impl EditTransition {
 // Selects viewable track range.
 type TimeRange = Range<Time>;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Viewport {
     /// Starting and ending moment of track's visible time range.
     pub time_range: TimeRange,
     /// The widget's displayed rectangle coordinates.
     pub view_rect: Rect,
+    pub y_range: Rangef,
 }
 
 impl Default for Viewport {
@@ -140,6 +143,7 @@ impl Default for Viewport {
         Viewport {
             time_range: TimeRange::default(),
             view_rect: Rect::NOTHING,
+            y_range: Rangef::NOTHING,
         }
     }
 }
@@ -152,7 +156,8 @@ impl Viewport {
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
     // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
-    const DEFAULT_TIME_SCALE: Pix = 1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
+    const DEFAULT_TIME_SCALE: Pix =
+        1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
 
     /// Pixel/uSec, can be cached.
     #[inline]
@@ -245,20 +250,25 @@ pub struct Stave {
 }
 
 /*
- Data flow (a, b) -> interpolate -> unscaled -> zoom-scroll -> out
+ Mesh data flow: (a, b) -> interpolate -> unscaled -> zoom-scroll -> out -> render
 */
 #[derive(Default, Clone)]
 struct Meshes {
     // Tracks changes in events (edit changes).
     version_id: VersionId,
-    a: Mesh,
-    b: Mesh,
+    previous: Mesh,
+    // Interpolation coefficient [0.0..1.0] between previous and current.
+    animation: f32,
+    current: Mesh,
     // Track drawn at some default scale that does not depend on current viewport
     // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
     // events have not changed.
     unscaled: Mesh,
     // Lets tracking changes in view (zoom, scroll).
     viewport: Viewport,
+    // Annotates out vertices with tract event ids.
+    // Used to detect hovers, and to show out-of-view selection hints.
+    out_events: Vec<EventId>,
     out: Arc<Mesh>,
 }
 
@@ -297,6 +307,7 @@ impl Stave {
             viewport: Viewport {
                 time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
                 view_rect: Rect::NOTHING,
+                y_range: Rangef::NOTHING,
             },
             cursor_position: 0,
             time_selection: None,
@@ -350,6 +361,7 @@ impl Stave {
                 }
 
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LANES);
+                self.viewport.y_range = bounds.y_range();
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
@@ -524,15 +536,16 @@ impl Stave {
         // -----------------------------------------------------------------------------------
         // Experimental
 
+        let font_tex_size = [0, 0]; // unused
+        let prepared_discs = vec![]; // unused
+                                     // TODO Use tesselator scale from settings.
+        let mut tessellator =
+            Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
+
         // FIXME Only using `b` side for now (no transitions/interpolation).
         if self.meshes.read().version_id != version_id {
             self.meshes.edit(|meshes: &mut Meshes| {
-                let font_tex_size = [0, 0]; // unused
-                let prepared_discs = vec![]; // unused
-                                             // TODO // let tessellator = Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
-                let mut tessellator =
-                    Tessellator::new(1.0, Default::default(), font_tex_size, prepared_discs);
-
+                let mut event_vertices: Vec<EventId> = vec![];
                 let mut mesh = Mesh::default();
                 for event in &track.events {
                     if let Some(trans) = &self.transition {
@@ -550,31 +563,10 @@ impl Stave {
                             //         selection_hints_left.insert(note.pitch);
                             //     }
                             // }
-                            let note_shape = self.paint_track_note_unscaled(
-                                key_ys,
-                                half_tone_step,
-                                &event,
-                                &note,
-                            );
-                            // Alternatively, can return the known rect from draw_track_note above and check that.
-                            if let Some(shape) = note_shape {
-                                // TODO // let r = shape.visual_bounding_rect();
-
-                                tessellator.tessellate_shape(shape, &mut mesh);
-
-                                // TODO //
-                                // if let Some(&pointer_pos) = pointer_pos.as_ref() {
-                                //     if r.contains(pointer_pos) {
-                                //         // TODO // *note_hovered = Some(event.id);
-                                //         painter.rect_stroke(
-                                //             r,
-                                //             CornerRadius::ZERO,
-                                //             Stroke::new(2.0, COLOR_HOVERED),
-                                //             StrokeKind::Inside,
-                                //         );
-                                //     }
-                                // }
-                            }
+                            let shape =
+                                self.paint_track_note_unscaled(half_tone_step, &event, &note);
+                            tessellator.tessellate_shape(shape, &mut mesh);
+                            event_vertices.push(event.id);
                         }
                         TrackEventType::Controller(cc) => (),
                         // TODO Restore CC display
@@ -594,23 +586,67 @@ impl Stave {
                         ),
                     }
                 }
+                // (!) Assuming vertice indices will not change in subsequent transformations.
+                meshes.out_events = event_vertices;
                 meshes.version_id = version_id;
                 meshes.unscaled = mesh;
             });
         }
         if self.meshes.read().viewport != self.viewport {
             self.meshes.edit(|meshes: &mut Meshes| {
+                // FIXME Implement versical scaling for new rendering scheme.
+                //    Note that lowest pitches have highest y coordinates and highest
+                //    pitches are at the top (lowest Ys).
+                let y_range = painter.clip_rect().y_range();
+                let map_y = |y| {
+                    emath::remap(
+                        y,
+                        Rangef::new(PIANO_KEY_LINES.0 as f32, PIANO_KEY_LINES.1 as f32),
+                        Rangef::new(y_range.max, y_range.min),
+                    )
+                };
                 let mut mesh = Mesh::default();
                 mesh.clone_from(&meshes.unscaled);
                 for v in &mut mesh.vertices {
-                    v.pos.x = self.viewport.x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
+                    v.pos.x = self
+                        .viewport
+                        .x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
+                    v.pos.y = map_y(v.pos.y);
                 }
                 meshes.viewport = self.viewport.to_owned();
                 meshes.out = Arc::new(mesh);
             });
         }
-
         painter.add(Shape::mesh(self.meshes.read().out.clone()));
+
+        if let Some(&pointer_pos) = pointer_pos.as_ref() {
+            // Hover
+            let meshes = self.meshes.read();
+            for triangle in 0..meshes.out_events.len() {
+                if point_in_mesh_triangle(&meshes.out, triangle, pointer_pos) {
+                    *note_hovered = Some(meshes.out_events[triangle]);
+
+                    painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED); // Stub
+                                                                             // TODO Implement hovered note highlighting
+                                                                             // Bug: probably hover overflows f32 in time calculations somewhere.
+                                                                             //      Hovers are found only at the beginning of the track.
+                                                                             // painter.rect_stroke(
+                                                                             //     r,
+                                                                             //     CornerRadius::ZERO,
+                                                                             //     Stroke::new(2.0, COLOR_HOVERED),
+                                                                             //     StrokeKind::Inside,
+                                                                             // );
+                }
+            }
+            // TODO // let r = shape.visual_bounding_rect();
+            // TODO //
+            // if let Some(&pointer_pos) = pointer_pos.as_ref() {
+            //     if r.contains(pointer_pos) {
+            //         // TODO //
+
+            //     }
+            // }
+        }
 
         if let Some(trans) = &self.transition {
             for (_ev_id, action) in &trans.changeset.changes {
@@ -1229,21 +1265,16 @@ impl Stave {
 
     fn paint_track_note_unscaled(
         &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         event: &TrackEvent,
         note: &Note,
-    ) -> Option<Shape> {
-        if let Some(y) = key_ys.get(&note.pitch) {
-            Some(Self::paint_note_unscaled(
-                (event.at, event.at + note.duration),
-                *y,
-                *half_tone_step,
-                self.note_color(&note.velocity, self.note_selection.contains(&event)),
-            ))
-        } else {
-            None
-        }
+    ) -> Shape {
+        Self::paint_note_unscaled(
+            (event.at, event.at + note.duration),
+            note.pitch as Pix,
+            *half_tone_step,
+            self.note_color(&note.velocity, self.note_selection.contains(&event)),
+        )
     }
 
     fn paint_track_note(
@@ -1535,6 +1566,30 @@ fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
         .min_by_key(|(_, &y)| OrderedFloat((y - pointer_pos.y).abs()))
         .unwrap()
         .0
+}
+
+// Barycentric sign test
+#[inline]
+fn cross_prod(u: Vec2, v: Vec2) -> f32 {
+    u.x * v.y - u.y * v.x
+}
+
+#[inline]
+fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
+    let c1 = cross_prod(b - a, p - a);
+    let c2 = cross_prod(c - b, p - b);
+    let c3 = cross_prod(a - c, p - c);
+
+    (c1 >= 0.0 && c2 >= 0.0 && c3 >= 0.0) || (c1 <= 0.0 && c2 <= 0.0 && c3 <= 0.0)
+}
+
+#[inline]
+fn point_in_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {
+    let idx = triangle_idx * 3;
+    let a = mesh.vertices[mesh.indices[idx] as usize].pos;
+    let b = mesh.vertices[mesh.indices[idx + 1] as usize].pos;
+    let c = mesh.vertices[mesh.indices[idx + 2] as usize].pos;
+    point_in_triangle(p, a, b, c)
 }
 
 #[cfg(test)]
