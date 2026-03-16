@@ -135,7 +135,6 @@ pub struct Viewport {
     pub time_range: TimeRange,
     /// The widget's displayed rectangle coordinates.
     pub view_rect: Rect,
-    pub y_range: Rangef,
 }
 
 impl Default for Viewport {
@@ -143,7 +142,6 @@ impl Default for Viewport {
         Viewport {
             time_range: TimeRange::default(),
             view_rect: Rect::NOTHING,
-            y_range: Rangef::NOTHING,
         }
     }
 }
@@ -309,7 +307,6 @@ impl Stave {
             viewport: Viewport {
                 time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
                 view_rect: Rect::NOTHING,
-                y_range: Rangef::NOTHING,
             },
             cursor_position: 0,
             time_selection: None,
@@ -363,7 +360,6 @@ impl Stave {
                 }
 
                 let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LANES);
-                self.viewport.y_range = bounds.y_range();
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
@@ -557,14 +553,6 @@ impl Stave {
                     }
                     match &event.event {
                         TrackEventType::Note(note) => {
-                            // TODO Restore edit animation display
-                            // if self.note_selection.contains(&event) {
-                            //     if x_range.max < self.x_from_time(event.at) {
-                            //         selection_hints_right.insert(note.pitch);
-                            //     } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                            //         selection_hints_left.insert(note.pitch);
-                            //     }
-                            // }
                             let shape = self.paint_track_note_unscaled(
                                 &Viewport::DEFAULT_HALF_TONE_STEP,
                                 &event,
@@ -602,17 +590,24 @@ impl Stave {
                 let mut mesh = Mesh::default();
                 mesh.clone_from(&meshes.unscaled);
                 // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-                if meshes.viewport.y_range != self.viewport.y_range {
-                    let y_range = painter.clip_rect().y_range();
+                if meshes.viewport.view_rect.height() != self.viewport.view_rect.height() {
+                    dbg!("-------------------------");
+                    dbg!(meshes.viewport.view_rect);
+                    dbg!(self.viewport.view_rect);
+                    assert_eq!(self.viewport.view_rect, painter.clip_rect());
+                    let y_range = self.viewport.view_rect.y_range();
                     // FIXME Adjust vertical note alignment. Refactor key_line_ys.
+                    // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
+                    let half_tone_step = y_range.span() / STAVE_KEY_LANES.len() as f32;
                     let map_y = |y| {
                         emath::remap(
                             y,
                             Rangef::new(
                                 0.0,
-                                Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32,
+                                Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
                             ),
-                            Rangef::new(y_range.min, y_range.max),
+                            Rangef::new(y_range.min + half_tone_step / 2.0,
+                                        y_range.max - half_tone_step / 2.0),
                         )
                     };
                     for v in &mut mesh.vertices {
@@ -637,7 +632,7 @@ impl Stave {
                 if point_in_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(meshes.out_events[triangle]);
 
-                    // Stub
+                    // Hover, temporary stub:
                     painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     // TODO Implement hovered note highlighting
                     // Bug: probably hover overflows f32 in time calculations somewhere.
@@ -649,6 +644,15 @@ impl Stave {
                     //     StrokeKind::Inside,
                     // );
                 }
+
+                // TODO Restore edit animation display
+                // if self.note_selection.contains(&event) {
+                //     if x_range.max < self.x_from_time(event.at) {
+                //         selection_hints_right.insert(note.pitch);
+                //     } else if self.x_from_time(event.at + note.duration) < x_range.min {
+                //         selection_hints_left.insert(note.pitch);
+                //     }
+                // }
             }
         }
 
