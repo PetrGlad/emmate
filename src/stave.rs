@@ -20,7 +20,7 @@ use eframe::egui::{
 };
 use eframe::emath;
 use eframe::emath::TSTransform;
-use eframe::epaint::{ClippedShape, RectShape, StrokeKind, Tessellator};
+use eframe::epaint::{ClippedShape, RectShape, StrokeKind, TessellationOptions, Tessellator};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::{Cell, RefCell};
@@ -129,7 +129,7 @@ impl EditTransition {
 // Selects viewable track range.
 type TimeRange = Range<Time>;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Viewport {
     /// Starting and ending moment of track's visible time range.
     pub time_range: TimeRange,
@@ -250,7 +250,8 @@ pub struct Stave {
 }
 
 /*
- Mesh data flow: (a, b) -> interpolate -> unscaled -> zoom-scroll -> out -> render
+ Mesh data flow: (a, b) -> interpolate -> unscaled -> vertical-remap -> scaled_y -> zoom-scroll -> out -> render
+ This is split into stages to shift most frequent updates later so we can re-use the calculations.
 */
 #[derive(Default, Clone)]
 struct Meshes {
@@ -264,6 +265,9 @@ struct Meshes {
     // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
     // events have not changed.
     unscaled: Mesh,
+    // Optimization: this field is not strictly necessary, but vertical scaling
+    // is performed less often, so keeping this partial apply.
+    scaled_y: Mesh,
     // Lets tracking changes in view (zoom, scroll).
     viewport: Viewport,
     // Annotates out vertices with tract event ids.
@@ -536,15 +540,18 @@ impl Stave {
 
         let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
-                                     // TODO Use tesselator scale from settings.
-        let mut tessellator =
-            Tessellator::new(2.0, Default::default(), font_tex_size, prepared_discs);
 
-        // FIXME Only using `b` side for now (no transitions/interpolation).
-        if self.meshes.read().version_id != version_id {
-            self.meshes.edit(|meshes: &mut Meshes| {
+        // TODO Use tesselator scale from settings.
+        let mut tessel_options = TessellationOptions::default();
+        tessel_options.feathering = false;
+        let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
+
+        // FIXME (edit transitions) Only using `b` side for now (no transitions/interpolation).
+        self.meshes.edit(|meshes: &mut Meshes| {
+            let has_version_changed = meshes.version_id != version_id;
+            if has_version_changed {
                 let mut event_vertices: Vec<EventId> = vec![];
-                let mut mesh = Mesh::default();
+                meshes.unscaled.clear();
                 for event in &track.events {
                     if let Some(trans) = &self.transition {
                         if trans.changeset.changes.contains_key(&event.id) {
@@ -558,12 +565,12 @@ impl Stave {
                                 &event,
                                 &note,
                             );
-                            tessellator.tessellate_shape(shape, &mut mesh);
+                            tessellator.tessellate_shape(shape, &mut meshes.unscaled);
                             event_vertices.push(event.id);
                         }
                         TrackEventType::Controller(cc) => (),
-                        // TODO Restore CC display
-                        // self.draw_track_cc(
+                        // TODO Restore CC display, use the returned shape (painter should not be used anymore)
+                        // let shape = self.draw_track_cc(
                         //     &key_ys,
                         //     half_tone_step,
                         //     &painter,
@@ -582,47 +589,45 @@ impl Stave {
                 // (!) Assuming vertice indices will not change in subsequent transformations.
                 meshes.out_events = event_vertices;
                 meshes.version_id = version_id;
-                meshes.unscaled = mesh;
-            });
-        }
-        if self.meshes.read().viewport != self.viewport {
-            self.meshes.edit(|meshes: &mut Meshes| {
-                let mut mesh = Mesh::default();
-                mesh.clone_from(&meshes.unscaled);
+            }
+            if meshes.viewport.view_rect.y_range() != self.viewport.view_rect.y_range() {
+                let y_range = self.viewport.view_rect.y_range();
                 // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-                if meshes.viewport.view_rect.height() != self.viewport.view_rect.height() {
-                    dbg!("-------------------------");
-                    dbg!(meshes.viewport.view_rect);
-                    dbg!(self.viewport.view_rect);
-                    assert_eq!(self.viewport.view_rect, painter.clip_rect());
-                    let y_range = self.viewport.view_rect.y_range();
+                if meshes.viewport.view_rect.y_range() != y_range {
+                    meshes.scaled_y.clone_from(&meshes.unscaled);
                     // FIXME Adjust vertical note alignment. Refactor key_line_ys.
                     // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
-                    let half_tone_step = y_range.span() / STAVE_KEY_LANES.len() as f32;
-                    let map_y = |y| {
-                        emath::remap(
-                            y,
+                    for v in &mut meshes.scaled_y.vertices {
+                        v.pos.y = emath::remap(
+                            v.pos.y,
                             Rangef::new(
                                 0.0,
                                 Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
                             ),
-                            Rangef::new(y_range.min + half_tone_step / 2.0,
-                                        y_range.max - half_tone_step / 2.0),
+                            Rangef::new(
+                                y_range.min + half_tone_step / 2.0,
+                                y_range.max - half_tone_step / 2.0,
+                            ),
                         )
-                    };
-                    for v in &mut mesh.vertices {
-                        v.pos.y = map_y(v.pos.y);
                     }
                 }
+            }
+
+            let has_viewport_changed = meshes.viewport != self.viewport;
+            if has_viewport_changed || has_version_changed {
+                let mut mesh = Mesh::default();
+                mesh.clone_from(&meshes.scaled_y);
+
                 for v in &mut mesh.vertices {
                     v.pos.x = self
                         .viewport
                         .x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
                 }
-                meshes.viewport = self.viewport.to_owned();
+                meshes.viewport = self.viewport.clone();
+                debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
                 meshes.out = Arc::new(mesh);
-            });
-        }
+            }
+        });
         painter.add(Shape::mesh(self.meshes.read().out.clone()));
 
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
@@ -635,6 +640,7 @@ impl Stave {
                     // Hover, temporary stub:
                     painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     // TODO Implement hovered note highlighting
+                    break;
                     // Bug: probably hover overflows f32 in time calculations somewhere.
                     //      Hovers are found only at the beginning of the track.
                     // painter.rect_stroke(
@@ -1457,18 +1463,20 @@ impl Stave {
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
-    ) {
+    ) -> Option<Shape> {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
             if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-                self.paint_note(
+                let shape = self.paint_note(
                     (last_damper_value.0, event.at),
                     *y,
                     *half_tone_step,
                     self.note_color(&last_damper_value.1, false),
                 );
                 *last_damper_value = (event.at, cc.value);
+                return Some(shape);
             }
         }
+        None
     }
 
     fn draw_grid(
