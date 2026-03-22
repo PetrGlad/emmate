@@ -590,27 +590,28 @@ impl Stave {
                 meshes.out_events = event_vertices;
                 meshes.version_id = version_id;
             }
-            if meshes.viewport.view_rect.y_range() != self.viewport.view_rect.y_range() {
-                let y_range = self.viewport.view_rect.y_range();
-                // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-                if meshes.viewport.view_rect.y_range() != y_range {
-                    meshes.scaled_y.clone_from(&meshes.unscaled);
-                    // FIXME Adjust vertical note alignment. Refactor key_line_ys.
-                    // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
-                    for v in &mut meshes.scaled_y.vertices {
-                        v.pos.y = emath::remap(
-                            v.pos.y,
-                            Rangef::new(
-                                0.0,
-                                Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
-                            ),
-                            Rangef::new(
-                                y_range.min + half_tone_step / 2.0,
-                                y_range.max - half_tone_step / 2.0,
-                            ),
-                        )
-                    }
+
+            let y_range = self.viewport.view_rect.y_range();
+            // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
+            if meshes.viewport.view_rect.y_range() != y_range {
+                meshes.scaled_y.clone_from(&meshes.unscaled);
+                // FIXME Adjust vertical note alignment. Refactor key_line_ys.
+                // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
+                for v in &mut meshes.scaled_y.vertices {
+                    v.pos.y = emath::remap(
+                        v.pos.y,
+                        Rangef::new(
+                            0.0,
+                            Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
+                        ),
+                        Rangef::new(
+                            y_range.min + half_tone_step / 2.0,
+                            y_range.max - half_tone_step / 2.0,
+                        ),
+                    )
                 }
+                meshes.viewport.view_rect.set_top(y_range.min);
+                meshes.viewport.view_rect.set_bottom(y_range.max);
             }
 
             let has_viewport_changed = meshes.viewport != self.viewport;
