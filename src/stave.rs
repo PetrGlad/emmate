@@ -550,7 +550,8 @@ impl Stave {
         self.meshes.edit(|meshes: &mut Meshes| {
             let has_version_changed = meshes.version_id != version_id;
             if has_version_changed {
-                let mut event_vertices: Vec<EventId> = vec![];
+                // (!) Assuming vertice indices will not change in subsequent transformations.
+                meshes.out_events.clear();
                 meshes.unscaled.clear();
                 for event in &track.events {
                     if let Some(trans) = &self.transition {
@@ -566,7 +567,9 @@ impl Stave {
                                 &note,
                             );
                             tessellator.tessellate_shape(shape, &mut meshes.unscaled);
-                            event_vertices.push(event.id);
+                            while meshes.out_events.len() < meshes.unscaled.indices.len() / 3 {
+                                meshes.out_events.push(event.id);
+                            }
                         }
                         TrackEventType::Controller(cc) => (),
                         // TODO Restore CC display, use the returned shape (painter should not be used anymore)
@@ -586,8 +589,6 @@ impl Stave {
                         ),
                     }
                 }
-                // (!) Assuming vertice indices will not change in subsequent transformations.
-                meshes.out_events = event_vertices;
                 meshes.version_id = version_id;
             }
 
@@ -629,19 +630,18 @@ impl Stave {
                 meshes.out = Arc::new(mesh);
             }
         });
-        painter.add(Shape::mesh(self.meshes.read().out.clone()));
+        painter.add(Shape::mesh(self.meshes.read().out.to_owned()));
 
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
             let meshes = self.meshes.read();
             for triangle in 0..meshes.out_events.len() {
-                if point_in_mesh_triangle(&meshes.out, triangle, pointer_pos) {
+                if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(meshes.out_events[triangle]);
 
-                    // Hover, temporary stub:
+                    // Hover temporary stub:
                     painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     // TODO Implement hovered note highlighting
-                    break;
                     // Bug: probably hover overflows f32 in time calculations somewhere.
                     //      Hovers are found only at the beginning of the track.
                     // painter.rect_stroke(
@@ -650,6 +650,7 @@ impl Stave {
                     //     Stroke::new(2.0, COLOR_HOVERED),
                     //     StrokeKind::Inside,
                     // );
+                    break;
                 }
 
                 // TODO Restore edit animation display
@@ -1601,7 +1602,7 @@ fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
 }
 
 #[inline]
-fn point_in_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {
+fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {
     let idx = triangle_idx * 3;
     let a = mesh.vertices[mesh.indices[idx] as usize].pos;
     let b = mesh.vertices[mesh.indices[idx + 1] as usize].pos;
