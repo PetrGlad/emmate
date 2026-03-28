@@ -93,6 +93,7 @@ pub struct EditTransition {
     pub animation_id: egui::Id,
     pub command_id: EditCommandId,
     pub changeset: Changeset,
+    /// 0.0 -> 1.0
     pub coeff: f32,
 }
 
@@ -398,11 +399,11 @@ impl Stave {
                         &track,
                     );
                 }
-                self.draw_cursor(
-                    &painter,
+                painter.add(self.cursor_shape(
+                    &painter.clip_rect().y_range(),
                     self.viewport.x_from_time(self.cursor_position),
                     Rgba::from_rgba_unmultiplied(0.0, 0.5, 0.0, 0.7).into(),
-                );
+                ));
 
                 if let Some(new_note) = &self.note_draw {
                     self.default_draw_note(
@@ -529,7 +530,6 @@ impl Stave {
         version_id: VersionId,
         track: &Track,
     ) -> Option<range::Range<Time>> {
-        let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
         let x_range = painter.clip_rect().x_range();
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
@@ -550,10 +550,68 @@ impl Stave {
         self.meshes.edit(|meshes: &mut Meshes| {
             let has_version_changed = meshes.version_id != version_id;
             if has_version_changed {
+                /////////////////////////////////////////////////////////////////////////////////
+                // FIXME Draw transition
+                // TODO We get version change after the track events were updated.
+                //   So now we should patch previous version to insert created and deleted
+                //   events placeholders to ensure interpolation will work for create/update/delete.
+                //   The laziest would be to append the placeholders to existing meshes.
+                //   These placeholders should be removed after transition is done
+                //   (re-generate mesh from the track).
+                //   To do interpolation update Meshes::unscaled on tick, and ensure viewport
+                //   translation is recalculated afterwards.
+                /////////////////////////////////////////////////////////////////////////////////
+
+                if let Some(trans) = &self.transition {
+                    for (_ev_id, action) in &trans.changeset.changes {
+                        // TODO (cleanup) Restrict actions to not change event types,
+                        //      this should reduce number of cases to consider.
+
+                        let note_a = Stave::note_animation_params(action.before());
+                        let note_b = Stave::note_animation_params(action.after());
+                        if note_a.is_some() || note_b.is_some() {
+                            self.draw_note_transition(
+                                key_ys,
+                                half_tone_step,
+                                &mut should_be_visible,
+                                trans.coeff,
+                                false,
+                                note_a,
+                                note_b,
+                            );
+                        }
+
+                        let cc_a = Stave::cc_animation_params(action.before());
+                        let cc_b = Stave::cc_animation_params(action.after());
+                        if cc_a.is_some() || cc_b.is_some() {
+                            self.draw_cc_transition(
+                                key_ys,
+                                half_tone_step,
+                                painter,
+                                &mut should_be_visible,
+                                trans.coeff,
+                                cc_a,
+                                cc_b,
+                            );
+                        }
+
+                        if !(note_a.is_some()
+                            || note_b.is_some()
+                            || cc_a.is_some()
+                            || cc_b.is_some())
+                        {
+                            // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
+                            log::trace!("No animation params (a bookmark?).");
+                        }
+                    }
+                }
+                /////////////////////////////////////////
                 // (!) Assuming vertice indices will not change in subsequent transformations.
                 meshes.out_events.clear();
                 meshes.unscaled.clear();
+                let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
                 for event in &track.events {
+                    // FIXME Update transition rendering for CC
                     if let Some(trans) = &self.transition {
                         if trans.changeset.changes.contains_key(&event.id) {
                             continue;
@@ -562,33 +620,45 @@ impl Stave {
                     match &event.event {
                         TrackEventType::Note(note) => {
                             let shape = self.paint_track_note_unscaled(
+                                // TODO (refactoring) Cleanuo lanes y calculations
                                 &Viewport::DEFAULT_HALF_TONE_STEP,
                                 &event,
                                 &note,
                             );
                             tessellator.tessellate_shape(shape, &mut meshes.unscaled);
-                            while meshes.out_events.len() < meshes.unscaled.indices.len() / 3 {
-                                meshes.out_events.push(event.id);
+                        }
+                        TrackEventType::Controller(cc) => {
+                            // TODO Restore CC display, use the returned shape (painter should not be used anymore)
+                            if let Some(shape) = self.draw_track_cc(
+                                &key_ys,
+                                half_tone_step,
+                                &mut last_damper_value,
+                                &event,
+                                &cc,
+                            ) {
+                                tessellator.tessellate_shape(shape, &mut meshes.unscaled);
                             }
                         }
-                        TrackEventType::Controller(cc) => (),
-                        // TODO Restore CC display, use the returned shape (painter should not be used anymore)
-                        // let shape = self.draw_track_cc(
-                        //     &key_ys,
-                        //     half_tone_step,
-                        //     &painter,
-                        //     &mut last_damper_value,
-                        //     &event,
-                        //     &cc,
-                        // ),
-                        // TODO Draw cursors separately? I would not want to scale them.
-                        TrackEventType::Bookmark => self.draw_cursor(
-                            &painter,
-                            self.viewport.x_from_time(event.at),
-                            Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                        ),
+                        // TODO Draw cursors separately? I would rather not to scale them.
+                        TrackEventType::Bookmark => {
+                            let shape = self.cursor_shape(
+                                &Rangef::new(
+                                    0.0,
+                                    // TODO (refactoring) Cleanuo lanes y calculations
+                                    (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
+                                        * Viewport::DEFAULT_HALF_TONE_STEP,
+                                ),
+                                self.viewport.x_from_time(event.at),
+                                Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                            );
+                            tessellator.tessellate_shape(shape, &mut meshes.unscaled);
+                        }
+                    }
+                    while meshes.out_events.len() < meshes.unscaled.indices.len() / 3 {
+                        meshes.out_events.push(event.id);
                     }
                 }
+                assert!(meshes.out_events.len() <= meshes.unscaled.indices.len() / 3);
                 meshes.version_id = version_id;
             }
 
@@ -664,45 +734,6 @@ impl Stave {
             }
         }
 
-        if let Some(trans) = &self.transition {
-            for (_ev_id, action) in &trans.changeset.changes {
-                // TODO (cleanup) Restrict actions to not change event types,
-                //      this should reduce number of cases to consider.
-
-                let note_a = Stave::note_animation_params(action.before());
-                let note_b = Stave::note_animation_params(action.after());
-                if note_a.is_some() || note_b.is_some() {
-                    self.draw_note_transition(
-                        key_ys,
-                        half_tone_step,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        false,
-                        note_a,
-                        note_b,
-                    );
-                }
-
-                let cc_a = Stave::cc_animation_params(action.before());
-                let cc_b = Stave::cc_animation_params(action.after());
-                if cc_a.is_some() || cc_b.is_some() {
-                    self.draw_cc_transition(
-                        key_ys,
-                        half_tone_step,
-                        painter,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        cc_a,
-                        cc_b,
-                    );
-                }
-
-                if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
-                    // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                    log::trace!("No animation params (a bookmark?).");
-                }
-            }
-        }
         draw_selection_hints(
             &painter,
             &key_ys,
@@ -1253,12 +1284,8 @@ impl Stave {
         }
     }
 
-    fn draw_cursor(&self, painter: &Painter, x: Pix, color: Color32) {
-        painter.vline(
-            x,
-            painter.clip_rect().y_range(),
-            Stroke { width: 2.0, color },
-        );
+    fn cursor_shape(&self, y_range: &Rangef, x: Pix, color: Color32) -> Shape {
+        Shape::vline(x, *y_range, Stroke { width: 2.0, color })
     }
 
     fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
@@ -1461,7 +1488,6 @@ impl Stave {
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
-        painter: &Painter,
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
