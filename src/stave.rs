@@ -1,4 +1,4 @@
-use crate::changeset::{Changeset, EventActionsList};
+use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
@@ -20,7 +20,9 @@ use eframe::egui::{
 };
 use eframe::emath;
 use eframe::emath::TSTransform;
-use eframe::epaint::{ClippedShape, RectShape, StrokeKind, TessellationOptions, Tessellator};
+use eframe::epaint::{
+    ClippedShape, RectShape, StrokeKind, TessellationOptions, Tessellator, Vertex,
+};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::{Cell, RefCell};
@@ -75,8 +77,8 @@ impl NotesSelection {
         }
     }
 
-    fn contains(&self, ev: &TrackEvent) -> bool {
-        self.selected.contains(&ev.id)
+    fn contains(&self, ev_id: &EventId) -> bool {
+        self.selected.contains(ev_id)
     }
 
     fn clear(&mut self) {
@@ -250,18 +252,34 @@ pub struct Stave {
     meshes: SyncCow<Meshes>,
 }
 
-/*
- Mesh data flow: (a, b) -> interpolate -> unscaled -> vertical-remap -> scaled_y -> zoom-scroll -> out -> render
- This is split into stages to shift most frequent updates later so we can re-use the calculations.
+// TODO This should replace EditTransition
+struct AnimationTransition {
+    a: Mesh,
+    b: Mesh,
+}
+
+impl AnimationTransition {
+    fn from_changeset(changeset: &Changeset) {}
+
+    // Interpolation coefficient [0.0..1.0] between previous and current.
+    fn current(animation: f32) {
+        // TODO implement interpolation betweeen a and b
+    }
+}
+
+/**
+Track view model.
+Mesh data flow: (a, b) -> interpolate -> unscaled -> vertical-remap -> scaled_y -> zoom-scroll -> out -> render
+This is split into stages to shift most frequent updates later so we can re-use the calculations.
 */
 #[derive(Default, Clone)]
 struct Meshes {
     // Tracks changes in events (edit changes).
     version_id: VersionId,
-    previous: Mesh,
-    // Interpolation coefficient [0.0..1.0] between previous and current.
-    animation: f32,
-    current: Mesh,
+
+    // Beginning and end of ongoing animation.
+    transition: Option<(Mesh, Mesh)>,
+
     // Track drawn at some default scale that does not depend on current viewport
     // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
     // events have not changed.
@@ -550,68 +568,11 @@ impl Stave {
         self.meshes.edit(|meshes: &mut Meshes| {
             let has_version_changed = meshes.version_id != version_id;
             if has_version_changed {
-                /////////////////////////////////////////////////////////////////////////////////
-                // FIXME Draw transition
-                // TODO We get version change after the track events were updated.
-                //   So now we should patch previous version to insert created and deleted
-                //   events placeholders to ensure interpolation will work for create/update/delete.
-                //   The laziest would be to append the placeholders to existing meshes.
-                //   These placeholders should be removed after transition is done
-                //   (re-generate mesh from the track).
-                //   To do interpolation update Meshes::unscaled on tick, and ensure viewport
-                //   translation is recalculated afterwards.
-                /////////////////////////////////////////////////////////////////////////////////
-
-                if let Some(trans) = &self.transition {
-                    for (_ev_id, action) in &trans.changeset.changes {
-                        // TODO (cleanup) Restrict actions to not change event types,
-                        //      this should reduce number of cases to consider.
-
-                        let note_a = Stave::note_animation_params(action.before());
-                        let note_b = Stave::note_animation_params(action.after());
-                        if note_a.is_some() || note_b.is_some() {
-                            self.draw_note_transition(
-                                key_ys,
-                                half_tone_step,
-                                &mut should_be_visible,
-                                trans.coeff,
-                                false,
-                                note_a,
-                                note_b,
-                            );
-                        }
-
-                        let cc_a = Stave::cc_animation_params(action.before());
-                        let cc_b = Stave::cc_animation_params(action.after());
-                        if cc_a.is_some() || cc_b.is_some() {
-                            self.draw_cc_transition(
-                                key_ys,
-                                half_tone_step,
-                                painter,
-                                &mut should_be_visible,
-                                trans.coeff,
-                                cc_a,
-                                cc_b,
-                            );
-                        }
-
-                        if !(note_a.is_some()
-                            || note_b.is_some()
-                            || cc_a.is_some()
-                            || cc_b.is_some())
-                        {
-                            // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                            log::trace!("No animation params (a bookmark?).");
-                        }
-                    }
-                }
-                /////////////////////////////////////////
                 // (!) Assuming vertice indices will not change in subsequent transformations.
                 meshes.out_events.clear();
                 meshes.unscaled.clear();
                 let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
                 for event in &track.events {
-                    // FIXME Update transition rendering for CC
                     if let Some(trans) = &self.transition {
                         if trans.changeset.changes.contains_key(&event.id) {
                             continue;
@@ -619,12 +580,7 @@ impl Stave {
                     }
                     match &event.event {
                         TrackEventType::Note(note) => {
-                            let shape = self.paint_track_note_unscaled(
-                                // TODO (refactoring) Cleanuo lanes y calculations
-                                &Viewport::DEFAULT_HALF_TONE_STEP,
-                                &event,
-                                &note,
-                            );
+                            let shape = self.paint_track_note_unscaled(&event, &note);
                             tessellator.tessellate_shape(shape, &mut meshes.unscaled);
                         }
                         TrackEventType::Controller(cc) => {
@@ -659,13 +615,63 @@ impl Stave {
                     }
                 }
                 assert!(meshes.out_events.len() <= meshes.unscaled.indices.len() / 3);
+
+                if let Some(trans) = &self.transition {
+                    let mut before = Mesh::default();
+                    let mut after = Mesh::default();
+                    for (_ev_id, action) in &trans.changeset.changes {
+                        if let Some((shape_a, shape_b)) = self.note_animation(action) {
+                            tessellator.tessellate_shape(shape_a, &mut before);
+                            tessellator.tessellate_shape(shape_b, &mut after);
+                        } else if let Some((shape_a, shape_b)) = self.cc_animation(action) {
+                            tessellator.tessellate_shape(shape_a, &mut before);
+                            tessellator.tessellate_shape(shape_b, &mut after);
+                        } else {
+                            // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
+                            log::trace!("No animation params (a bookmark?).");
+                        }
+                    }
+                    // Current animation procedure assumes that only vertices change,
+                    // so before to after mapping should be 1 to 1.
+                    assert_eq!(before.indices.len(), before.indices.len());
+                    assert_eq!(before.vertices.len(), before.vertices.len());
+                    meshes.transition = Some((before, after));
+                } else {
+                    meshes.transition = None;
+                }
+
                 meshes.version_id = version_id;
             }
 
+            let mut animated = Mesh::default();
+            if let Some(EditTransition { coeff, .. }) = self.transition {
+                debug_assert!(0.0 <= coeff && coeff <= 1.0);
+                if let Some((mesh_a, mesh_b)) = &meshes.transition {
+                    animated.clone_from(mesh_a);
+                    animated.vertices.clear();
+                    // FIXME Interpolate here into `animated`.
+                    for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
+                        animated.vertices.push(Vertex {
+                            pos: Pos2 {
+                                x: emath::lerp(va.pos.x..=vb.pos.x, coeff),
+                                y: emath::lerp(va.pos.y..=vb.pos.y, coeff),
+                            },
+                            uv: va.uv,
+                            color: emath::lerp(Rgba::from(va.color)..=Rgba::from(vb.color), coeff)
+                                .into(),
+                        });
+                    }
+                }
+            }
+            let is_animating = !animated.is_empty();
+
             let y_range = self.viewport.view_rect.y_range();
             // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-            if meshes.viewport.view_rect.y_range() != y_range {
+            if has_version_changed || meshes.viewport.view_rect.y_range() != y_range || is_animating
+            {
                 meshes.scaled_y.clone_from(&meshes.unscaled);
+                meshes.scaled_y.append(animated);
+
                 // FIXME Adjust vertical note alignment. Refactor key_line_ys.
                 // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
                 for v in &mut meshes.scaled_y.vertices {
@@ -686,7 +692,7 @@ impl Stave {
             }
 
             let has_viewport_changed = meshes.viewport != self.viewport;
-            if has_viewport_changed || has_version_changed {
+            if has_version_changed || has_viewport_changed || is_animating {
                 let mut mesh = Mesh::default();
                 mesh.clone_from(&meshes.scaled_y);
 
@@ -723,7 +729,7 @@ impl Stave {
                     break;
                 }
 
-                // TODO Restore edit animation display
+                // TODO Restore selection hints display.
                 // if self.note_selection.contains(&event) {
                 //     if x_range.max < self.x_from_time(event.at) {
                 //         selection_hints_right.insert(note.pitch);
@@ -1288,14 +1294,49 @@ impl Stave {
         Shape::vline(x, *y_range, Stroke { width: 2.0, color })
     }
 
-    fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
-        ev.and_then(|ev| {
-            if let TrackEventType::Note(n) = &ev.event {
-                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
-            } else {
-                None // CC is animated separately.
-            }
-        })
+    fn note_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
+        match (action.before(), action.after()) {
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
+            ) => Some((
+                self.paint_track_note_unscaled2(id_a, at_a, a, None),
+                self.paint_track_note_unscaled2(id_b, at_b, b, None),
+            )),
+            // New note
+            (
+                None,
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
+            ) => Some((
+                self.paint_track_note_unscaled2(id_b, at_b, b, Some(Color32::TRANSPARENT)),
+                self.paint_track_note_unscaled2(id_b, at_b, b, None),
+            )),
+            // Deleted note
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
+                None,
+            ) => Some((
+                self.paint_track_note_unscaled2(id_a, at_a, a, None),
+                self.paint_track_note_unscaled2(id_a, at_a, a, Some(Color32::TRANSPARENT)),
+            )),
+            _ => None,
+        }
     }
 
     fn note_color(&self, velocity: &Level, selected: bool) -> Color32 {
@@ -1306,17 +1347,35 @@ impl Stave {
         }
     }
 
-    fn paint_track_note_unscaled(
-        &self,
-        half_tone_step: &Pix,
-        event: &TrackEvent,
-        note: &Note,
-    ) -> Shape {
-        Self::paint_note_unscaled(
+    fn lane_y_unscaled(lane: Pitch) -> Pix {
+        (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - lane) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
+    }
+
+    // TODO (cleanup) Remove now redundant painting procedures
+    fn paint_track_note_unscaled(&self, event: &TrackEvent, note: &Note) -> Shape {
+        Self::note_shape_unscaled(
             (event.at, event.at + note.duration),
-            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - note.pitch) as Pix * half_tone_step,
-            *half_tone_step,
-            self.note_color(&note.velocity, self.note_selection.contains(&event)),
+            Self::lane_y_unscaled(note.pitch),
+            Viewport::DEFAULT_HALF_TONE_STEP,
+            self.note_color(&note.velocity, self.note_selection.contains(&event.id)),
+        )
+    }
+
+    fn paint_track_note_unscaled2(
+        &self,
+        event_id: &EventId,
+        at: &Time,
+        note: &Note,
+        color: Option<Color32>,
+    ) -> Shape {
+        Self::note_shape_unscaled(
+            (*at, at + note.duration),
+            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - note.pitch) as Pix
+                * Viewport::DEFAULT_HALF_TONE_STEP,
+            Viewport::DEFAULT_HALF_TONE_STEP,
+            color.unwrap_or(
+                self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
+            ),
         )
     }
 
@@ -1327,16 +1386,13 @@ impl Stave {
         event: &TrackEvent,
         note: &Note,
     ) -> Option<Shape> {
-        if let Some(y) = key_ys.get(&note.pitch) {
-            Some(self.paint_note(
-                (event.at, event.at + note.duration),
-                *y,
-                *half_tone_step,
-                self.note_color(&note.velocity, self.note_selection.contains(&event)),
-            ))
-        } else {
-            None
-        }
+        let y = key_ys.get(&note.pitch)?;
+        Some(self.paint_note(
+            (event.at, event.at + note.duration),
+            *y,
+            *half_tone_step,
+            self.note_color(&note.velocity, self.note_selection.contains(&event.id)),
+        ))
     }
 
     fn draw_note_transition(
@@ -1374,7 +1430,7 @@ impl Stave {
         self.paint_note((t1, t2), y, *half_tone_step, color);
     }
 
-    fn paint_note_unscaled(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
+    fn note_shape_unscaled(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
                 x: time_range.0 as f32 * Viewport::DEFAULT_TIME_SCALE,
@@ -1400,6 +1456,17 @@ impl Stave {
             },
         };
         Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
+    }
+
+    fn point_accent_shape_unscaled(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
+        Shape::circle_filled(
+            Pos2 {
+                x: time as f32 * Viewport::DEFAULT_TIME_SCALE,
+                y,
+            },
+            height / 2.2,
+            color,
+        )
     }
 
     fn draw_point_accent(
@@ -1444,15 +1511,79 @@ impl Stave {
         }
     }
 
-    fn cc_animation_params(ev: Option<&TrackEvent>) -> Option<(Time, Level)> {
-        ev.and_then(|ev| {
-            if let TrackEventType::Controller(cc) = &ev.event {
-                debug_assert_eq!(cc.controller_id, MIDI_CC_SUSTAIN_ID);
-                Some((ev.at, cc.value))
-            } else {
-                None
-            }
-        })
+    fn cc_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
+        match (action.before(), action.after()) {
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
+            ) => Some((
+                Self::point_accent_shape_unscaled(
+                    *at_a,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&a.value, false),
+                ),
+                Self::point_accent_shape_unscaled(
+                    *at_b,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&b.value, false),
+                ),
+            )),
+            // New CC value
+            (
+                None,
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
+            ) => Some((
+                Self::point_accent_shape_unscaled(
+                    *at_b,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&b.value, false),
+                ),
+                Self::point_accent_shape_unscaled(
+                    *at_b,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&b.value, false),
+                ),
+            )),
+            // Deleted value
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
+                None,
+            ) => Some((
+                Self::point_accent_shape_unscaled(
+                    *at_a,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&a.value, false),
+                ),
+                Self::point_accent_shape_unscaled(
+                    *at_a,
+                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    Viewport::DEFAULT_HALF_TONE_STEP,
+                    self.note_color(&a.value, false),
+                ),
+            )),
+            _ => None,
+        }
     }
 
     fn draw_cc_transition(
