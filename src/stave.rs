@@ -159,6 +159,8 @@ impl Viewport {
     // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
     const DEFAULT_TIME_SCALE: Pix =
         1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
+    const DEFAULT_TIME_SCALE_DBG_INV: Time = 1000;
+    // 1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
 
     const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
 
@@ -173,6 +175,14 @@ impl Viewport {
     pub fn x_from_time(&self, at: Time) -> Pix {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x + (at as f32 - self.time_range.0 as f32) * self.time_scale()
+    }
+
+    #[inline]
+    pub fn x_from_default(&self, x_default: Pix) -> Pix {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.view_rect.min.x
+            + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DBG_INV) as f32)
+                * self.time_scale() * Self::DEFAULT_TIME_SCALE_DBG_INV as f32
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
@@ -278,12 +288,13 @@ struct Meshes {
     version_id: VersionId,
 
     // Beginning and end of ongoing animation.
+    // TODO Use AnimationTransition
     transition: Option<(Mesh, Mesh)>,
 
     // Track drawn at some default scale that does not depend on current viewport
     // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
     // events have not changed.
-    unscaled: Mesh,
+    default: Mesh,
     // Optimization: this field is not strictly necessary, but vertical scaling
     // is performed less often, so keeping this partial apply.
     scaled_y: Mesh,
@@ -424,13 +435,13 @@ impl Stave {
                 ));
 
                 if let Some(new_note) = &self.note_draw {
-                    self.default_draw_note(
+                    painter.add(self.default_draw_note(
                         64,
                         (new_note.time.0, new_note.time.1),
                         *key_ys.get(&new_note.pitch).unwrap(),
                         half_tone_step,
                         true,
-                    );
+                    ));
                 }
 
                 if let Some(range) = should_be_visible {
@@ -570,7 +581,7 @@ impl Stave {
             if has_version_changed {
                 // (!) Assuming vertice indices will not change in subsequent transformations.
                 meshes.out_events.clear();
-                meshes.unscaled.clear();
+                meshes.default.clear();
                 let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
                 for event in &track.events {
                     if let Some(trans) = &self.transition {
@@ -580,8 +591,8 @@ impl Stave {
                     }
                     match &event.event {
                         TrackEventType::Note(note) => {
-                            let shape = self.paint_track_note_unscaled(&event, &note);
-                            tessellator.tessellate_shape(shape, &mut meshes.unscaled);
+                            let shape = self.track_note_shape_default(&event, &note);
+                            tessellator.tessellate_shape(shape, &mut meshes.default);
                         }
                         TrackEventType::Controller(cc) => {
                             // TODO Restore CC display, use the returned shape (painter should not be used anymore)
@@ -592,7 +603,7 @@ impl Stave {
                                 &event,
                                 &cc,
                             ) {
-                                tessellator.tessellate_shape(shape, &mut meshes.unscaled);
+                                tessellator.tessellate_shape(shape, &mut meshes.default);
                             }
                         }
                         // TODO Draw cursors separately? I would rather not to scale them.
@@ -607,14 +618,14 @@ impl Stave {
                                 self.viewport.x_from_time(event.at),
                                 Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
                             );
-                            tessellator.tessellate_shape(shape, &mut meshes.unscaled);
+                            tessellator.tessellate_shape(shape, &mut meshes.default);
                         }
                     }
-                    while meshes.out_events.len() < meshes.unscaled.indices.len() / 3 {
+                    while meshes.out_events.len() < meshes.default.indices.len() / 3 {
                         meshes.out_events.push(event.id);
                     }
                 }
-                assert!(meshes.out_events.len() <= meshes.unscaled.indices.len() / 3);
+                assert!(meshes.out_events.len() <= meshes.default.indices.len() / 3);
 
                 if let Some(trans) = &self.transition {
                     let mut before = Mesh::default();
@@ -669,7 +680,7 @@ impl Stave {
             // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
             if has_version_changed || meshes.viewport.view_rect.y_range() != y_range || is_animating
             {
-                meshes.scaled_y.clone_from(&meshes.unscaled);
+                meshes.scaled_y.clone_from(&meshes.default);
                 meshes.scaled_y.append(animated);
 
                 // FIXME Adjust vertical note alignment. Refactor key_line_ys.
@@ -697,9 +708,7 @@ impl Stave {
                 mesh.clone_from(&meshes.scaled_y);
 
                 for v in &mut mesh.vertices {
-                    v.pos.x = self
-                        .viewport
-                        .x_from_time((v.pos.x / Viewport::DEFAULT_TIME_SCALE) as i64);
+                    v.pos.x = self.viewport.x_from_default(v.pos.x);
                 }
                 meshes.viewport = self.viewport.clone();
                 debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
@@ -717,7 +726,7 @@ impl Stave {
 
                     // Hover temporary stub:
                     painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
-                    // TODO Implement hovered note highlighting
+                    // TODO Reimplement hovered note highlighting
                     // Bug: probably hover overflows f32 in time calculations somewhere.
                     //      Hovers are found only at the beginning of the track.
                     // painter.rect_stroke(
@@ -1352,7 +1361,7 @@ impl Stave {
     }
 
     // TODO (cleanup) Remove now redundant painting procedures
-    fn paint_track_note_unscaled(&self, event: &TrackEvent, note: &Note) -> Shape {
+    fn track_note_shape_default(&self, event: &TrackEvent, note: &Note) -> Shape {
         Self::note_shape_unscaled(
             (event.at, event.at + note.duration),
             Self::lane_y_unscaled(note.pitch),
@@ -1379,71 +1388,21 @@ impl Stave {
         )
     }
 
-    fn paint_track_note(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        event: &TrackEvent,
-        note: &Note,
-    ) -> Option<Shape> {
-        let y = key_ys.get(&note.pitch)?;
-        Some(self.paint_note(
-            (event.at, event.at + note.duration),
-            *y,
-            *half_tone_step,
-            self.note_color(&note.velocity, self.note_selection.contains(&event.id)),
-        ))
-    }
-
-    fn draw_note_transition(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        should_be_visible: &mut Option<range::Range<Time>>,
-        coeff: f32,
-        is_selected: bool,
-        a: Option<((Time, Time), Pitch, Level)>,
-        b: Option<((Time, Time), Pitch, Level)>,
-    ) {
-        // Interpolate the note states.
-        assert!(a.is_some() || b.is_some());
-        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
-        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
-
-        *should_be_visible = should_be_visible
-            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
-            .or(Some((t1_a, t2_a)));
-
-        // May want to handle gracefully when note gets in/out of visible pitch range.
-        // Just patching with existing y for now.
-        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
-        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
-        let y = egui::lerp(*y_a..=*y_b, coeff);
-
-        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
-        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
-
-        let c_a = self.note_color(&v_a, is_selected);
-        let c_b = self.note_color(&v_b, is_selected);
-        let color = Self::transition_color(c_a, c_b, coeff);
-
-        self.paint_note((t1, t2), y, *half_tone_step, color);
-    }
-
     fn note_shape_unscaled(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
-                x: time_range.0 as f32 * Viewport::DEFAULT_TIME_SCALE,
+                x: (time_range.0 / Viewport::DEFAULT_TIME_SCALE_DBG_INV) as f32,
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: time_range.1 as f32 * Viewport::DEFAULT_TIME_SCALE,
+                x: (time_range.1 / Viewport::DEFAULT_TIME_SCALE_DBG_INV) as f32,
                 y: y + height * 0.45,
             },
         };
         Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
     }
 
+    // To draw note immediately (without intermediate meshes).
     fn paint_note(&self, time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
@@ -1458,7 +1417,18 @@ impl Stave {
         Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
     }
 
-    fn point_accent_shape_unscaled(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
+    fn default_draw_note(
+        &self,
+        velocity: Level,
+        x_range: (Time, Time),
+        y: Pix,
+        height: Pix,
+        selected: bool,
+    ) -> Shape {
+        self.paint_note(x_range, y, height, self.note_color(&velocity, selected))
+    }
+
+    fn point_accent_shape_default(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
         Shape::circle_filled(
             Pos2 {
                 x: time as f32 * Viewport::DEFAULT_TIME_SCALE,
@@ -1485,17 +1455,6 @@ impl Stave {
             height / 2.2,
             color,
         );
-    }
-
-    fn default_draw_note(
-        &self,
-        velocity: Level,
-        x_range: (Time, Time),
-        y: Pix,
-        height: Pix,
-        selected: bool,
-    ) {
-        self.paint_note(x_range, y, height, self.note_color(&velocity, selected));
     }
 
     fn transition_color(color_a: Color32, color_b: Color32, coeff: f32) -> Color32 {
@@ -1525,13 +1484,13 @@ impl Stave {
                     event: TrackEventType::Controller(b),
                 }),
             ) => Some((
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_a,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&a.value, false),
                 ),
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_b,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
@@ -1547,13 +1506,13 @@ impl Stave {
                     event: TrackEventType::Controller(b),
                 }),
             ) => Some((
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_b,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&b.value, false),
                 ),
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_b,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
@@ -1569,13 +1528,13 @@ impl Stave {
                 }),
                 None,
             ) => Some((
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_a,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&a.value, false),
                 ),
-                Self::point_accent_shape_unscaled(
+                Self::point_accent_shape_default(
                     *at_a,
                     Self::lane_y_unscaled(PIANO_DAMPER_LANE),
                     Viewport::DEFAULT_HALF_TONE_STEP,
@@ -1583,35 +1542,6 @@ impl Stave {
                 ),
             )),
             _ => None,
-        }
-    }
-
-    fn draw_cc_transition(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        should_be_visible: &mut Option<range::Range<Time>>,
-        coeff: f32,
-        a: Option<(Time, Level)>,
-        b: Option<(Time, Level)>,
-    ) {
-        assert!(a.is_some() || b.is_some());
-        if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-            let (t1, v1) = a.or(b).unwrap();
-            let (t2, v2) = b.or(a).unwrap();
-
-            let t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
-
-            let c_a = self.note_color(&v1, false);
-            let c_b = self.note_color(&v2, false);
-            let color = Self::transition_color(c_a, c_b, coeff);
-            *should_be_visible = should_be_visible
-                .map(|r| (r.0.min(t2), r.1.max(t2)))
-                .or(Some((t2, t2)));
-            debug_assert!(should_be_visible.is_some());
-            // Previous CC value is not available here, so just showing an accent here for now.
-            self.draw_point_accent(painter, t, *y, *half_tone_step, color);
         }
     }
 
