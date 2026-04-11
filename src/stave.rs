@@ -182,7 +182,8 @@ impl Viewport {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x
             + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DBG_INV) as f32)
-                * self.time_scale() * Self::DEFAULT_TIME_SCALE_DBG_INV as f32
+                * self.time_scale()
+                * Self::DEFAULT_TIME_SCALE_DBG_INV as f32
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
@@ -308,6 +309,10 @@ struct Meshes {
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
 const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
+
+// Egui optimizes away transparent shapes. This placeholder color is used as starting or end point
+// in insertions/deletions to ensure the shape is always there.
+const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 1);
 
 struct InnerResponse {
     response: egui::Response,
@@ -575,10 +580,9 @@ impl Stave {
         tessel_options.feathering = false;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
-        // FIXME (edit transitions) Only using `b` side for now (no transitions/interpolation).
         self.meshes.edit(|meshes: &mut Meshes| {
             let has_version_changed = meshes.version_id != version_id;
-            if has_version_changed {
+            if has_version_changed || meshes.default.is_empty() {
                 // (!) Assuming vertice indices will not change in subsequent transformations.
                 meshes.out_events.clear();
                 meshes.default.clear();
@@ -627,6 +631,8 @@ impl Stave {
                 }
                 assert!(meshes.out_events.len() <= meshes.default.indices.len() / 3);
 
+                meshes.version_id = version_id;
+
                 if let Some(trans) = &self.transition {
                     let mut before = Mesh::default();
                     let mut after = Mesh::default();
@@ -644,23 +650,23 @@ impl Stave {
                     }
                     // Current animation procedure assumes that only vertices change,
                     // so before to after mapping should be 1 to 1.
-                    assert_eq!(before.indices.len(), before.indices.len());
-                    assert_eq!(before.vertices.len(), before.vertices.len());
+                    assert_eq!(before.indices.len(), after.indices.len());
+                    assert_eq!(before.vertices.len(), after.vertices.len());
                     meshes.transition = Some((before, after));
                 } else {
                     meshes.transition = None;
+                    meshes.version_id = -1; // Force refresh without any animations next time.
                 }
-
-                meshes.version_id = version_id;
             }
 
             let mut animated = Mesh::default();
             if let Some(EditTransition { coeff, .. }) = self.transition {
                 debug_assert!(0.0 <= coeff && coeff <= 1.0);
                 if let Some((mesh_a, mesh_b)) = &meshes.transition {
+                    assert_eq!(mesh_a.vertices.len(), mesh_b.vertices.len());
+                    assert_eq!(mesh_a.indices.len(), mesh_b.indices.len());
                     animated.clone_from(mesh_a);
                     animated.vertices.clear();
-                    // FIXME Interpolate here into `animated`.
                     for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
                         animated.vertices.push(Vertex {
                             pos: Pos2 {
@@ -672,6 +678,9 @@ impl Stave {
                                 .into(),
                         });
                     }
+                    debug_assert!(animated.is_valid());
+                } else {
+                    assert!(false, "Have transition, but no animation.")
                 }
             }
             let is_animating = !animated.is_empty();
@@ -1304,7 +1313,8 @@ impl Stave {
     }
 
     fn note_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
-        match (action.before(), action.after()) {
+        debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
+        match (action.before(), action.after()) {   
             (
                 Some(TrackEvent {
                     id: id_a,
@@ -1329,7 +1339,7 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.paint_track_note_unscaled2(id_b, at_b, b, Some(Color32::TRANSPARENT)),
+                self.paint_track_note_unscaled2(id_b, at_b, b, Some(COLOR_NOTHING)),
                 self.paint_track_note_unscaled2(id_b, at_b, b, None),
             )),
             // Deleted note
@@ -1342,7 +1352,7 @@ impl Stave {
                 None,
             ) => Some((
                 self.paint_track_note_unscaled2(id_a, at_a, a, None),
-                self.paint_track_note_unscaled2(id_a, at_a, a, Some(Color32::TRANSPARENT)),
+                self.paint_track_note_unscaled2(id_a, at_a, a, Some(COLOR_NOTHING)),
             )),
             _ => None,
         }
