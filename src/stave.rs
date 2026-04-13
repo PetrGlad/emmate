@@ -2,13 +2,13 @@ use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
-    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType,
-    DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track,
+    TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
-    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
-    transpose_selected_notes, AppliedCommand, EditCommandId,
+    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark,
+    set_damper, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
@@ -19,18 +19,15 @@ use eframe::egui::{
     PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
 };
 use eframe::emath;
-use eframe::emath::TSTransform;
 use eframe::epaint::{
-    ClippedShape, RectShape, StrokeKind, TessellationOptions, Tessellator, Vertex,
+    RectShape, TessellationOptions, Tessellator, Vertex,
 };
 use egui::Rgba;
 use ordered_float::OrderedFloat;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use sync_cow::SyncCow;
-use tracing::Event;
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -115,15 +112,17 @@ impl EditTransition {
         }
     }
 
-    pub fn update(mut self, ctx: &Context) -> Self {
+    pub fn update(&mut self, ctx: &Context) {
         self.coeff = ctx.animate_bool(self.animation_id, true);
-        self
+        dbg!(self.coeff);
     }
 
     pub fn value(&self) -> Option<f32> {
         if self.coeff >= 1.0 {
+            dbg!("end-coeff", self.coeff);
             None
         } else {
+            dbg!(self.coeff);
             Some(self.coeff)
         }
     }
@@ -159,6 +158,8 @@ impl Viewport {
     // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
     const DEFAULT_TIME_SCALE: Pix =
         1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
+    // FIXME Keep only one scale constant. Calculated value is about 1/1000,
+    //       rounding it to better see where scroll jerking/shimmering comes.
     const DEFAULT_TIME_SCALE_DBG_INV: Time = 1000;
     // 1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
 
@@ -260,7 +261,7 @@ pub struct Stave {
     //   * When animation finishes, before := after; discard_deleted(&mut before); truncate(&mut after).
     //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
     //   * No need to allocate meshes every time
-    meshes: SyncCow<Meshes>,
+    meshes: RefCell<Meshes>,
 }
 
 // TODO This should replace EditTransition
@@ -285,7 +286,7 @@ This is split into stages to shift most frequent updates later so we can re-use 
 */
 #[derive(Default, Clone)]
 struct Meshes {
-    // Tracks changes in events (edit changes).
+    // Track version id, used to detect changes in events (edit changes).
     version_id: VersionId,
 
     // Beginning and end of ongoing animation.
@@ -301,7 +302,7 @@ struct Meshes {
     scaled_y: Mesh,
     // Lets tracking changes in view (zoom, scroll).
     viewport: Viewport,
-    // Annotates out vertices with tract event ids.
+    // Annotates out triangles with tract event ids.
     // Used to detect hovers, and to show out-of-view selection hints.
     out_events: Vec<EventId>,
     out: Arc<Mesh>,
@@ -312,7 +313,8 @@ const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 
 // Egui optimizes away transparent shapes. This placeholder color is used as starting or end point
 // in insertions/deletions to ensure the shape is always there.
-const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(128, 128, 128, 1);
+const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 1);
+// const COLOR_NOTHING: Color32 = Color32::GREEN; // DEBUG // Making it stand out for diagnostics.
 
 struct InnerResponse {
     response: egui::Response,
@@ -353,7 +355,7 @@ impl Stave {
             note_selection: NotesSelection::default(),
             transition: None,
             note_colors,
-            meshes: SyncCow::new(Meshes::default()),
+            meshes: RefCell::new(Meshes::default()),
         }
     }
 
@@ -423,7 +425,7 @@ impl Stave {
                 {
                     let history = self.history.read().expect("Read stave.history.");
                     let track = history.track.read();
-                    should_be_visible = self.draw_events(
+                    should_be_visible = self.paint_events(
                         &key_ys,
                         &half_tone_step,
                         &pointer_pos,
@@ -527,10 +529,11 @@ impl Stave {
         if hours > 0 {
             result.push_str(&format!("{}:", hours));
         }
-        result.push_str(&format!("{}'{}", minutes, seconds));
-        if millis > 0 {
-            result.push_str(&format!(".{}", millis));
-        }
+        result.push_str(&format!(
+            "{}'{}",
+            minutes,
+            seconds as f32 + millis as f32 / 1000.0
+        ));
         result
     }
 
@@ -554,7 +557,7 @@ impl Stave {
         )
     }
 
-    fn draw_events(
+    fn paint_events(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
@@ -569,9 +572,6 @@ impl Stave {
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         let mut should_be_visible = None;
 
-        // -----------------------------------------------------------------------------------
-        // Experimental
-
         let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
 
@@ -580,155 +580,156 @@ impl Stave {
         tessel_options.feathering = false;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
-        self.meshes.edit(|meshes: &mut Meshes| {
-            let has_version_changed = meshes.version_id != version_id;
-            if has_version_changed || meshes.default.is_empty() {
-                // (!) Assuming vertice indices will not change in subsequent transformations.
-                meshes.out_events.clear();
-                meshes.default.clear();
-                let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
-                for event in &track.events {
+        let mut meshes = self.meshes.borrow_mut();
+        let has_version_changed = meshes.version_id != version_id;
+        if has_version_changed {
+            // (!) Assuming vertice indices will not change in subsequent transformations.
+            meshes.out_events.clear();
+            meshes.default.clear();
+
+            if let Some(trans) = &self.transition {
+                let mut before = Mesh::default();
+                let mut after = Mesh::default();
+                dbg!("anim-new/changes", &trans.changeset.changes.iter().take(5));
+                for (_ev_id, action) in &trans.changeset.changes {
+                    if let Some((shape_a, shape_b)) = self.note_animation(action) {
+                        tessellator.tessellate_shape(shape_a, &mut before);
+                        tessellator.tessellate_shape(shape_b, &mut after);
+                    } else if let Some((shape_a, shape_b)) = self.cc_animation(action) {
+                        tessellator.tessellate_shape(shape_a, &mut before);
+                        tessellator.tessellate_shape(shape_b, &mut after);
+                    } else {
+                        // E.g. a bookmark.
+                    }
+                }
+                // Current animation procedure assumes that only vertices change.
+                // Hence, "before" to "after" mapping should be 1 to 1.
+                assert_eq!(before.indices.len(), after.indices.len());
+                assert_eq!(before.vertices.len(), after.vertices.len());
+                meshes.transition = Some((before, after));
+                dbg!("anim-new/id", meshes.version_id);
+            }
+
+            let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
+            for event in &track.events {
+                if meshes.transition.is_some() {
                     if let Some(trans) = &self.transition {
                         if trans.changeset.changes.contains_key(&event.id) {
+                            dbg!("skip id", event.id);
                             continue;
                         }
                     }
-                    match &event.event {
-                        TrackEventType::Note(note) => {
-                            let shape = self.track_note_shape_default(&event, &note);
-                            tessellator.tessellate_shape(shape, &mut meshes.default);
-                        }
-                        TrackEventType::Controller(cc) => {
-                            // TODO Restore CC display, use the returned shape (painter should not be used anymore)
-                            if let Some(shape) = self.draw_track_cc(
-                                &key_ys,
-                                half_tone_step,
-                                &mut last_damper_value,
-                                &event,
-                                &cc,
-                            ) {
-                                tessellator.tessellate_shape(shape, &mut meshes.default);
-                            }
-                        }
-                        // TODO Draw cursors separately? I would rather not to scale them.
-                        TrackEventType::Bookmark => {
-                            let shape = self.cursor_shape(
-                                &Rangef::new(
-                                    0.0,
-                                    // TODO (refactoring) Cleanuo lanes y calculations
-                                    (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
-                                        * Viewport::DEFAULT_HALF_TONE_STEP,
-                                ),
-                                self.viewport.x_from_time(event.at),
-                                Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                            );
+                }
+                match &event.event {
+                    TrackEventType::Note(note) => {
+                        let shape = self.track_note_shape_default(&event, &note);
+                        tessellator.tessellate_shape(shape, &mut meshes.default);
+                    }
+                    TrackEventType::Controller(cc) => {
+                        // TODO Restore CC display, use the returned shape (painter should not be used anymore)
+                        if let Some(shape) = self.draw_track_cc(
+                            &key_ys,
+                            half_tone_step,
+                            &mut last_damper_value,
+                            &event,
+                            &cc,
+                        ) {
                             tessellator.tessellate_shape(shape, &mut meshes.default);
                         }
                     }
-                    while meshes.out_events.len() < meshes.default.indices.len() / 3 {
-                        meshes.out_events.push(event.id);
+                    // TODO Draw cursors separately? I would rather not to scale them.
+                    TrackEventType::Bookmark => {
+                        let shape = self.cursor_shape(
+                            &Rangef::new(
+                                0.0,
+                                // TODO (refactoring) Cleanup lanes y calculations
+                                (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
+                                    * Viewport::DEFAULT_HALF_TONE_STEP,
+                            ),
+                            self.viewport.x_from_time(event.at),
+                            Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                        );
+                        tessellator.tessellate_shape(shape, &mut meshes.default);
                     }
                 }
-                assert!(meshes.out_events.len() <= meshes.default.indices.len() / 3);
-
-                meshes.version_id = version_id;
-
-                if let Some(trans) = &self.transition {
-                    let mut before = Mesh::default();
-                    let mut after = Mesh::default();
-                    for (_ev_id, action) in &trans.changeset.changes {
-                        if let Some((shape_a, shape_b)) = self.note_animation(action) {
-                            tessellator.tessellate_shape(shape_a, &mut before);
-                            tessellator.tessellate_shape(shape_b, &mut after);
-                        } else if let Some((shape_a, shape_b)) = self.cc_animation(action) {
-                            tessellator.tessellate_shape(shape_a, &mut before);
-                            tessellator.tessellate_shape(shape_b, &mut after);
-                        } else {
-                            // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                            log::trace!("No animation params (a bookmark?).");
-                        }
-                    }
-                    // Current animation procedure assumes that only vertices change,
-                    // so before to after mapping should be 1 to 1.
-                    assert_eq!(before.indices.len(), after.indices.len());
-                    assert_eq!(before.vertices.len(), after.vertices.len());
-                    meshes.transition = Some((before, after));
-                } else {
-                    meshes.transition = None;
-                    meshes.version_id = -1; // Force refresh without any animations next time.
+                while meshes.out_events.len() < meshes.default.indices.len() / 3 {
+                    meshes.out_events.push(event.id);
                 }
             }
+            assert!(meshes.out_events.len() <= meshes.default.indices.len() / 3);
+            meshes.version_id = version_id;
+        }
 
-            let mut animated = Mesh::default();
-            if let Some(EditTransition { coeff, .. }) = self.transition {
-                debug_assert!(0.0 <= coeff && coeff <= 1.0);
-                if let Some((mesh_a, mesh_b)) = &meshes.transition {
-                    assert_eq!(mesh_a.vertices.len(), mesh_b.vertices.len());
-                    assert_eq!(mesh_a.indices.len(), mesh_b.indices.len());
-                    animated.clone_from(mesh_a);
-                    animated.vertices.clear();
-                    for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
-                        animated.vertices.push(Vertex {
-                            pos: Pos2 {
-                                x: emath::lerp(va.pos.x..=vb.pos.x, coeff),
-                                y: emath::lerp(va.pos.y..=vb.pos.y, coeff),
-                            },
-                            uv: va.uv,
-                            color: emath::lerp(Rgba::from(va.color)..=Rgba::from(vb.color), coeff)
-                                .into(),
-                        });
-                    }
-                    debug_assert!(animated.is_valid());
-                } else {
-                    assert!(false, "Have transition, but no animation.")
+        let mut animated = Mesh::default();
+        if let Some(EditTransition { coeff, .. }) = self.transition {
+            debug_assert!(0.0 <= coeff && coeff <= 1.0);
+            debug_assert!(meshes.transition.is_some());
+            if let Some((mesh_a, mesh_b)) = &meshes.transition {
+                dbg!("anim-lerp", meshes.version_id, coeff);
+                animated.clone_from(mesh_a);
+                animated.vertices.clear();
+                for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
+                    animated.vertices.push(Vertex {
+                        pos: Pos2 {
+                            x: emath::lerp(va.pos.x..=vb.pos.x, coeff),
+                            y: emath::lerp(va.pos.y..=vb.pos.y, coeff),
+                        },
+                        uv: va.uv,
+                        color: emath::lerp(Rgba::from(va.color)..=Rgba::from(vb.color), coeff)
+                            .into(),
+                    });
                 }
+                debug_assert!(animated.is_valid());
             }
-            let is_animating = !animated.is_empty();
+        } else if meshes.transition.is_some() {
+            meshes.transition = None;
+            meshes.version_id = -1; // Force repaint without animation parts.
+            dbg!("anim-reset", meshes.version_id);
+        }
+        let is_animating = !animated.is_empty();
 
-            let y_range = self.viewport.view_rect.y_range();
-            // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-            if has_version_changed || meshes.viewport.view_rect.y_range() != y_range || is_animating
-            {
-                meshes.scaled_y.clone_from(&meshes.default);
-                meshes.scaled_y.append(animated);
+        let y_range = self.viewport.view_rect.y_range();
+        // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
+        if has_version_changed || meshes.viewport.view_rect.y_range() != y_range || is_animating {
+            meshes.scaled_y = meshes.default.clone();
+            meshes.scaled_y.append(animated);
 
-                // FIXME Adjust vertical note alignment. Refactor key_line_ys.
-                // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
-                for v in &mut meshes.scaled_y.vertices {
-                    v.pos.y = emath::remap(
-                        v.pos.y,
-                        Rangef::new(
-                            0.0,
-                            Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
-                        ),
-                        Rangef::new(
-                            y_range.min + half_tone_step / 2.0,
-                            y_range.max - half_tone_step / 2.0,
-                        ),
-                    )
-                }
-                meshes.viewport.view_rect.set_top(y_range.min);
-                meshes.viewport.view_rect.set_bottom(y_range.max);
+            // FIXME Adjust vertical note alignment. Refactor key_line_ys.
+            // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
+            for v in &mut meshes.scaled_y.vertices {
+                v.pos.y = emath::remap(
+                    v.pos.y,
+                    Rangef::new(
+                        0.0,
+                        Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
+                    ),
+                    Rangef::new(
+                        y_range.min + half_tone_step / 2.0,
+                        y_range.max - half_tone_step / 2.0,
+                    ),
+                )
             }
+            meshes.viewport.view_rect.set_top(y_range.min);
+            meshes.viewport.view_rect.set_bottom(y_range.max);
+        }
 
-            let has_viewport_changed = meshes.viewport != self.viewport;
-            if has_version_changed || has_viewport_changed || is_animating {
-                let mut mesh = Mesh::default();
-                mesh.clone_from(&meshes.scaled_y);
+        let has_viewport_changed = meshes.viewport != self.viewport;
+        if has_version_changed || has_viewport_changed || is_animating {
+            let mut mesh = Mesh::default();
+            mesh.clone_from(&meshes.scaled_y);
 
-                for v in &mut mesh.vertices {
-                    v.pos.x = self.viewport.x_from_default(v.pos.x);
-                }
-                meshes.viewport = self.viewport.clone();
-                debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
-                meshes.out = Arc::new(mesh);
+            for v in &mut mesh.vertices {
+                v.pos.x = self.viewport.x_from_default(v.pos.x);
             }
-        });
-        painter.add(Shape::mesh(self.meshes.read().out.to_owned()));
+            meshes.viewport = self.viewport.clone();
+            debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
+            meshes.out = Arc::new(mesh);
+        }
+
+        painter.add(Shape::mesh(meshes.out.to_owned()));
 
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
-            let meshes = self.meshes.read();
             for triangle in 0..meshes.out_events.len() {
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(meshes.out_events[triangle]);
@@ -776,14 +777,11 @@ impl Stave {
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
-        self.transition = self
-            .transition
-            .take()
-            .map(|tr| tr.update(&ui.ctx()))
-            .filter(|tr| tr.value().is_some());
-        if self.transition.is_none() {
-            ui.ctx().clear_animations();
+        // dbg!("before", &self.transition);
+        if let Some(transition) = &mut self.transition {
+            transition.update(&ui.ctx())
         }
+        // dbg!("after", &self.transition);
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
@@ -795,6 +793,15 @@ impl Stave {
             }
         }
 
+        let had_transition = self.transition.is_some();
+        self.transition = self.transition.take().filter(|tr| tr.value().is_some());
+        if had_transition && self.transition.is_none() {
+            ui.ctx().clear_animations();
+            ui.ctx().request_repaint();
+            dbg!("CLEAR", &self.transition);
+        }
+        // dbg!("drawn", &self.history.read().unwrap().version());
+
         let inner = &stave_response.response;
         self.update_new_note_draw(
             inner,
@@ -802,11 +809,23 @@ impl Stave {
             &stave_response.time_hovered,
             &stave_response.pitch_hovered,
         );
+
         self.update_time_selection(&inner, &stave_response.time_hovered);
+
+        let dbg_version_before = self.history.read().unwrap().version();
         let new_cursor_position = self.handle_commands(&inner);
         if let Some(pos) = new_cursor_position {
             self.cursor_position = pos;
             self.ensure_visible(pos);
+        }
+
+        // dbg!("commands-handled", self.history.read().unwrap().version());
+        if dbg_version_before != self.history.read().unwrap().version() {
+            dbg!(
+                "requesting-repaint",
+                &self.history.read().unwrap().version()
+            );
+            ui.ctx().request_repaint();
         }
 
         StaveResponse {
@@ -1227,7 +1246,7 @@ impl Stave {
         self.transition = Self::animate_edit(
             context,
             transition_id,
-            diff.clone().map(|diff| (diff.0 .0, diff.1)),
+            diff.clone().map(|diff| (diff.0.0, diff.1)),
         );
         diff
     }
@@ -1314,7 +1333,7 @@ impl Stave {
 
     fn note_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
         debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
-        match (action.before(), action.after()) {   
+        match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
                     id: id_a,
@@ -1678,7 +1697,7 @@ fn is_black_key(tone: &Pitch) -> bool {
 fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
     *pitch_ys
         .iter()
-        .min_by_key(|(_, &y)| OrderedFloat((y - pointer_pos.y).abs()))
+        .min_by_key(|(_, y)| OrderedFloat((**y - pointer_pos.y).abs()))
         .unwrap()
         .0
 }

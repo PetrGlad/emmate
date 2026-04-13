@@ -1,7 +1,7 @@
 [package]
 name = "emmate"
 version = "0.4.2"
-edition = "2021"
+edition = "2024"
 authors = ["Petr <petrglad@gmail.com>"]
 description = "A MIDI editor."
 homepage = "https://github.com/PetrGlad/emmate"
