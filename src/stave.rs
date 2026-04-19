@@ -2,26 +2,24 @@ use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
-    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track,
-    TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    ControllerSetValue, DEFAULT_CC_LEVEL, EventId, Level, MAX_LEVEL, MIDI_CC_SUSTAIN_ID, Note,
+    Pitch, Track, TrackEvent, TrackEventType, export_smf,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark,
-    set_damper, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
-    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandId,
+    AppliedCommand, EditCommandId, accent_selected_notes, add_new_note, clear_bookmark,
+    delete_selected, set_bookmark, set_damper, shift_selected, shift_tail, stretch_selected_notes,
+    tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{range, Pix};
+use crate::{Pix, range};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 use eframe::emath;
-use eframe::epaint::{
-    RectShape, TessellationOptions, Tessellator, Vertex,
-};
+use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
@@ -131,12 +129,12 @@ impl EditTransition {
 // Selects viewable track range.
 type TimeRange = Range<Time>;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub struct Viewport {
     /// Starting and ending moment of track's visible time range.
     pub time_range: TimeRange,
     /// The widget's displayed rectangle coordinates.
-    pub view_rect: Rect,
+    view_rect: Rect,
 }
 
 impl Default for Viewport {
@@ -165,6 +163,25 @@ impl Viewport {
 
     const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
 
+    pub fn lanes_y_half_tone(&self) -> f32 {
+        self.view_rect.height() / STAVE_KEY_LANES.len() as f32
+    }
+
+    pub fn lanes_y_range(&self) -> Rangef {
+        Rangef::new(
+            self.view_rect.top() + self.lanes_y_half_tone() / 2.0,
+            self.view_rect.bottom() - self.lanes_y_half_tone() / 2.0,
+        )
+    }
+
+    pub fn lanes_default_y_range() -> Rangef {
+        Rangef::new(
+            0.0,
+            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
+                * Viewport::DEFAULT_HALF_TONE_STEP,
+        )
+    }
+
     /// Pixel/uSec, can be cached.
     #[inline]
     pub fn time_scale(&self) -> f32 {
@@ -185,6 +202,18 @@ impl Viewport {
             + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DBG_INV) as f32)
                 * self.time_scale()
                 * Self::DEFAULT_TIME_SCALE_DBG_INV as f32
+    }
+
+    #[inline]
+    pub fn y_from_default(&self, y: &Pix) -> Pix {
+        emath::remap(
+            *y,
+            Rangef::new(
+                0.0,
+                Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
+            ),
+            self.lanes_y_range(),
+        )
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
@@ -626,10 +655,7 @@ impl Stave {
                         tessellator.tessellate_shape(shape, &mut meshes.default);
                     }
                     TrackEventType::Controller(cc) => {
-                        // TODO Restore CC display, use the returned shape (painter should not be used anymore)
-                        if let Some(shape) = self.draw_track_cc(
-                            &key_ys,
-                            half_tone_step,
+                        if let Some(shape) = self.default_track_cc(
                             &mut last_damper_value,
                             &event,
                             &cc,
@@ -637,17 +663,12 @@ impl Stave {
                             tessellator.tessellate_shape(shape, &mut meshes.default);
                         }
                     }
-                    // TODO Draw cursors separately? I would rather not to scale them.
+                    // TODO Paint cursors separately? I would rather not to scale them.
                     TrackEventType::Bookmark => {
                         let shape = self.cursor_shape(
-                            &Rangef::new(
-                                0.0,
-                                // TODO (refactoring) Cleanup lanes y calculations
-                                (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
-                                    * Viewport::DEFAULT_HALF_TONE_STEP,
-                            ),
+                            &Viewport::lanes_default_y_range(),
                             self.viewport.x_from_time(event.at),
-                            Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                            Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         );
                         tessellator.tessellate_shape(shape, &mut meshes.default);
                     }
@@ -683,7 +704,7 @@ impl Stave {
             }
         } else if meshes.transition.is_some() {
             meshes.transition = None;
-            meshes.version_id = -1; // Force repaint without animation parts.
+            meshes.version_id = -1; // Force repaint without animation parts next time.
             dbg!("anim-reset", meshes.version_id);
         }
         let is_animating = !animated.is_empty();
@@ -697,17 +718,7 @@ impl Stave {
             // FIXME Adjust vertical note alignment. Refactor key_line_ys.
             // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
             for v in &mut meshes.scaled_y.vertices {
-                v.pos.y = emath::remap(
-                    v.pos.y,
-                    Rangef::new(
-                        0.0,
-                        Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
-                    ),
-                    Rangef::new(
-                        y_range.min + half_tone_step / 2.0,
-                        y_range.max - half_tone_step / 2.0,
-                    ),
-                )
+                v.pos.y = self.viewport.y_from_default(&v.pos.y);
             }
             meshes.viewport.view_rect.set_top(y_range.min);
             meshes.viewport.view_rect.set_bottom(y_range.max);
@@ -737,10 +748,8 @@ impl Stave {
                     // Hover temporary stub:
                     painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     // TODO Reimplement hovered note highlighting
-                    // Bug: probably hover overflows f32 in time calculations somewhere.
-                    //      Hovers are found only at the beginning of the track.
                     // painter.rect_stroke(
-                    //     r,
+                    //      r,
                     //     CornerRadius::ZERO,
                     //     Stroke::new(2.0, COLOR_HOVERED),
                     //     StrokeKind::Inside,
@@ -1399,6 +1408,10 @@ impl Stave {
         )
     }
 
+    fn default_pitch_y(pitch: &Pitch) -> f32 {
+        (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - pitch) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
+    }
+
     fn paint_track_note_unscaled2(
         &self,
         event_id: &EventId,
@@ -1408,8 +1421,7 @@ impl Stave {
     ) -> Shape {
         Self::note_shape_unscaled(
             (*at, at + note.duration),
-            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - note.pitch) as Pix
-                * Viewport::DEFAULT_HALF_TONE_STEP,
+            Self::default_pitch_y(&note.pitch),
             Viewport::DEFAULT_HALF_TONE_STEP,
             color.unwrap_or(
                 self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
@@ -1574,27 +1586,24 @@ impl Stave {
         }
     }
 
-    fn draw_track_cc(
+    fn default_track_cc(
         &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
     ) -> Option<Shape> {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-                let shape = self.paint_note(
-                    (last_damper_value.0, event.at),
-                    *y,
-                    *half_tone_step,
-                    self.note_color(&last_damper_value.1, false),
-                );
-                *last_damper_value = (event.at, cc.value);
-                return Some(shape);
-            }
+            let shape = Self::note_shape_unscaled(
+                (last_damper_value.0, event.at),
+                Self::default_pitch_y(&PIANO_DAMPER_LANE),
+                Viewport::DEFAULT_HALF_TONE_STEP,
+                self.note_color(&last_damper_value.1, false),
+            );
+            *last_damper_value = (event.at, cc.value);
+            Some(shape)
+        } else {
+            None
         }
-        None
     }
 
     fn draw_grid(
