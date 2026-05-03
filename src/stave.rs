@@ -158,8 +158,7 @@ impl Viewport {
         1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
     // FIXME Keep only one scale constant. Calculated value is about 1/1000,
     //       rounding it to better see where scroll jerking/shimmering comes.
-    const DEFAULT_TIME_SCALE_DBG_INV: Time = 1000;
-    // 1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
+    const DEFAULT_TIME_SCALE_DBG_INV: Time = 1000; // approx (1/DEFAULT_TIME_SCALE)
 
     const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
 
@@ -175,10 +174,10 @@ impl Viewport {
     }
 
     pub fn lanes_default_y_range() -> Rangef {
+        // FIXME Check y ranges (piano keys vs stave lanes vs view rect)
         Rangef::new(
             0.0,
-            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix
-                * Viewport::DEFAULT_HALF_TONE_STEP,
+            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix * Viewport::DEFAULT_HALF_TONE_STEP,
         )
     }
 
@@ -214,6 +213,10 @@ impl Viewport {
             ),
             self.lanes_y_range(),
         )
+    }
+
+    pub fn pitch_y_default(pitch: &Pitch) -> f32 {
+        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
@@ -291,21 +294,6 @@ pub struct Stave {
     //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
     //   * No need to allocate meshes every time
     meshes: RefCell<Meshes>,
-}
-
-// TODO This should replace EditTransition
-struct AnimationTransition {
-    a: Mesh,
-    b: Mesh,
-}
-
-impl AnimationTransition {
-    fn from_changeset(changeset: &Changeset) {}
-
-    // Interpolation coefficient [0.0..1.0] between previous and current.
-    fn current(animation: f32) {
-        // TODO implement interpolation betweeen a and b
-    }
 }
 
 /**
@@ -651,15 +639,13 @@ impl Stave {
                 }
                 match &event.event {
                     TrackEventType::Note(note) => {
-                        let shape = self.track_note_shape_default(&event, &note);
+                        let shape = self.note_event_shape_default(&event, &note);
                         tessellator.tessellate_shape(shape, &mut meshes.default);
                     }
                     TrackEventType::Controller(cc) => {
-                        if let Some(shape) = self.default_track_cc(
-                            &mut last_damper_value,
-                            &event,
-                            &cc,
-                        ) {
+                        if let Some(shape) =
+                            self.default_track_cc_shape(&mut last_damper_value, &event, &cc)
+                        {
                             tessellator.tessellate_shape(shape, &mut meshes.default);
                         }
                     }
@@ -1115,7 +1101,7 @@ impl Stave {
             return self
                 .history
                 .read()
-                .expect("Read stave.history.")
+                .expect("Read stave history.")
                 .with_track(|track| {
                     track
                         .events
@@ -1137,7 +1123,7 @@ impl Stave {
             return self
                 .history
                 .read()
-                .expect("Read stave.history.")
+                .expect("Read stave history.")
                 .with_track(move |track| {
                     track
                         .events
@@ -1355,8 +1341,8 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.paint_track_note_unscaled2(id_a, at_a, a, None),
-                self.paint_track_note_unscaled2(id_b, at_b, b, None),
+                self.track_note_shape_default(id_a, at_a, a, None),
+                self.track_note_shape_default(id_b, at_b, b, None),
             )),
             // New note
             (
@@ -1367,8 +1353,8 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.paint_track_note_unscaled2(id_b, at_b, b, Some(COLOR_NOTHING)),
-                self.paint_track_note_unscaled2(id_b, at_b, b, None),
+                self.track_note_shape_default(id_b, at_b, b, Some(COLOR_NOTHING)),
+                self.track_note_shape_default(id_b, at_b, b, None),
             )),
             // Deleted note
             (
@@ -1379,8 +1365,8 @@ impl Stave {
                 }),
                 None,
             ) => Some((
-                self.paint_track_note_unscaled2(id_a, at_a, a, None),
-                self.paint_track_note_unscaled2(id_a, at_a, a, Some(COLOR_NOTHING)),
+                self.track_note_shape_default(id_a, at_a, a, None),
+                self.track_note_shape_default(id_a, at_a, a, Some(COLOR_NOTHING)),
             )),
             _ => None,
         }
@@ -1394,34 +1380,21 @@ impl Stave {
         }
     }
 
-    fn lane_y_unscaled(lane: Pitch) -> Pix {
-        (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - lane) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
-    }
-
     // TODO (cleanup) Remove now redundant painting procedures
-    fn track_note_shape_default(&self, event: &TrackEvent, note: &Note) -> Shape {
-        Self::note_shape_unscaled(
-            (event.at, event.at + note.duration),
-            Self::lane_y_unscaled(note.pitch),
-            Viewport::DEFAULT_HALF_TONE_STEP,
-            self.note_color(&note.velocity, self.note_selection.contains(&event.id)),
-        )
+    fn note_event_shape_default(&self, event: &TrackEvent, note: &Note) -> Shape {
+        self.track_note_shape_default(&event.id, &event.at, note, None)
     }
 
-    fn default_pitch_y(pitch: &Pitch) -> f32 {
-        (PIANO_KEY_COUNT + PIANO_LOWEST_KEY - pitch) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
-    }
-
-    fn paint_track_note_unscaled2(
+    fn track_note_shape_default(
         &self,
         event_id: &EventId,
         at: &Time,
         note: &Note,
         color: Option<Color32>,
     ) -> Shape {
-        Self::note_shape_unscaled(
+        Self::note_shape_default(
             (*at, at + note.duration),
-            Self::default_pitch_y(&note.pitch),
+            Viewport::pitch_y_default(&note.pitch),
             Viewport::DEFAULT_HALF_TONE_STEP,
             color.unwrap_or(
                 self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
@@ -1429,7 +1402,7 @@ impl Stave {
         )
     }
 
-    fn note_shape_unscaled(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
+    fn note_shape_default(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
                 x: (time_range.0 / Viewport::DEFAULT_TIME_SCALE_DBG_INV) as f32,
@@ -1512,6 +1485,7 @@ impl Stave {
     }
 
     fn cc_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
+        let y: f32 = Viewport::pitch_y_default(&PIANO_DAMPER_LANE);
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
@@ -1527,13 +1501,13 @@ impl Stave {
             ) => Some((
                 Self::point_accent_shape_default(
                     *at_a,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&a.value, false),
                 ),
                 Self::point_accent_shape_default(
                     *at_b,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&b.value, false),
                 ),
@@ -1549,13 +1523,13 @@ impl Stave {
             ) => Some((
                 Self::point_accent_shape_default(
                     *at_b,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&b.value, false),
                 ),
                 Self::point_accent_shape_default(
                     *at_b,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&b.value, false),
                 ),
@@ -1571,13 +1545,13 @@ impl Stave {
             ) => Some((
                 Self::point_accent_shape_default(
                     *at_a,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&a.value, false),
                 ),
                 Self::point_accent_shape_default(
                     *at_a,
-                    Self::lane_y_unscaled(PIANO_DAMPER_LANE),
+                    y,
                     Viewport::DEFAULT_HALF_TONE_STEP,
                     self.note_color(&a.value, false),
                 ),
@@ -1586,16 +1560,16 @@ impl Stave {
         }
     }
 
-    fn default_track_cc(
+    fn default_track_cc_shape(
         &self,
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
     ) -> Option<Shape> {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            let shape = Self::note_shape_unscaled(
+            let shape = Self::note_shape_default(
                 (last_damper_value.0, event.at),
-                Self::default_pitch_y(&PIANO_DAMPER_LANE),
+                Viewport::pitch_y_default(&PIANO_DAMPER_LANE),
                 Viewport::DEFAULT_HALF_TONE_STEP,
                 self.note_color(&last_damper_value.1, false),
             );
@@ -1736,4 +1710,38 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::{Stave, Viewport, STAVE_KEY_LANES};
+    use crate::Pix;
+    use crate::track_history::TrackHistory;
+    use eframe::egui::{Pos2, Rangef, Rect};
+    use std::path::PathBuf;
+    use std::sync::{Arc, RwLock};
+    use crate::range::{Range, RangeLike};
+    use crate::track::Pitch;
+
+    #[test]
+    fn check_lanes_y_scaling() {
+        // let history = Arc::new(RwLock::new(TrackHistory::with_directory(&PathBuf::from(
+        //     "target",
+        // ))));
+        // let stave = Stave::new(history);
+
+        let viewport = Viewport {
+            time_range: (0, 2000),
+            view_rect: Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 { x: 200.0, y: 100.0 },
+            },
+        };
+
+        let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
+        dbg!(&pitches);
+        for p in STAVE_KEY_LANES.range() {
+            let pitch_y = pitches.get(&p);
+            let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
+            dbg!(pitch_y.unwrap() - translated_y);
+            assert!((pitch_y.unwrap() - &translated_y).abs() < 0.1f32);
+        }
+    }
+}
