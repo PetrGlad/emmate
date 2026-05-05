@@ -154,11 +154,9 @@ impl Viewport {
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
     // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
-    const DEFAULT_TIME_SCALE: Pix =
-        1.0 / (Self::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) as Pix;
     // FIXME Keep only one scale constant. Calculated value is about 1/1000,
     //       rounding it to better see where scroll jerking/shimmering comes.
-    const DEFAULT_TIME_SCALE_DBG_INV: Time = 1000; // approx (1/DEFAULT_TIME_SCALE)
+    const DEFAULT_TIME_SCALE_DENOM: Time = 7000;
 
     const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
 
@@ -191,16 +189,16 @@ impl Viewport {
     #[inline]
     pub fn x_from_time(&self, at: Time) -> Pix {
         debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.min.x + (at as f32 - self.time_range.0 as f32) * self.time_scale()
+        self.view_rect.min.x + (at - self.time_range.0) as f32 * self.time_scale()
     }
 
     #[inline]
     pub fn x_from_default(&self, x_default: Pix) -> Pix {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x
-            + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DBG_INV) as f32)
+            + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DENOM) as f32)
                 * self.time_scale()
-                * Self::DEFAULT_TIME_SCALE_DBG_INV as f32
+                * Self::DEFAULT_TIME_SCALE_DENOM as f32
     }
 
     #[inline]
@@ -208,7 +206,7 @@ impl Viewport {
         emath::remap(
             *y,
             Rangef::new(
-                0.0,
+                Viewport::DEFAULT_HALF_TONE_STEP,
                 Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
             ),
             self.lanes_y_range(),
@@ -216,7 +214,7 @@ impl Viewport {
     }
 
     pub fn pitch_y_default(pitch: &Pitch) -> f32 {
-        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
+        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - 1) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
     }
 
     pub fn time_from_x(&self, x: Pix) -> Time {
@@ -1405,11 +1403,11 @@ impl Stave {
     fn note_shape_default(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
-                x: (time_range.0 / Viewport::DEFAULT_TIME_SCALE_DBG_INV) as f32,
+                x: (time_range.0 / Viewport::DEFAULT_TIME_SCALE_DENOM) as f32,
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: (time_range.1 / Viewport::DEFAULT_TIME_SCALE_DBG_INV) as f32,
+                x: (time_range.1 / Viewport::DEFAULT_TIME_SCALE_DENOM) as f32,
                 y: y + height * 0.45,
             },
         };
@@ -1445,7 +1443,7 @@ impl Stave {
     fn point_accent_shape_default(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
         Shape::circle_filled(
             Pos2 {
-                x: time as f32 * Viewport::DEFAULT_TIME_SCALE,
+                x: time as f32 / Viewport::DEFAULT_TIME_SCALE_DENOM as f32,
                 y,
             },
             height / 2.2,
@@ -1711,37 +1709,61 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::{Stave, Viewport, STAVE_KEY_LANES};
+    use super::{Stave, Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES};
     use crate::Pix;
     use crate::track_history::TrackHistory;
     use eframe::egui::{Pos2, Rangef, Rect};
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
+    use crate::common::Time;
     use crate::range::{Range, RangeLike};
     use crate::track::Pitch;
 
     #[test]
-    fn check_lanes_y_scaling() {
-        // let history = Arc::new(RwLock::new(TrackHistory::with_directory(&PathBuf::from(
-        //     "target",
-        // ))));
-        // let stave = Stave::new(history);
-
+    fn check_default_lanes_y_scaling() {
         let viewport = Viewport {
             time_range: (0, 2000),
             view_rect: Rect {
                 min: Pos2 { x: 0.0, y: 0.0 },
-                max: Pos2 { x: 200.0, y: 100.0 },
+                max: Pos2 { x: 200.0, y: 108.0 },
             },
         };
-
+        dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.0));
+        dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
         let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
-        dbg!(&pitches);
+        dbg!(step, &pitches);
+        assert_eq!(Viewport::pitch_y_default(&PIANO_LOWEST_KEY), Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32);
+        assert_eq!(Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)), 0.0);
         for p in STAVE_KEY_LANES.range() {
             let pitch_y = pitches.get(&p);
             let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
-            dbg!(pitch_y.unwrap() - translated_y);
-            assert!((pitch_y.unwrap() - &translated_y).abs() < 0.1f32);
+            dbg!(p, &pitch_y.unwrap(), translated_y, pitch_y.unwrap() - translated_y);
+            assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
         }
+    }
+
+    #[test]
+    fn check_time_x_scaling() {
+        let viewport = Viewport {
+            time_range: (0, 2_345_678),
+            view_rect: Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 { x: 1000.0, y: 108.0 },
+            },
+        };
+        for t in [-13, 0, 1234, 23, 100006] {
+            assert!((viewport.time_from_x(viewport.x_from_time(t)) - t).abs() <= 1);
+        }
+        for x in [-3.3, 0.0, 0.01, 0.044, 134.0, 1.8765444e7] {
+            assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
+        }
+        dbg!((Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)), Viewport::DEFAULT_TIME_SCALE_DENOM);
+        assert!((Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) < Viewport::DEFAULT_TIME_SCALE_DENOM);
+        // dbg!(Viewport::DEFAULT_TIME_SCALE, Viewport::DEFAULT_TIME_SCALE_DBG_INV);
+        // dbg!((1.0 / Viewport::DEFAULT_TIME_SCALE - Viewport::DEFAULT_TIME_SCALE_DBG_INV as f32).abs());
+        // assert!((1.0 / Viewport::DEFAULT_TIME_SCALE - Viewport::DEFAULT_TIME_SCALE_DBG_INV as f32).abs() < 0.001);
+
+        dbg!(viewport.x_from_default(123.0), viewport.x_from_default(123.0) * Viewport::DEFAULT_TIME_SCALE_DENOM as f32);
+        assert!((viewport.x_from_default(123.0) / Viewport::DEFAULT_TIME_SCALE_DENOM as f32) <= 0.01);
     }
 }
