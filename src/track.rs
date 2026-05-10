@@ -106,7 +106,7 @@ impl Track {
         self.events = snapshot.events;
     }
 
-    fn index_events(&self) -> HashMap<EventId, TrackEvent> {
+    pub fn index_events(&self) -> HashMap<EventId, TrackEvent> {
         let mut track_map = HashMap::with_capacity(self.events.len());
         for ev in &self.events {
             track_map.insert(ev.id, ev.clone());

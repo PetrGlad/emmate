@@ -16,14 +16,14 @@ use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 use eframe::emath;
 use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -308,6 +308,10 @@ This is split into stages to shift most frequent updates later so we can re-use 
 struct Meshes {
     // Track version id, used to detect changes in events (edit changes).
     version_id: VersionId,
+
+    // TODO (cleanup) This map can be cached in the tack itself, but need to ensure
+    //      it is updated after each track change.
+    events: HashMap<EventId, TrackEvent>,
 
     // Beginning and end of ongoing animation.
     // TODO Use AnimationTransition
@@ -595,12 +599,13 @@ impl Stave {
 
         // TODO Use tesselator scale from settings.
         let mut tessel_options = TessellationOptions::default();
-        tessel_options.feathering = false;
+        tessel_options.feathering = true;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
         let mut meshes = self.meshes.borrow_mut();
         let has_version_changed = meshes.version_id != version_id;
         if has_version_changed {
+            meshes.events = track.index_events();
             // (!) Assuming vertice indices will not change in subsequent transformations.
             meshes.out_events.clear();
             meshes.default.clear();
@@ -723,24 +728,27 @@ impl Stave {
             debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
             meshes.out = Arc::new(mesh);
         }
-
         painter.add(Shape::mesh(meshes.out.to_owned()));
 
+        // Contains shapes that may change every frame, not caching it.
+        let mut transients_mesh = Mesh::default();
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
+            // XXX Linear lookup. This and other parts of this pipeline can be optimized
+            // with a spatial tree, but it is fast enough for now.
             for triangle in 0..meshes.out_events.len() {
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
-                    *note_hovered = Some(meshes.out_events[triangle]);
-
+                    let hovered_event_id = meshes.out_events[triangle];
+                    *note_hovered = Some(hovered_event_id);
+                    let ev = meshes
+                        .events
+                        .get(&hovered_event_id)
+                        .expect("hovered event is on the track");
+                    if let Some(hover_shape) = Stave::hover_shape_default(&ev) {
+                        tessellator.tessellate_shape(hover_shape, &mut transients_mesh);
+                    }
                     // Hover temporary stub:
-                    painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
-                    // TODO Reimplement hovered note highlighting
-                    // painter.rect_stroke(
-                    //      r,
-                    //     CornerRadius::ZERO,
-                    //     Stroke::new(2.0, COLOR_HOVERED),
-                    //     StrokeKind::Inside,
-                    // );
+                    // painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     break;
                 }
 
@@ -754,6 +762,11 @@ impl Stave {
                 // }
             }
         }
+        for v in &mut transients_mesh.vertices {
+            v.pos.y = self.viewport.y_from_default(&v.pos.y);
+            v.pos.x = self.viewport.x_from_default(v.pos.x);
+        }
+        painter.add(Shape::mesh(transients_mesh));
 
         draw_selection_hints(
             &painter,
@@ -1395,26 +1408,46 @@ impl Stave {
     ) -> Shape {
         Self::note_shape_default(
             (*at, at + note.duration),
-            Viewport::pitch_y_default(&note.pitch),
-            Viewport::DEFAULT_HALF_TONE_STEP,
+            &note.pitch,
             color.unwrap_or(
                 self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
             ),
         )
     }
 
-    fn note_shape_default(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
+    fn note_shape_default(time_range: (Time, Time), pitch: &Pitch, color: Color32) -> Shape {
+        Shape::Rect(RectShape::filled(
+            Self::event_rect_default(time_range, &pitch),
+            CornerRadius::ZERO,
+            color,
+        ))
+    }
+
+    fn event_rect_default(time_range: (Time, Time), pitch: &Pitch) -> Rect {
+        let y = Viewport::pitch_y_default(&pitch);
         let paint_rect = Rect {
             min: Pos2 {
                 x: Viewport::x_default_from_time(time_range.0),
-                y: y - height * 0.45,
+                y: y - Viewport::DEFAULT_HALF_TONE_STEP * 0.45,
             },
             max: Pos2 {
                 x: Viewport::x_default_from_time(time_range.1),
-                y: y + height * 0.45,
+                y: y + Viewport::DEFAULT_HALF_TONE_STEP * 0.45,
             },
         };
-        Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
+        paint_rect
+    }
+
+    fn hover_shape_default(event: &TrackEvent) -> Option<Shape> {
+        match &event.event {
+            TrackEventType::Note(note) => Some(Shape::Rect(RectShape::stroke(
+                Self::event_rect_default((event.at, event.at + note.duration), &note.pitch),
+                CornerRadius::ZERO,
+                Stroke::new(2.0, COLOR_HOVERED),
+                StrokeKind::Outside,
+            ))),
+            _ => None,
+        }
     }
 
     // To draw note immediately (without intermediate meshes).
@@ -1570,8 +1603,7 @@ impl Stave {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
             let shape = Self::note_shape_default(
                 (last_damper_value.0, event.at),
-                Viewport::pitch_y_default(&PIANO_DAMPER_LANE),
-                Viewport::DEFAULT_HALF_TONE_STEP,
+                &PIANO_DAMPER_LANE,
                 self.note_color(&last_damper_value.1, false),
             );
             *last_damper_value = (event.at, cc.value);
@@ -1712,9 +1744,7 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES,
-    };
+    use super::{Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES};
     use crate::range::RangeLike;
     use crate::Pix;
     use eframe::egui::{Pos2, Rect};
