@@ -2,21 +2,21 @@ use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
-    ControllerSetValue, DEFAULT_CC_LEVEL, EventId, Level, MAX_LEVEL, MIDI_CC_SUSTAIN_ID, Note,
-    Pitch, Track, TrackEvent, TrackEventType, export_smf,
+    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track,
+    TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
 };
 use crate::track_edit::{
-    AppliedCommand, EditCommandId, accent_selected_notes, add_new_note, clear_bookmark,
-    delete_selected, set_bookmark, set_damper, shift_selected, shift_tail, stretch_selected_notes,
-    tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
+    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark,
+    set_damper, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{Pix, range};
+use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, Ui, Vec2,
 };
 use eframe::emath;
 use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
@@ -192,11 +192,20 @@ impl Viewport {
         self.view_rect.min.x + (at - self.time_range.0) as f32 * self.time_scale()
     }
 
+    pub fn time_from_x(&self, x: Pix) -> Time {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
+    }
+
+    pub fn x_default_from_time(at: Time) -> Pix {
+        (at as f64 / Self::DEFAULT_TIME_SCALE_DENOM as f64) as Pix
+    }
+
     #[inline]
     pub fn x_from_default(&self, x_default: Pix) -> Pix {
         debug_assert!(self.view_rect.width() > 0.0);
         self.view_rect.min.x
-            + (x_default - (self.time_range.0 / Self::DEFAULT_TIME_SCALE_DENOM) as f32)
+            + (x_default - Viewport::x_default_from_time(self.time_range.0))
                 * self.time_scale()
                 * Self::DEFAULT_TIME_SCALE_DENOM as f32
     }
@@ -214,12 +223,8 @@ impl Viewport {
     }
 
     pub fn pitch_y_default(pitch: &Pitch) -> f32 {
-        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - 1) as Pix * Viewport::DEFAULT_HALF_TONE_STEP
-    }
-
-    pub fn time_from_x(&self, x: Pix) -> Time {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
+        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - 1) as Pix
+            * Viewport::DEFAULT_HALF_TONE_STEP
     }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
@@ -392,8 +397,6 @@ impl Stave {
         );
     }
 
-    const NOTHING_ZONE: Range<Time> = (Time::MIN, 0);
-
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
         Frame::new()
             .inner_margin(Margin::symmetric(4.0 as i8, 4.0 as i8))
@@ -432,7 +435,7 @@ impl Stave {
                 }
                 self.draw_time_selection(
                     &painter,
-                    &Stave::NOTHING_ZONE,
+                    &(self.viewport.time_range.0, 0),
                     &Color32::from_black_alpha(15),
                 );
                 let mut note_hovered = None;
@@ -1403,11 +1406,11 @@ impl Stave {
     fn note_shape_default(time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
-                x: (time_range.0 / Viewport::DEFAULT_TIME_SCALE_DENOM) as f32,
+                x: Viewport::x_default_from_time(time_range.0),
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: (time_range.1 / Viewport::DEFAULT_TIME_SCALE_DENOM) as f32,
+                x: Viewport::x_default_from_time(time_range.1),
                 y: y + height * 0.45,
             },
         };
@@ -1443,7 +1446,7 @@ impl Stave {
     fn point_accent_shape_default(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
         Shape::circle_filled(
             Pos2 {
-                x: time as f32 / Viewport::DEFAULT_TIME_SCALE_DENOM as f32,
+                x: Viewport::x_default_from_time(time),
                 y,
             },
             height / 2.2,
@@ -1709,15 +1712,12 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::{Stave, Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES};
+    use super::{
+        Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES,
+    };
+    use crate::range::RangeLike;
     use crate::Pix;
-    use crate::track_history::TrackHistory;
-    use eframe::egui::{Pos2, Rangef, Rect};
-    use std::path::PathBuf;
-    use std::sync::{Arc, RwLock};
-    use crate::common::Time;
-    use crate::range::{Range, RangeLike};
-    use crate::track::Pitch;
+    use eframe::egui::{Pos2, Rect};
 
     #[test]
     fn check_default_lanes_y_scaling() {
@@ -1732,12 +1732,23 @@ mod tests {
         dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
         let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
         dbg!(step, &pitches);
-        assert_eq!(Viewport::pitch_y_default(&PIANO_LOWEST_KEY), Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32);
-        assert_eq!(Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)), 0.0);
+        assert_eq!(
+            Viewport::pitch_y_default(&PIANO_LOWEST_KEY),
+            Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32
+        );
+        assert_eq!(
+            Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)),
+            0.0
+        );
         for p in STAVE_KEY_LANES.range() {
             let pitch_y = pitches.get(&p);
             let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
-            dbg!(p, &pitch_y.unwrap(), translated_y, pitch_y.unwrap() - translated_y);
+            dbg!(
+                p,
+                &pitch_y.unwrap(),
+                translated_y,
+                pitch_y.unwrap() - translated_y
+            );
             assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
         }
     }
@@ -1748,7 +1759,10 @@ mod tests {
             time_range: (0, 2_345_678),
             view_rect: Rect {
                 min: Pos2 { x: 0.0, y: 0.0 },
-                max: Pos2 { x: 1000.0, y: 108.0 },
+                max: Pos2 {
+                    x: 1000.0,
+                    y: 108.0,
+                },
             },
         };
         for t in [-13, 0, 1234, 23, 100006] {
@@ -1757,13 +1771,33 @@ mod tests {
         for x in [-3.3, 0.0, 0.01, 0.044, 134.0, 1.8765444e7] {
             assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
         }
-        dbg!((Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)), Viewport::DEFAULT_TIME_SCALE_DENOM);
-        assert!((Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)) < Viewport::DEFAULT_TIME_SCALE_DENOM);
-        // dbg!(Viewport::DEFAULT_TIME_SCALE, Viewport::DEFAULT_TIME_SCALE_DBG_INV);
-        // dbg!((1.0 / Viewport::DEFAULT_TIME_SCALE - Viewport::DEFAULT_TIME_SCALE_DBG_INV as f32).abs());
-        // assert!((1.0 / Viewport::DEFAULT_TIME_SCALE - Viewport::DEFAULT_TIME_SCALE_DBG_INV as f32).abs() < 0.001);
+        dbg!(
+            (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
+            Viewport::DEFAULT_TIME_SCALE_DENOM
+        );
+        assert!(
+            (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS))
+                < Viewport::DEFAULT_TIME_SCALE_DENOM
+        );
 
-        dbg!(viewport.x_from_default(123.0), viewport.x_from_default(123.0) * Viewport::DEFAULT_TIME_SCALE_DENOM as f32);
-        assert!((viewport.x_from_default(123.0) / Viewport::DEFAULT_TIME_SCALE_DENOM as f32) <= 0.01);
+        for t in [
+            -123454321,
+            -33001,
+            0,
+            33,
+            1564,
+            7000,
+            8321,
+            123_000_098,
+            Viewport::ZOOM_TIME_LIMIT,
+        ] {
+            let tt = viewport.x_from_default(Viewport::x_default_from_time(t));
+            assert!(
+                (viewport.x_from_default(Viewport::x_default_from_time(t))
+                    - viewport.x_from_time(t))
+                .abs()
+                    < 0.01
+            );
+        }
     }
 }

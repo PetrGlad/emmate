@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use eframe::egui::{Modifiers, Vec2};
-use eframe::{self, egui, CreationContext};
+use eframe::egui::{Modifiers, Ui, Vec2};
+use eframe::{self, egui, CreationContext, Frame};
 use egui_extras::{Size, StripBuilder};
 
 use crate::common::Time;
@@ -93,6 +93,7 @@ impl EmApp {
 }
 
 impl eframe::App for EmApp {
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
