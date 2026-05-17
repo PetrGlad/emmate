@@ -132,7 +132,7 @@ type TimeRange = Range<Time>;
 #[derive(Clone, PartialEq)]
 pub struct Viewport {
     /// Starting and ending moment of track's visible time range.
-    pub time_range: TimeRange,
+    time_range: TimeRange,
     /// The widget's displayed rectangle coordinates.
     view_rect: Rect,
 }
@@ -153,13 +153,6 @@ impl Viewport {
     // I would like to use Duration but that is not "const compatible" yet.
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
-    // Some reasonable scale to fit ZOOM_TIME_LIMIT into Pix for pre-backed meshes.
-    // FIXME Keep only one scale constant. Calculated value is about 1/1000,
-    //       rounding it to better see where scroll jerking/shimmering comes.
-    const DEFAULT_TIME_SCALE_DENOM: Time = 7000;
-
-    const DEFAULT_HALF_TONE_STEP: Pix = 10.0;
-
     pub fn lanes_y_half_tone(&self) -> f32 {
         self.view_rect.height() / STAVE_KEY_LANES.len() as f32
     }
@@ -168,14 +161,6 @@ impl Viewport {
         Rangef::new(
             self.view_rect.top() + self.lanes_y_half_tone() / 2.0,
             self.view_rect.bottom() - self.lanes_y_half_tone() / 2.0,
-        )
-    }
-
-    pub fn lanes_default_y_range() -> Rangef {
-        // FIXME Check y ranges (piano keys vs stave lanes vs view rect)
-        Rangef::new(
-            0.0,
-            (PIANO_KEY_COUNT + PIANO_LOWEST_KEY) as Pix * Viewport::DEFAULT_HALF_TONE_STEP,
         )
     }
 
@@ -197,35 +182,26 @@ impl Viewport {
         self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
     }
 
-    pub fn x_default_from_time(at: Time) -> Pix {
-        (at as f64 / Self::DEFAULT_TIME_SCALE_DENOM as f64) as Pix
-    }
+    // #[inline]
+    // pub fn x_from_default(&self, x_default: Pix) -> Pix {
+    //     debug_assert!(self.view_rect.width() > 0.0);
+    //     self.view_rect.min.x
+    //         + (x_default - Viewport::x_default_from_time(self.time_range.0))
+    //             * self.time_scale()
+    //             * Self::DEFAULT_TIME_SCALE_DENOM as f32
+    // }
 
-    #[inline]
-    pub fn x_from_default(&self, x_default: Pix) -> Pix {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.min.x
-            + (x_default - Viewport::x_default_from_time(self.time_range.0))
-                * self.time_scale()
-                * Self::DEFAULT_TIME_SCALE_DENOM as f32
-    }
-
-    #[inline]
-    pub fn y_from_default(&self, y: &Pix) -> Pix {
-        emath::remap(
-            *y,
-            Rangef::new(
-                Viewport::DEFAULT_HALF_TONE_STEP,
-                Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
-            ),
-            self.lanes_y_range(),
-        )
-    }
-
-    pub fn pitch_y_default(pitch: &Pitch) -> f32 {
-        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - 1) as Pix
-            * Viewport::DEFAULT_HALF_TONE_STEP
-    }
+    // #[inline]
+    // pub fn y_from_default(&self, y: &Pix) -> Pix {
+    //     emath::remap(
+    //         *y,
+    //         Rangef::new(
+    //             Viewport::DEFAULT_HALF_TONE_STEP,
+    //             Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
+    //         ),
+    //         self.lanes_y_range(),
+    //     )
+    // }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that time position under mouse pointer stays put.
@@ -314,22 +290,42 @@ struct Meshes {
     events: HashMap<EventId, TrackEvent>,
 
     // Beginning and end of ongoing animation.
-    // TODO Use AnimationTransition
     transition: Option<(Mesh, Mesh)>,
 
-    // Track drawn at some default scale that does not depend on current viewport
-    // (drawn with a pre-defined view port). This helps to skip notes tesselation when track
-    // events have not changed.
-    default: Mesh,
-    // Optimization: this field is not strictly necessary, but vertical scaling
-    // is performed less often, so keeping this partial apply.
-    scaled_y: Mesh,
-    // Lets tracking changes in view (zoom, scroll).
-    viewport: Viewport,
-    // Annotates out triangles with tract event ids.
+    // Evens painted at current vertical and horizontal scale, without xy shifts (at 0,0).
+    scaled: Mesh,
+
+    // Horizontal/vertical scaling.
+    height: Pix,
+    time_scale: f64,
+    // Scroll/translation.
+    time_start: Time,
+    xy: Pos2,
+
+    // Annotates resulting triangles with track event ids.
     // Used to detect hovers, and to show out-of-view selection hints.
     out_events: Vec<EventId>,
     out: Arc<Mesh>,
+}
+
+struct TYScale {
+    // Pix/uSec
+    time_scale: f64,
+    // Y step per lane
+    y_step: Pix,
+}
+
+impl TYScale {
+    #[inline]
+    pub fn x(&self, at: &Time) -> Pix {
+        (*at as f64 * self.time_scale) as Pix
+    }
+
+    #[inline]
+    pub fn y(&self, pitch: &Pitch) -> f32 {
+        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - CONTROL_LANES_COUNT) as Pix
+            * self.y_step
+    }
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
@@ -579,6 +575,13 @@ impl Stave {
         )
     }
 
+    fn shift_mesh(mesh: &mut Mesh, xy: &Pos2) {
+        for v in &mut mesh.vertices {
+            v.pos.x += xy.x;
+            v.pos.y += xy.y;
+        }
+    }
+
     fn paint_events(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
@@ -599,26 +602,35 @@ impl Stave {
 
         // TODO Use tesselator scale from settings.
         let mut tessel_options = TessellationOptions::default();
-        tessel_options.feathering = true;
+        tessel_options.feathering = false;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
         let mut meshes = self.meshes.borrow_mut();
         let has_version_changed = meshes.version_id != version_id;
-        if has_version_changed {
+
+        let height = self.viewport.view_rect.height();
+        let ty = TYScale {
+            y_step: height / STAVE_KEY_LANES.len() as f32,
+            time_scale: self.viewport.view_rect.width() as f64
+                / self.viewport.time_range.len() as f64,
+        };
+        let has_scale_changed = height != meshes.height || ty.time_scale != meshes.time_scale;
+
+        if has_version_changed || has_scale_changed {
             meshes.events = track.index_events();
             // (!) Assuming vertice indices will not change in subsequent transformations.
             meshes.out_events.clear();
-            meshes.default.clear();
+            meshes.scaled.clear();
 
             if let Some(trans) = &self.transition {
                 let mut before = Mesh::default();
                 let mut after = Mesh::default();
-                dbg!("anim-new/changes", &trans.changeset.changes.iter().take(5));
+                // dbg!("anim-new/changes", &trans.changeset.changes.iter().take(5));
                 for (_ev_id, action) in &trans.changeset.changes {
-                    if let Some((shape_a, shape_b)) = self.note_animation(action) {
+                    if let Some((shape_a, shape_b)) = self.note_animation(action, &ty) {
                         tessellator.tessellate_shape(shape_a, &mut before);
                         tessellator.tessellate_shape(shape_b, &mut after);
-                    } else if let Some((shape_a, shape_b)) = self.cc_animation(action) {
+                    } else if let Some((shape_a, shape_b)) = self.cc_animation(action, &ty) {
                         tessellator.tessellate_shape(shape_a, &mut before);
                         tessellator.tessellate_shape(shape_b, &mut after);
                     } else {
@@ -645,32 +657,33 @@ impl Stave {
                 }
                 match &event.event {
                     TrackEventType::Note(note) => {
-                        let shape = self.note_event_shape_default(&event, &note);
-                        tessellator.tessellate_shape(shape, &mut meshes.default);
+                        let shape = self.note_event_shape(&event, &note, &ty);
+                        tessellator.tessellate_shape(shape, &mut meshes.scaled);
                     }
                     TrackEventType::Controller(cc) => {
                         if let Some(shape) =
-                            self.default_track_cc_shape(&mut last_damper_value, &event, &cc)
+                            self.default_track_cc_shape(&mut last_damper_value, &event, &cc, &ty)
                         {
-                            tessellator.tessellate_shape(shape, &mut meshes.default);
+                            tessellator.tessellate_shape(shape, &mut meshes.scaled);
                         }
                     }
-                    // TODO Paint cursors separately? I would rather not to scale them.
                     TrackEventType::Bookmark => {
                         let shape = self.cursor_shape(
-                            &Viewport::lanes_default_y_range(),
+                            &self.viewport.view_rect.y_range(),
                             self.viewport.x_from_time(event.at),
                             Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         );
-                        tessellator.tessellate_shape(shape, &mut meshes.default);
+                        tessellator.tessellate_shape(shape, &mut meshes.scaled);
                     }
                 }
-                while meshes.out_events.len() < meshes.default.indices.len() / 3 {
+                while meshes.out_events.len() < meshes.scaled.indices.len() / 3 {
                     meshes.out_events.push(event.id);
                 }
             }
-            assert!(meshes.out_events.len() <= meshes.default.indices.len() / 3);
+            assert!(meshes.out_events.len() <= meshes.scaled.indices.len() / 3);
             meshes.version_id = version_id;
+            meshes.height = height;
+            meshes.time_scale = ty.time_scale;
         }
 
         let mut animated = Mesh::default();
@@ -695,42 +708,35 @@ impl Stave {
                 debug_assert!(animated.is_valid());
             }
         } else if meshes.transition.is_some() {
+            // Animation end.
             meshes.transition = None;
             meshes.version_id = -1; // Force repaint without animation parts next time.
             dbg!("anim-reset", meshes.version_id);
         }
+
         let is_animating = !animated.is_empty();
-
-        let y_range = self.viewport.view_rect.y_range();
-        // Vertical  scale does not change often. Doing it conditionally to optimize a bit.
-        if has_version_changed || meshes.viewport.view_rect.y_range() != y_range || is_animating {
-            meshes.scaled_y = meshes.default.clone();
-            meshes.scaled_y.append(animated);
-
-            // FIXME Adjust vertical note alignment. Refactor key_line_ys.
-            // TODO Cleanup lanes calculation, see also key_line_ys which is duplicated here.
-            for v in &mut meshes.scaled_y.vertices {
-                v.pos.y = self.viewport.y_from_default(&v.pos.y);
-            }
-            meshes.viewport.view_rect.set_top(y_range.min);
-            meshes.viewport.view_rect.set_bottom(y_range.max);
-        }
-
-        let has_viewport_changed = meshes.viewport != self.viewport;
-        if has_version_changed || has_viewport_changed || is_animating {
+        // Horizontal zoom and scrolling.
+        let has_position_changed = meshes.xy != self.viewport.view_rect.min
+            || meshes.time_start != self.viewport.time_range.0;
+        let shift = meshes.xy
+            + Vec2 {
+                x: -ty.x(&self.viewport.time_range.0),
+                y: 0f32,
+            };
+        if has_version_changed || has_scale_changed || has_position_changed || is_animating {
             let mut mesh = Mesh::default();
-            mesh.clone_from(&meshes.scaled_y);
-
-            for v in &mut mesh.vertices {
-                v.pos.x = self.viewport.x_from_default(v.pos.x);
-            }
-            meshes.viewport = self.viewport.clone();
-            debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
+            mesh.clone_from(&meshes.scaled);
+            mesh.append(animated);
+            Self::shift_mesh(&mut mesh, &shift);
+            meshes.xy = self.viewport.view_rect.min;
+            meshes.time_start = self.viewport.time_range.0;
+            // debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
             meshes.out = Arc::new(mesh);
         }
         painter.add(Shape::mesh(meshes.out.to_owned()));
 
-        // Contains shapes that may change every frame, not caching it.
+        // Contains shapes that may change every frame, not caching these.
+        // TODO (cleanup) Maybe animation should also be here.
         let mut transients_mesh = Mesh::default();
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
@@ -744,11 +750,9 @@ impl Stave {
                         .events
                         .get(&hovered_event_id)
                         .expect("hovered event is on the track");
-                    if let Some(hover_shape) = Stave::hover_shape_default(&ev) {
+                    if let Some(hover_shape) = Stave::hover_shape(&ev, &ty) {
                         tessellator.tessellate_shape(hover_shape, &mut transients_mesh);
                     }
-                    // Hover temporary stub:
-                    // painter.circle_filled(pointer_pos, 10.0, COLOR_HOVERED);
                     break;
                 }
 
@@ -762,10 +766,7 @@ impl Stave {
                 // }
             }
         }
-        for v in &mut transients_mesh.vertices {
-            v.pos.y = self.viewport.y_from_default(&v.pos.y);
-            v.pos.x = self.viewport.x_from_default(v.pos.x);
-        }
+        Self::shift_mesh(&mut transients_mesh, &shift);
         painter.add(Shape::mesh(transients_mesh));
 
         draw_selection_hints(
@@ -1340,7 +1341,7 @@ impl Stave {
         Shape::vline(x, *y_range, Stroke { width: 2.0, color })
     }
 
-    fn note_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
+    fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shape, Shape)> {
         debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
         match (action.before(), action.after()) {
             (
@@ -1355,8 +1356,8 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.track_note_shape_default(id_a, at_a, a, None),
-                self.track_note_shape_default(id_b, at_b, b, None),
+                self.track_note_shape(id_a, at_a, a, None, ty),
+                self.track_note_shape(id_b, at_b, b, None, ty),
             )),
             // New note
             (
@@ -1367,8 +1368,8 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.track_note_shape_default(id_b, at_b, b, Some(COLOR_NOTHING)),
-                self.track_note_shape_default(id_b, at_b, b, None),
+                self.track_note_shape(id_b, at_b, b, Some(COLOR_NOTHING), ty),
+                self.track_note_shape(id_b, at_b, b, None, ty),
             )),
             // Deleted note
             (
@@ -1379,8 +1380,8 @@ impl Stave {
                 }),
                 None,
             ) => Some((
-                self.track_note_shape_default(id_a, at_a, a, None),
-                self.track_note_shape_default(id_a, at_a, a, Some(COLOR_NOTHING)),
+                self.track_note_shape(id_a, at_a, a, None, ty),
+                self.track_note_shape(id_a, at_a, a, Some(COLOR_NOTHING), ty),
             )),
             _ => None,
         }
@@ -1395,53 +1396,54 @@ impl Stave {
     }
 
     // TODO (cleanup) Remove now redundant painting procedures
-    fn note_event_shape_default(&self, event: &TrackEvent, note: &Note) -> Shape {
-        self.track_note_shape_default(&event.id, &event.at, note, None)
+    fn note_event_shape(&self, event: &TrackEvent, note: &Note, ty: &TYScale) -> Shape {
+        self.track_note_shape(&event.id, &event.at, note, None, ty)
     }
 
-    fn track_note_shape_default(
+    fn track_note_shape(
         &self,
         event_id: &EventId,
         at: &Time,
         note: &Note,
         color: Option<Color32>,
+        ty: &TYScale,
     ) -> Shape {
-        Self::note_shape_default(
+        Self::note_shape(
             (*at, at + note.duration),
             &note.pitch,
             color.unwrap_or(
                 self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
             ),
+            ty,
         )
     }
 
-    fn note_shape_default(time_range: (Time, Time), pitch: &Pitch, color: Color32) -> Shape {
+    fn note_shape(time_range: (Time, Time), pitch: &Pitch, color: Color32, ty: &TYScale) -> Shape {
         Shape::Rect(RectShape::filled(
-            Self::event_rect_default(time_range, &pitch),
+            Self::event_rect(time_range, &pitch, ty),
             CornerRadius::ZERO,
             color,
         ))
     }
 
-    fn event_rect_default(time_range: (Time, Time), pitch: &Pitch) -> Rect {
-        let y = Viewport::pitch_y_default(&pitch);
-        let paint_rect = Rect {
+    fn event_rect(time_range: (Time, Time), pitch: &Pitch, ty: &TYScale) -> Rect {
+        let y = ty.y(&pitch);
+        Rect {
             min: Pos2 {
-                x: Viewport::x_default_from_time(time_range.0),
-                y: y - Viewport::DEFAULT_HALF_TONE_STEP * 0.45,
+                x: ty.x(&time_range.0),
+                y: y - ty.y_step * 0.45,
             },
             max: Pos2 {
-                x: Viewport::x_default_from_time(time_range.1),
-                y: y + Viewport::DEFAULT_HALF_TONE_STEP * 0.45,
+                x: ty.x(&time_range.1),
+                y: y + ty.y_step * 0.45,
             },
-        };
-        paint_rect
+        }
     }
 
-    fn hover_shape_default(event: &TrackEvent) -> Option<Shape> {
+    fn hover_shape(event: &TrackEvent, ty: &TYScale) -> Option<Shape> {
         match &event.event {
             TrackEventType::Note(note) => Some(Shape::Rect(RectShape::stroke(
-                Self::event_rect_default((event.at, event.at + note.duration), &note.pitch),
+                Self::event_rect((event.at, event.at + note.duration), &note.pitch, ty),
                 CornerRadius::ZERO,
                 Stroke::new(2.0, COLOR_HOVERED),
                 StrokeKind::Outside,
@@ -1476,13 +1478,13 @@ impl Stave {
         self.paint_note(x_range, y, height, self.note_color(&velocity, selected))
     }
 
-    fn point_accent_shape_default(time: Time, y: Pix, height: Pix, color: Color32) -> Shape {
+    fn point_accent_shape(time: &Time, pitch: &Pitch, color: Color32, ty: &TYScale) -> Shape {
         Shape::circle_filled(
             Pos2 {
-                x: Viewport::x_default_from_time(time),
-                y,
+                x: ty.x(time),
+                y: ty.y(pitch),
             },
-            height / 2.2,
+            ty.y_step / 2.2,
             color,
         )
     }
@@ -1518,76 +1520,75 @@ impl Stave {
         }
     }
 
-    fn cc_animation(&self, action: &EventAction) -> Option<(Shape, Shape)> {
-        let y: f32 = Viewport::pitch_y_default(&PIANO_DAMPER_LANE);
+    fn cc_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shape, Shape)> {
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
-                    id: id_a,
+                    id: _id_a,
                     at: at_a,
                     event: TrackEventType::Controller(a),
                 }),
                 Some(TrackEvent {
-                    id: id_b,
+                    id: _id_b,
                     at: at_b,
                     event: TrackEventType::Controller(b),
                 }),
             ) => Some((
-                Self::point_accent_shape_default(
-                    *at_a,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&a.value, false),
+                    ty,
                 ),
-                Self::point_accent_shape_default(
-                    *at_b,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&b.value, false),
+                    ty,
                 ),
             )),
             // New CC value
             (
                 None,
                 Some(TrackEvent {
-                    id: id_b,
+                    id: _id_b,
                     at: at_b,
                     event: TrackEventType::Controller(b),
                 }),
             ) => Some((
-                Self::point_accent_shape_default(
-                    *at_b,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&b.value, false),
+                    ty,
                 ),
-                Self::point_accent_shape_default(
-                    *at_b,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&b.value, false),
+                    ty,
                 ),
             )),
             // Deleted value
             (
                 Some(TrackEvent {
-                    id: id_a,
+                    id: _id_a,
                     at: at_a,
                     event: TrackEventType::Controller(a),
                 }),
                 None,
             ) => Some((
-                Self::point_accent_shape_default(
-                    *at_a,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&a.value, false),
+                    ty,
                 ),
-                Self::point_accent_shape_default(
-                    *at_a,
-                    y,
-                    Viewport::DEFAULT_HALF_TONE_STEP,
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
                     self.note_color(&a.value, false),
+                    ty,
                 ),
             )),
             _ => None,
@@ -1599,12 +1600,14 @@ impl Stave {
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
+        ty: &TYScale,
     ) -> Option<Shape> {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            let shape = Self::note_shape_default(
+            let shape = Self::note_shape(
                 (last_damper_value.0, event.at),
                 &PIANO_DAMPER_LANE,
                 self.note_color(&last_damper_value.1, false),
+                ty,
             );
             *last_damper_value = (event.at, cc.value);
             Some(shape)
@@ -1744,9 +1747,7 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 
 #[cfg(test)]
 mod tests {
-    use super::{Viewport, PIANO_KEY_COUNT, PIANO_KEY_LINES, PIANO_LOWEST_KEY, STAVE_KEY_LANES};
-    use crate::range::RangeLike;
-    use crate::Pix;
+    use super::Viewport;
     use eframe::egui::{Pos2, Rect};
 
     #[test]
@@ -1758,29 +1759,29 @@ mod tests {
                 max: Pos2 { x: 200.0, y: 108.0 },
             },
         };
-        dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.0));
-        dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
-        let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
-        dbg!(step, &pitches);
-        assert_eq!(
-            Viewport::pitch_y_default(&PIANO_LOWEST_KEY),
-            Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32
-        );
-        assert_eq!(
-            Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)),
-            0.0
-        );
-        for p in STAVE_KEY_LANES.range() {
-            let pitch_y = pitches.get(&p);
-            let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
-            dbg!(
-                p,
-                &pitch_y.unwrap(),
-                translated_y,
-                pitch_y.unwrap() - translated_y
-            );
-            assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
-        }
+        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.0));
+        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
+        // let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
+        // // dbg!(step, &pitches);
+        // assert_eq!(
+        //     Viewport::pitch_y_default(&PIANO_LOWEST_KEY),
+        //     Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32
+        // );
+        // assert_eq!(
+        //     Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)),
+        //     0.0
+        // );
+        // for p in STAVE_KEY_LANES.range() {
+        //     let pitch_y = pitches.get(&p);
+        //     let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
+        //     dbg!(
+        //         p,
+        //         &pitch_y.unwrap(),
+        //         translated_y,
+        //         pitch_y.unwrap() - translated_y
+        //     );
+        //     assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
+        // }
     }
 
     #[test]
@@ -1801,33 +1802,33 @@ mod tests {
         for x in [-3.3, 0.0, 0.01, 0.044, 134.0, 1.8765444e7] {
             assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
         }
-        dbg!(
-            (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
-            Viewport::DEFAULT_TIME_SCALE_DENOM
-        );
-        assert!(
-            (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS))
-                < Viewport::DEFAULT_TIME_SCALE_DENOM
-        );
+        // dbg!(
+        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
+        //     Viewport::DEFAULT_TIME_SCALE_DENOM
+        // );
+        // assert!(
+        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS))
+        //         < Viewport::DEFAULT_TIME_SCALE_DENOM
+        // );
 
-        for t in [
-            -123454321,
-            -33001,
-            0,
-            33,
-            1564,
-            7000,
-            8321,
-            123_000_098,
-            Viewport::ZOOM_TIME_LIMIT,
-        ] {
-            let tt = viewport.x_from_default(Viewport::x_default_from_time(t));
-            assert!(
-                (viewport.x_from_default(Viewport::x_default_from_time(t))
-                    - viewport.x_from_time(t))
-                .abs()
-                    < 0.01
-            );
-        }
+        // for t in [
+        //     -123454321,
+        //     -33001,
+        //     0,
+        //     33,
+        //     1564,
+        //     7000,
+        //     8321,
+        //     123_000_098,
+        //     Viewport::ZOOM_TIME_LIMIT,
+        // ] {
+        //     let tt = viewport.x_from_time(Viewport::x_default_from_time(t));
+        //     assert!(
+        //         (viewport.x_from_default(Viewport::x_default_from_time(t))
+        //             - viewport.x_from_time(t))
+        //         .abs()
+        //             < 0.01
+        //     );
+        // }
     }
 }
