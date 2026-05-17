@@ -325,6 +325,7 @@ impl TYScale {
     pub fn y(&self, pitch: &Pitch) -> f32 {
         (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - CONTROL_LANES_COUNT) as Pix
             * self.y_step
+            - self.y_step / 2.0
     }
 }
 
@@ -718,7 +719,8 @@ impl Stave {
         // Horizontal zoom and scrolling.
         let has_position_changed = meshes.xy != self.viewport.view_rect.min
             || meshes.time_start != self.viewport.time_range.0;
-        let shift = meshes.xy
+        let shift = self.viewport.view_rect.min
+            // Time scrolling
             + Vec2 {
                 x: -ty.x(&self.viewport.time_range.0),
                 y: 0f32,
