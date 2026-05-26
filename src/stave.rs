@@ -61,6 +61,7 @@ pub struct NoteDraw {
 #[derive(Debug, Default)]
 pub struct NotesSelection {
     selected: HashSet<EventId>,
+    version: u64,
 }
 
 impl NotesSelection {
@@ -70,6 +71,7 @@ impl NotesSelection {
         } else {
             self.selected.insert(*id);
         }
+        self.version += 1;
     }
 
     fn contains(&self, ev_id: &EventId) -> bool {
@@ -78,6 +80,7 @@ impl NotesSelection {
 
     fn clear(&mut self) {
         self.selected.clear();
+        self.version += 1;
     }
 
     pub fn count(&self) -> usize {
@@ -282,8 +285,12 @@ This is split into stages to shift most frequent updates later so we can re-use 
 */
 #[derive(Default, Clone)]
 struct Meshes {
+    // TODO (cleanup) This change tracing becomes a bit tedious. Is there a generic implementation?
     // Track version id, used to detect changes in events (edit changes).
     version_id: VersionId,
+    // Track selection changes.
+    selection_version: u64,
+    time_selection: Option<Range<Time>>,
 
     // TODO (cleanup) This map can be cached in the tack itself, but need to ensure
     //      it is updated after each track change.
@@ -308,6 +315,7 @@ struct Meshes {
     out: Arc<Mesh>,
 }
 
+// Holds time (x) and vertical (y, lanes) scaling for stave.
 struct TYScale {
     // Pix/uSec
     time_scale: f64,
@@ -594,6 +602,7 @@ impl Stave {
         track: &Track,
     ) -> Option<range::Range<Time>> {
         let x_range = painter.clip_rect().x_range();
+        // TODO Restore view shifts on edit.
         let mut should_be_visible = None;
 
         let font_tex_size = [0, 0]; // unused
@@ -606,6 +615,8 @@ impl Stave {
 
         let mut meshes = self.meshes.borrow_mut();
         let has_version_changed = meshes.version_id != version_id;
+        let has_selection_changed = meshes.selection_version != self.note_selection.version
+            || meshes.time_selection != self.time_selection;
 
         let height = self.viewport.view_rect.height();
         let ty = TYScale {
@@ -615,7 +626,7 @@ impl Stave {
         };
         let has_scale_changed = height != meshes.height || ty.time_scale != meshes.time_scale;
 
-        if has_version_changed || has_scale_changed {
+        if has_version_changed || has_scale_changed || has_selection_changed {
             meshes.events = track.index_events();
             // (!) Assuming vertice indices will not change in subsequent transformations.
             meshes.out_events.clear();
@@ -681,6 +692,8 @@ impl Stave {
             }
             assert!(meshes.out_events.len() <= meshes.scaled.indices.len() / 3);
             meshes.version_id = version_id;
+            meshes.selection_version = self.note_selection.version;
+            meshes.time_selection = self.time_selection;
             meshes.height = height;
             meshes.time_scale = ty.time_scale;
         }
@@ -723,7 +736,12 @@ impl Stave {
                 x: -ty.x(&self.viewport.time_range.0),
                 y: 0f32,
             };
-        if has_version_changed || has_scale_changed || has_position_changed || is_animating {
+        if has_version_changed
+            || has_scale_changed
+            || has_selection_changed
+            || has_position_changed
+            || is_animating
+        {
             let mut mesh = Mesh::default();
             mesh.clone_from(&meshes.scaled);
             mesh.append(animated);
@@ -738,17 +756,21 @@ impl Stave {
         // Contains shapes that may change every frame, not caching these.
         // TODO (cleanup) Maybe animation meshes should also be here.
         let mut transients_mesh = Mesh::default();
-        // FIXME (optimization) Linear lookup (see also selection hints). This and other parts of this
+        // TODO (optimization) Linear lookup (see also selection hints). This and other parts of this
         //  pipeline can be optimized with a spatial tree, but it is fast enough for now.
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
             for triangle in 0..meshes.out_events.len() {
+                let event_id = meshes.out_events[triangle];
+                // if self.note_selection.contains(&event_id) {
+                //     let (a, b, c) = nth_triangle_indices(&meshes.out, triangle);
+                //     transients_mesh.(a, b, c);
+                // }
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
-                    let hovered_event_id = meshes.out_events[triangle];
-                    *note_hovered = Some(hovered_event_id);
+                    *note_hovered = Some(event_id);
                     let ev = meshes
                         .events
-                        .get(&hovered_event_id)
+                        .get(&event_id)
                         .expect("hovered event is on the track");
                     if let Some(hover_shape) = Stave::hover_shape(&ev, &ty) {
                         tessellator.tessellate_shape(hover_shape, &mut transients_mesh);
@@ -757,7 +779,7 @@ impl Stave {
                 }
             }
         }
-        /* Paint soem sign at the visible border of the stave to hint that
+        /* Paint some sign at the visible border of the stave to hint that
         there are also selected events that are not currently visible,
         This should help avoiding inadvertent edits. */
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
@@ -765,6 +787,7 @@ impl Stave {
         for event in &track.events {
             if let TrackEventType::Note(note) = &event.event {
                 if self.note_selection.contains(&event.id) {
+                    // // Visibility can also be determined by comparing triangles coordinate's.
                     if x_range.max < ty.x(&event.at) + shift.x {
                         selection_hints_right.insert(note.pitch);
                     } else if ty.x(&(event.at + note.duration)) + shift.x < x_range.min {
@@ -1742,6 +1765,16 @@ fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
 
     (c1 >= 0.0 && c2 >= 0.0 && c3 >= 0.0) || (c1 <= 0.0 && c2 <= 0.0 && c3 <= 0.0)
 }
+
+// #[inline]
+// fn nth_triangle_indices(mesh: &Mesh, triangle_idx: usize) -> (u32, u32, u32) {
+//     let idx = triangle_idx * 3;
+//     (
+//         mesh.indices[idx],
+//         mesh.indices[idx + 1],
+//         mesh.indices[idx + 2],
+//     )
+// }
 
 #[inline]
 fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {

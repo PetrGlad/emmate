@@ -1,6 +1,5 @@
 use crate::track_history::TrackHistory;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::fs;
 use std::path::{absolute, Path, PathBuf};
 use std::sync::{Arc, RwLock};

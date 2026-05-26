@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use eframe::egui::{Modifiers, Ui, Vec2};
-use eframe::{self, egui, CreationContext, Frame};
+use eframe::egui::{Modifiers, Vec2};
+use eframe::{self, egui, CreationContext};
 use egui_extras::{Size, StripBuilder};
 
 use crate::common::Time;
@@ -93,7 +93,6 @@ impl EmApp {
 }
 
 impl eframe::App for EmApp {
-
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
@@ -128,14 +127,18 @@ impl eframe::App for EmApp {
                     egui::Key::PageUp,
                 ))
             }) {
-                self.stave.viewport.scroll_by(ctx.available_rect().width() / -4.0);
+                self.stave
+                    .viewport
+                    .scroll_by(ctx.available_rect().width() / -4.0);
             } else if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     Modifiers::NONE,
                     egui::Key::PageDown,
                 ))
             }) {
-                self.stave.viewport.scroll_by(ctx.available_rect().width() / 4.0);
+                self.stave
+                    .viewport
+                    .scroll_by(ctx.available_rect().width() / 4.0);
             }
 
             {
@@ -193,17 +196,29 @@ impl eframe::App for EmApp {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave.history.write().expect("Write stave.history.").undo(&mut vec![]);
+                                self.stave
+                                    .history
+                                    .write()
+                                    .expect("Write stave.history.")
+                                    .undo(&mut vec![]);
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave.history.write().expect("Write stave.history.").redo(&mut vec![]);
+                                self.stave
+                                    .history
+                                    .write()
+                                    .expect("Write stave.history.")
+                                    .redo(&mut vec![]);
                             }
                         });
                         ui.horizontal(|ui| {
                             // Status line
                             ui.label(format!(
                                 "track_len={}  n_sel={}  t_sel={}  at={}s  fps={}",
-                                self.stave.history.read().expect("Read stave.history.").with_track(|t| t.events.len()),
+                                self.stave
+                                    .history
+                                    .read()
+                                    .expect("Read stave.history.")
+                                    .with_track(|t| t.events.len()),
                                 self.stave.note_selection.count(),
                                 self.stave.time_selection.as_ref().map_or(
                                     "()".to_string(),

@@ -2,15 +2,15 @@
 
 Grid-less MIDI editor with following goals:
 
-* Not a DAW: MIDI is the input, MIDI is exported (I would like it to be but will not have enough time for that).
+* Not a DAW: MIDI is the input, MIDI is exported. I would like it to be a DAW but will never have enough time for that.
 * Do not care (much) about measures. Primarily aimed at piano real time recordings without explicit tempo/bars.
 * A feature absent in other midi editors I could get my hands on (both commercial and free ones): removing a piece
   of MIDI recording as one can remove a time fragment from PCM recording. For some odd reason DAW authors insist on
   handling time in MIDI editors differently from PCM sound recordings. In some editors this is doable but cumbersome at
   best.
-* Playing/editing very long (at elast up to about 25K of playable events) files. Those files are usually recordings of
-  real performances (e.g. from a MIDI keyboard).
-* Comfortable keyboard workflow.
+* Support for playing and editing long MIDI scores (over 25K of notes). Those files are usually recordings of
+  real performances e.g. from a MIDI keyboard.
+* Comfortable keyboard controls.
 * Allows making fine adjustments of notes and tempo.
 * Unlimited undo/redo. Never loose session data. Non destructive edits, do not override original files.
 * Flight recorder (always-on MIDI recording).
@@ -34,7 +34,7 @@ Currently only Linux-like systems with ALSA are supported. Volunteers to support
 
 **Note** that the program functions only as MIDI editor and uses a MIDI sequencer port for playback.
 To get audible playback you should use some other software that can listen to the MIDI output port and produce some
-sound. Any DAW or a synthesiser plugin with stand-alone UI would do. The output MIDI sequencer port name is
+sound. Any DAW or a synthesyser plugin with stand-alone UI would do. The output MIDI sequencer port name is
 also `emmate`.
 
 Currently expected usage scenario is opening a MIDI file passed as command line argument. This will create an `*.emmate`
@@ -47,18 +47,18 @@ emmate --midi-file my-unpolished-masterpiece.mid
 Run `emmate --help` to see other available switches.
 
 All editing actions are persisted immediately, no need to do anything special to save your work. To export the stave to
-a midi file press Ctrl+S. Exported file will be saved into the `*.emmate/export/`
-folder.
+a MIDI file press Ctrl+S. Exported file will be saved into the `*.emmate/export/` folder.
 
 Undo/redo history is unlimited.
 
-You can transpose/correct loudness/shift/adjust length of selected notes. Draw/delete notes or complete time slices.
+You can transpose/correct loudness/shift/adjust length of selected notes. 
+Draw/delete notes or complete time slices.
 Draw on/off sustain pedal state (on the bottom lane).
 
 Mouse zoom and scroll is supported. "Follow playback" switch makes the stave to scroll during playback.
-You can set/clear bookmarks with `m`/`n`.
+You can set and clear bookmarks with `m` and `n`.
 
-See `Stave::handle_commands` (src/stave.rs) method for availiable keyboard shortcuts.
+See `Stave::handle_commands` (src/stave.rs) method for available keyboard shortcuts.
 
 ## Build
 
@@ -69,26 +69,40 @@ ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
 
 For audio output you can use any synth or DAW that can read the system's sequencer device.
+E.g. one can launch stand-alone Pianoteq for that.
+
 
 ## TODO
 
-- [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
-- [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time, though. Use
-  tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
+- [ ] Stave rendering cleanup: there is some now-unused code left after Meshes rendering revamp. 
+  Implement x scaling check in tests. 
+- [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time,
+  though. Use tabs? Alternatively several emmate windows may cooperate, each showing one stave at a time.
 - [ ] (workflow) Copy/cut/paste notes and time ranges (should also be supported between tracks).
 - [ ] (improvement) Use intermediate state snapshots in edit history (currently diffs also include previous state).
   Need also logic to decide when the snapshot should be made. This change should produce more compact on-disk files
   without duplication.
-- [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (can be set on export).
+- [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (can be set on export). 
+  Do not undo initial import (it is confusing).
+- [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
+  Use spatial tree: set of ranges, with mapping range -> event-visible-in-that-range.
+  This lookup can also speed-up selection hints and hovers. 
 - [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
-- [ ] (workflow) Recording events from the input sequencer (should probably use copy-paste to/from another track for overdubs for
-  now).
+- [ ] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name. 
+- [ ] (workflow) Recording events from the input sequencer (should probably use copy-paste to/from another track
+  for overdubs for now).
 - [ ] (workflow) "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
-      Although not integrated, `midi-blackbox` project can be used as a partial solution.   
+  Although not integrated, `midi-blackbox` project can be used as a partial solution.
+- [ ] (visual) Improve short notes display (e.g. when zoomed out): may be hard to see; currently there
+  is note height jitter on zoom. 
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
+- [x] (performance) Render events into a mesh that can be scrolled and re-used when track does not change. 
+  Now there is 0 CPU usage when paused, and <<100% CPU usage on follow-playback scrolling. Can be optimized 
+  further with spatial tree.
+  Rejected version of this approach (produced visible artifacts due to scaling) is on `full-rescale-version` tag.  
 - [x] (bug) Tape delete does not stitch CC line properly (leaves unmatched events).
 - [x] BUG After edits the sustain lane is left in an inconsistent state sometimes (needs investigation). -> Pane
   size did not match the CC lane drawn, so the mouse was not properly registered.
@@ -96,7 +110,7 @@ For audio output you can use any synth or DAW that can read the system's sequenc
 - [x] Adjust tempo for a tape selection.
 - [x] (refactoring) Reduce number of range types (prefer range::Range, maybe)
 - [x] (refactoring, a big one) Use events ordered by note lanes, use MIDI events (or some equivalent) directly, instead
-  of note ranges. -- Decided not to. It simplifies some parts while complicates others, no clear win. See latest working
+  of note ranges. >> Decided not to. It simplifies some parts while complicates others, no clear win. See latest working
   version of this revamp at `events-revamp` branch.
 - [x] Zoom to fit whole composition.
 - [x] (refactoring) Minimize use of unwrap. The biggest contention currently is event data shared between
