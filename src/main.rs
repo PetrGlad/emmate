@@ -26,6 +26,7 @@ mod config;
 mod engine;
 mod midi;
 mod project;
+#[allow(dead_code)]
 mod range;
 mod stave;
 mod track;

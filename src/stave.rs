@@ -602,8 +602,14 @@ impl Stave {
         track: &Track,
     ) -> Option<range::Range<Time>> {
         let x_range = painter.clip_rect().x_range();
-        // TODO Restore view shifts on edit.
         let mut should_be_visible = None;
+        /* TODO Restore function: show all affected event on edit action.
+                Was:
+          // *should_be_visible = should_be_visible
+          //   .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+          //   .or(Some((t1_a, t2_a)));
+          Should now probably use triangles instead.
+        */
 
         let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
