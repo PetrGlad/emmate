@@ -594,8 +594,6 @@ impl Stave {
         track: &Track,
     ) -> Option<range::Range<Time>> {
         let x_range = painter.clip_rect().x_range();
-        let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
-        let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
         let mut should_be_visible = None;
 
         let font_tex_size = [0, 0]; // unused
@@ -603,7 +601,7 @@ impl Stave {
 
         // TODO Use tesselator scale from settings.
         let mut tessel_options = TessellationOptions::default();
-        tessel_options.feathering = false;
+        // tessel_options.feathering = true;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
         let mut meshes = self.meshes.borrow_mut();
@@ -738,12 +736,12 @@ impl Stave {
         painter.add(Shape::mesh(meshes.out.to_owned()));
 
         // Contains shapes that may change every frame, not caching these.
-        // TODO (cleanup) Maybe animation should also be here.
+        // TODO (cleanup) Maybe animation meshes should also be here.
         let mut transients_mesh = Mesh::default();
+        // FIXME (optimization) Linear lookup (see also selection hints). This and other parts of this
+        //  pipeline can be optimized with a spatial tree, but it is fast enough for now.
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
-            // XXX Linear lookup. This and other parts of this pipeline can be optimized
-            // with a spatial tree, but it is fast enough for now.
             for triangle in 0..meshes.out_events.len() {
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     let hovered_event_id = meshes.out_events[triangle];
@@ -757,15 +755,22 @@ impl Stave {
                     }
                     break;
                 }
-
-                // TODO Restore selection hints display.
-                // if self.note_selection.contains(&event) {
-                //     if x_range.max < self.x_from_time(event.at) {
-                //         selection_hints_right.insert(note.pitch);
-                //     } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                //         selection_hints_left.insert(note.pitch);
-                //     }
-                // }
+            }
+        }
+        /* Paint soem sign at the visible border of the stave to hint that
+        there are also selected events that are not currently visible,
+        This should help avoiding inadvertent edits. */
+        let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
+        let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
+        for event in &track.events {
+            if let TrackEventType::Note(note) = &event.event {
+                if self.note_selection.contains(&event.id) {
+                    if x_range.max < ty.x(&event.at) + shift.x {
+                        selection_hints_right.insert(note.pitch);
+                    } else if ty.x(&(event.at + note.duration)) + shift.x < x_range.min {
+                        selection_hints_left.insert(note.pitch);
+                    }
+                }
             }
         }
         Self::shift_mesh(&mut transients_mesh, &shift);
@@ -1433,11 +1438,11 @@ impl Stave {
         Rect {
             min: Pos2 {
                 x: ty.x(&time_range.0),
-                y: y - ty.y_step * 0.45,
+                y: y - ty.y_step * 0.5,
             },
             max: Pos2 {
                 x: ty.x(&time_range.1),
-                y: y + ty.y_step * 0.45,
+                y: y + ty.y_step * 0.5,
             },
         }
     }
@@ -1448,7 +1453,7 @@ impl Stave {
                 Self::event_rect((event.at, event.at + note.duration), &note.pitch, ty),
                 CornerRadius::ZERO,
                 Stroke::new(2.0, COLOR_HOVERED),
-                StrokeKind::Outside,
+                StrokeKind::Middle,
             ))),
             _ => None,
         }
@@ -1804,6 +1809,8 @@ mod tests {
         for x in [-3.3, 0.0, 0.01, 0.044, 134.0, 1.8765444e7] {
             assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
         }
+
+        // TODO Check key_ys and pre-render events ys match.
         // dbg!(
         //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
         //     Viewport::DEFAULT_TIME_SCALE_DENOM
