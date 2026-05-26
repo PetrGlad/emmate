@@ -671,7 +671,7 @@ impl Stave {
                     TrackEventType::Bookmark => {
                         let shape = self.cursor_shape(
                             &self.viewport.view_rect.y_range(),
-                            self.viewport.x_from_time(event.at),
+                            ty.x(&event.at),
                             Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         );
                         tessellator.tessellate_shape(shape, &mut meshes.scaled);
