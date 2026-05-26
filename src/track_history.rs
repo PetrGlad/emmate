@@ -110,7 +110,7 @@ impl TrackHistory {
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);
         if version.is_empty() {
-            log::info!("No track history found.");
+            log::info!("No track version found for version_id={} (max_version_id={}).", version_id, self.max_version);
             return false;
         }
         {

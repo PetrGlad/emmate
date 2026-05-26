@@ -1,15 +1,15 @@
 use crate::track_history::TrackHistory;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::fs;
 use std::path::{absolute, Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 // Persistence format version
 pub const PROJECT_FORMAT_ID: u16 = 1;
 
 pub struct Project {
     pub title: String,
-    pub history: RefCell<TrackHistory>,
+    pub history: Arc<RwLock<TrackHistory>>,
     pub home_path: PathBuf,
 }
 
@@ -72,7 +72,7 @@ impl Project {
         Project {
             title: meta.title,
             home_path: directory,
-            history: RefCell::new(history),
+            history: Arc::new(RwLock::new(history)),
         }
     }
 

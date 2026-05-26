@@ -1,26 +1,31 @@
-use crate::changeset::{Changeset, EventActionsList};
-use crate::common::Time;
+use crate::changeset::{Changeset, EventAction, EventActionsList};
+use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
-use crate::track::{export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
+use crate::track::{
+    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track,
+    TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+};
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark, set_damper,
-    shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert, tape_stretch,
-    transpose_selected_notes, AppliedCommand, EditCommandId,
+    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark,
+    set_damper, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
+    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandId,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{range, Pix};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
-    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Stroke, Ui,
+    self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
+    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
-use eframe::epaint::StrokeKind;
+use eframe::emath;
+use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 // Tone 60 is C3, tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -56,6 +61,7 @@ pub struct NoteDraw {
 #[derive(Debug, Default)]
 pub struct NotesSelection {
     selected: HashSet<EventId>,
+    version: u64,
 }
 
 impl NotesSelection {
@@ -65,14 +71,16 @@ impl NotesSelection {
         } else {
             self.selected.insert(*id);
         }
+        self.version += 1;
     }
 
-    fn contains(&self, ev: &TrackEvent) -> bool {
-        self.selected.contains(&ev.id)
+    fn contains(&self, ev_id: &EventId) -> bool {
+        self.selected.contains(ev_id)
     }
 
     fn clear(&mut self) {
         self.selected.clear();
+        self.version += 1;
     }
 
     pub fn count(&self) -> usize {
@@ -85,6 +93,7 @@ pub struct EditTransition {
     pub animation_id: egui::Id,
     pub command_id: EditCommandId,
     pub changeset: Changeset,
+    /// 0.0 -> 1.0
     pub coeff: f32,
 }
 
@@ -104,34 +113,142 @@ impl EditTransition {
         }
     }
 
-    pub fn update(mut self, ctx: &Context) -> Self {
+    pub fn update(&mut self, ctx: &Context) {
         self.coeff = ctx.animate_bool(self.animation_id, true);
-        self
+        dbg!(self.coeff);
     }
 
     pub fn value(&self) -> Option<f32> {
         if self.coeff >= 1.0 {
+            dbg!("end-coeff", self.coeff);
             None
         } else {
+            dbg!(self.coeff);
             Some(self.coeff)
         }
     }
 }
 
+// Selects viewable track range.
+type TimeRange = Range<Time>;
+
+#[derive(Clone, PartialEq)]
+pub struct Viewport {
+    /// Starting and ending moment of track's visible time range.
+    time_range: TimeRange,
+    /// The widget's displayed rectangle coordinates.
+    view_rect: Rect,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            time_range: TimeRange::default(),
+            view_rect: Rect::NOTHING,
+        }
+    }
+}
+
+// Zoom and scroll parameters.
+impl Viewport {
+    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
+    /// World record playing piano seems to be 130 hours, so some might find this limiting.
+    // I would like to use Duration but that is not "const compatible" yet.
+    const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
+
+    pub fn lanes_y_half_tone(&self) -> f32 {
+        self.view_rect.height() / STAVE_KEY_LANES.len() as f32
+    }
+
+    pub fn lanes_y_range(&self) -> Rangef {
+        Rangef::new(
+            self.view_rect.top() + self.lanes_y_half_tone() / 2.0,
+            self.view_rect.bottom() - self.lanes_y_half_tone() / 2.0,
+        )
+    }
+
+    /// Pixel/uSec, can be cached.
+    #[inline]
+    pub fn time_scale(&self) -> f32 {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.view_rect.width() / self.time_range.len() as f32
+    }
+
+    #[inline]
+    pub fn x_from_time(&self, at: Time) -> Pix {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.view_rect.min.x + (at - self.time_range.0) as f32 * self.time_scale()
+    }
+
+    pub fn time_from_x(&self, x: Pix) -> Time {
+        debug_assert!(self.view_rect.width() > 0.0);
+        self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
+    }
+
+    // #[inline]
+    // pub fn x_from_default(&self, x_default: Pix) -> Pix {
+    //     debug_assert!(self.view_rect.width() > 0.0);
+    //     self.view_rect.min.x
+    //         + (x_default - Viewport::x_default_from_time(self.time_range.0))
+    //             * self.time_scale()
+    //             * Self::DEFAULT_TIME_SCALE_DENOM as f32
+    // }
+
+    // #[inline]
+    // pub fn y_from_default(&self, y: &Pix) -> Pix {
+    //     emath::remap(
+    //         *y,
+    //         Rangef::new(
+    //             Viewport::DEFAULT_HALF_TONE_STEP,
+    //             Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
+    //         ),
+    //         self.lanes_y_range(),
+    //     )
+    // }
+
+    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
+        // Zoom so that time position under mouse pointer stays put.
+        // TODO (cleanup) Consider using emath::remap
+        let at = self.time_from_x(mouse_x);
+        self.time_range.0 = (at - ((at - self.time_range.0) as f32 / zoom_factor) as Time)
+            .max(-Self::ZOOM_TIME_LIMIT)
+            - 1;
+        self.time_range.1 = (at + ((self.time_range.1 - at) as f32 / zoom_factor) as Time)
+            .min(Self::ZOOM_TIME_LIMIT)
+            + 1;
+        assert!(self.time_range.0 < self.time_range.1)
+    }
+
+    pub fn scroll(&mut self, dt: Time) {
+        if self.time_range.0 + dt < -Self::ZOOM_TIME_LIMIT
+            || self.time_range.1 + dt > Self::ZOOM_TIME_LIMIT
+        {
+            return;
+        }
+        self.time_range.0 += dt;
+        self.time_range.1 += dt;
+    }
+
+    pub fn scroll_by(&mut self, dx: Pix) {
+        self.scroll((dx / self.time_scale()) as Time);
+    }
+
+    pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
+        self.scroll(
+            at - (self.time_range.len() as f32 * view_fraction) as Time - self.time_range.0,
+        );
+    }
+}
+
 // #[derive(Debug)]
 pub struct Stave {
-    pub history: RefCell<TrackHistory>,
+    pub history: Arc<RwLock<TrackHistory>>,
 
-    /// Starting moment of visible time range.
-    pub time_left: Time,
-    /// End moment of visible time range.
-    pub time_right: Time,
-    /// The widget's displayed rectangle coordinates.
-    pub view_rect: Rect,
+    pub viewport: Viewport,
 
     pub cursor_position: Time,
     pub time_selection: Option<Range<Time>>,
-    /// Currently drawn note.
+    /// Currently drawn new note.
     pub note_draw: Option<NoteDraw>,
     pub note_selection: NotesSelection,
     /// Change animation parameters.
@@ -139,10 +256,94 @@ pub struct Stave {
 
     // Velocity -> note_color lookup map
     note_colors: Vec<Color32>,
+
+    // Experimental
+    // Using SyncCOW to support multithreaded mesh generation. Is not needed otherwise.
+    // TODO Multithreaded generation does help to offload from single cpu but is rather inefficient still.
+    //   Now I wan to experiment with on-demand mesh generation and using lerp on mesh itself for animation
+    //   (because I am curious, that is why):
+    //   * During transitions use 2 meshes "before" and "after" and generate the output by interpolation for animation.
+    //   * Only re-generate mesh when track changes.
+    //   * Scale the mesh itself to support zoom/scroll. Maybe this would look like:
+    //             out := lerp(before, after); zoom(&mut out)
+    //   * When showing and edit action, generate another mesh with the new state.
+    //      * Update "before" one with placeholders for insertions.
+    //      * After mesh would have placeholders for deletions.
+    //   This would require:
+    //   * To tessellate track at some default scale.
+    //   * Ensure size(before.vertices) == size(after.vertices), deleted state can be represented as completely transparent color.
+    //   * When animation finishes, before := after; discard_deleted(&mut before); truncate(&mut after).
+    //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
+    //   * No need to allocate meshes every time
+    meshes: RefCell<Meshes>,
+}
+
+/**
+Track view model.
+Mesh data flow: (a, b) -> interpolate -> unscaled -> vertical-remap -> scaled_y -> zoom-scroll -> out -> render
+This is split into stages to shift most frequent updates later so we can re-use the calculations.
+*/
+#[derive(Default, Clone)]
+struct Meshes {
+    // TODO (cleanup) This change tracing becomes a bit tedious. Is there a generic implementation?
+    // Track version id, used to detect changes in events (edit changes).
+    version_id: VersionId,
+    // Track selection changes.
+    selection_version: u64,
+    time_selection: Option<Range<Time>>,
+
+    // TODO (cleanup) This map can be cached in the tack itself, but need to ensure
+    //      it is updated after each track change.
+    events: HashMap<EventId, TrackEvent>,
+
+    // Beginning and end of ongoing animation.
+    transition: Option<(Mesh, Mesh)>,
+
+    // Evens painted at current vertical and horizontal scale, without xy shifts (at 0,0).
+    scaled: Mesh,
+
+    // Horizontal/vertical scaling.
+    height: Pix,
+    time_scale: f64,
+    // Scroll/translation.
+    time_start: Time,
+    xy: Pos2,
+
+    // Annotates resulting triangles with track event ids.
+    // Used to detect hovers, and to show out-of-view selection hints.
+    out_events: Vec<EventId>,
+    out: Arc<Mesh>,
+}
+
+// Holds time (x) and vertical (y, lanes) scaling for stave.
+struct TYScale {
+    // Pix/uSec
+    time_scale: f64,
+    // Y step per lane
+    y_step: Pix,
+}
+
+impl TYScale {
+    #[inline]
+    pub fn x(&self, at: &Time) -> Pix {
+        (*at as f64 * self.time_scale) as Pix
+    }
+
+    #[inline]
+    pub fn y(&self, pitch: &Pitch) -> f32 {
+        (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - CONTROL_LANES_COUNT) as Pix
+            * self.y_step
+            - self.y_step / 2.0
+    }
 }
 
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
 const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
+
+// Egui optimizes away transparent shapes. This placeholder color is used as starting or end point
+// in insertions/deletions to ensure the shape is always there.
+const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 1);
+// const COLOR_NOTHING: Color32 = Color32::GREEN; // DEBUG // Making it stand out for diagnostics.
 
 struct InnerResponse {
     response: egui::Response,
@@ -158,12 +359,7 @@ pub struct StaveResponse {
 }
 
 impl Stave {
-    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
-    /// World record playing piano seems to be 130 hours, so some might find this limiting.
-    // I would like to use Duration but that is not "const compatible" yet.
-    const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
-
-    pub fn new(history: RefCell<TrackHistory>) -> Stave {
+    pub fn new(history: Arc<RwLock<TrackHistory>>) -> Stave {
         let mut note_colors = vec![];
         assert_eq!(Level::MIN, 0); // Otherwise need to adjust lookups.
         for velocity in Level::MIN..Level::MAX {
@@ -178,80 +374,37 @@ impl Stave {
 
         Stave {
             history,
-            time_left: 0,
-            time_right: chrono::Duration::minutes(5).num_microseconds().unwrap(),
-            view_rect: Rect::NOTHING,
+            viewport: Viewport {
+                time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
+                view_rect: Rect::NOTHING,
+            },
             cursor_position: 0,
             time_selection: None,
             note_draw: None,
             note_selection: NotesSelection::default(),
             transition: None,
             note_colors,
+            meshes: RefCell::new(Meshes::default()),
         }
     }
 
     pub fn save_to(&mut self, file_path: &PathBuf) {
         self.history
-            .borrow()
+            .read()
+            .expect("Read stave.history.")
             .with_track(|track| export_smf(&track.events, file_path));
     }
 
-    /// Pixel/uSec, can be cached.
-    pub fn time_scale(&self) -> f32 {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.width() / (self.time_right - self.time_left) as f32
-    }
-
-    pub fn x_from_time(&self, at: Time) -> Pix {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.view_rect.min.x + (at as f32 - self.time_left as f32) * self.time_scale()
-    }
-
-    pub fn time_from_x(&self, x: Pix) -> Time {
-        debug_assert!(self.view_rect.width() > 0.0);
-        self.time_left + ((x - self.view_rect.min.x) / self.time_scale()) as Time
-    }
-
-    pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
-        // Zoom so that time position under mouse pointer stays put.
-        // TODO (cleanup) Consider using emath::remap
-        let at = self.time_from_x(mouse_x);
-        self.time_left = (at - ((at - self.time_left) as f32 / zoom_factor) as Time)
-            .max(-Self::ZOOM_TIME_LIMIT)
-            - 1;
-        self.time_right = (at + ((self.time_right - at) as f32 / zoom_factor) as Time)
-            .min(Self::ZOOM_TIME_LIMIT)
-            + 1;
-        assert!(self.time_left < self.time_right)
-    }
-
     pub fn zoom_to_fit(&mut self, time_margin: Time) {
-        self.time_left = -time_margin;
-        self.time_right = self.history.borrow().with_track(|tr| tr.max_time()) + time_margin;
-    }
-
-    pub fn scroll(&mut self, dt: Time) {
-        if self.time_left + dt < -Self::ZOOM_TIME_LIMIT
-            || self.time_right + dt > Self::ZOOM_TIME_LIMIT
-        {
-            return;
-        }
-        self.time_left += dt;
-        self.time_right += dt;
-    }
-
-    pub fn scroll_by(&mut self, dx: Pix) {
-        self.scroll((dx / self.time_scale()) as Time);
-    }
-
-    pub fn scroll_to(&mut self, at: Time, view_fraction: f32) {
-        self.scroll(
-            at - ((self.time_right - self.time_left) as f32 * view_fraction) as Time
-                - self.time_left,
+        self.viewport.time_range = (
+            -time_margin,
+            self.history
+                .read()
+                .expect("Read stave.history.")
+                .with_track(|tr| tr.max_time())
+                + time_margin,
         );
     }
-
-    const NOTHING_ZONE: Range<Time> = (Time::MIN, 0);
 
     fn view(&mut self, ui: &mut Ui) -> InnerResponse {
         Frame::new()
@@ -267,7 +420,7 @@ impl Stave {
                     let style = ui.ctx().style();
                     let ruler_height = style.text_styles[&Body].size;
                     *bounds.top_mut() += ruler_height;
-                    self.view_rect = bounds;
+                    self.viewport.view_rect = bounds;
 
                     ruler_rect.set_height(ruler_height);
                     // TODO (cleanup) Use painter_at instead.
@@ -280,7 +433,7 @@ impl Stave {
                 let pointer_pos = ui.input(|i| i.pointer.hover_pos());
                 if let Some(pointer_pos) = pointer_pos {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
-                    time_hovered = Some(self.time_from_x(pointer_pos.x));
+                    time_hovered = Some(self.viewport.time_from_x(pointer_pos.x));
                 }
 
                 let painter = ui.painter_at(bounds);
@@ -291,38 +444,38 @@ impl Stave {
                 }
                 self.draw_time_selection(
                     &painter,
-                    &Stave::NOTHING_ZONE,
+                    &(self.viewport.time_range.0, 0),
                     &Color32::from_black_alpha(15),
                 );
                 let mut note_hovered = None;
                 let should_be_visible;
                 {
-                    let history = self.history.borrow();
+                    let history = self.history.read().expect("Read stave.history.");
                     let track = history.track.read();
-                    should_be_visible = self.draw_events(
+                    should_be_visible = self.paint_events(
                         &key_ys,
                         &half_tone_step,
                         &pointer_pos,
                         &mut note_hovered,
                         &painter,
+                        history.version(),
                         &track,
                     );
                 }
-                self.draw_cursor(
-                    &painter,
-                    self.x_from_time(self.cursor_position),
+                painter.add(self.cursor_shape(
+                    &painter.clip_rect().y_range(),
+                    self.viewport.x_from_time(self.cursor_position),
                     Rgba::from_rgba_unmultiplied(0.0, 0.5, 0.0, 0.7).into(),
-                );
+                ));
 
                 if let Some(new_note) = &self.note_draw {
-                    self.default_draw_note(
-                        &painter,
+                    painter.add(self.default_draw_note(
                         64,
                         (new_note.time.0, new_note.time.1),
                         *key_ys.get(&new_note.pitch).unwrap(),
                         half_tone_step,
                         true,
-                    );
+                    ));
                 }
 
                 if let Some(range) = should_be_visible {
@@ -342,32 +495,33 @@ impl Stave {
             .inner
     }
 
+    const TIME_RULER_TICK_DURATIONS_SECONDS: [f32; 16] = [
+        0.005,
+        0.01,
+        0.05,
+        0.1,
+        1.0,
+        5.0,
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        5.0 * 60.0,
+        10.0 * 60.0,
+        30.0 * 60.0,
+        60.0f32 * 60.0,
+        60.0f32 * 60.0 * 4.0,
+        60.0f32 * 60.0 * 6.0,
+    ];
+
     fn draw_time_ruler(&mut self, painter: &Painter, ruler_rect: Rect) {
-        let tick_durations_s = [
-            0.005,
-            0.01,
-            0.05,
-            0.1,
-            1.0,
-            5.0,
-            10.0,
-            15.0,
-            30.0,
-            60.0,
-            5.0 * 60.0,
-            10.0 * 60.0,
-            30.0 * 60.0,
-            60.0f32 * 60.0,
-            60.0f32 * 60.0 * 4.0,
-            60.0f32 * 60.0 * 6.0,
-        ];
-        let time_width = ruler_rect.width() / self.time_scale();
-        let tick_duration = tick_durations_s
+        let time_width = ruler_rect.width() / self.viewport.time_scale();
+        let tick_duration = Self::TIME_RULER_TICK_DURATIONS_SECONDS
             .iter()
             .find_map(|td| {
                 let x = td * 1_000_000.0; // From seconds
-                let nticks = time_width / x;
-                if 2.0 < nticks && nticks < 20.0 {
+                let n_ticks = time_width / x;
+                if 2.0 < n_ticks && n_ticks < 20.0 {
                     Some(x)
                 } else {
                     None
@@ -376,13 +530,13 @@ impl Stave {
             .unwrap_or(time_width / 5.0)
             .round() as Time;
         assert!(tick_duration > 0);
-        let start_tick = self.time_from_x(ruler_rect.min.x) / tick_duration;
-        let end_tick = self.time_from_x(ruler_rect.max.x) / tick_duration;
-        let mut last_x = self.x_from_time(-1);
+        let start_tick = self.viewport.time_from_x(ruler_rect.min.x) / tick_duration;
+        let end_tick = self.viewport.time_from_x(ruler_rect.max.x) / tick_duration;
+        let mut last_x = self.viewport.x_from_time(-1);
         for tick in start_tick..end_tick + 1 {
             let at = tick * tick_duration;
             // Avoids labels overlapping.
-            if last_x < self.x_from_time(at) {
+            if last_x < self.viewport.x_from_time(at) {
                 last_x = self.draw_time_tick(painter, ruler_rect, at).max.x;
             }
         }
@@ -402,15 +556,16 @@ impl Stave {
         if hours > 0 {
             result.push_str(&format!("{}:", hours));
         }
-        result.push_str(&format!("{}'{}", minutes, seconds));
-        if millis > 0 {
-            result.push_str(&format!(".{}", millis));
-        }
+        result.push_str(&format!(
+            "{}'{}",
+            minutes,
+            seconds as f32 + millis as f32 / 1000.0
+        ));
         result
     }
 
     fn draw_time_tick(&mut self, painter: &Painter, ruler_rect: Rect, at: Time) -> Rect {
-        let x = self.x_from_time(at);
+        let x = self.viewport.x_from_time(at);
         painter.rect_filled(
             Rect::from_x_y_ranges(
                 Rangef::new(x, x + 1.0),
@@ -429,108 +584,227 @@ impl Stave {
         )
     }
 
-    fn draw_events(
+    fn shift_mesh(mesh: &mut Mesh, xy: &Pos2) {
+        for v in &mut mesh.vertices {
+            v.pos.x += xy.x;
+            v.pos.y += xy.y;
+        }
+    }
+
+    fn paint_events(
         &self,
         key_ys: &BTreeMap<Pitch, Pix>,
         half_tone_step: &Pix,
         pointer_pos: &Option<Pos2>,
         note_hovered: &mut Option<EventId>,
         painter: &Painter,
+        version_id: VersionId,
         track: &Track,
     ) -> Option<range::Range<Time>> {
-        let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
         let x_range = painter.clip_rect().x_range();
+        let mut should_be_visible = None;
+        /* TODO Restore function: show all affected event on edit action.
+                Was:
+          // *should_be_visible = should_be_visible
+          //   .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
+          //   .or(Some((t1_a, t2_a)));
+          Should now probably use triangles instead.
+        */
+
+        let font_tex_size = [0, 0]; // unused
+        let prepared_discs = vec![]; // unused
+
+        // TODO Use tesselator scale from settings.
+        let mut tessel_options = TessellationOptions::default();
+        // tessel_options.feathering = true;
+        let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
+
+        let mut meshes = self.meshes.borrow_mut();
+        let has_version_changed = meshes.version_id != version_id;
+        let has_selection_changed = meshes.selection_version != self.note_selection.version
+            || meshes.time_selection != self.time_selection;
+
+        let height = self.viewport.view_rect.height();
+        let ty = TYScale {
+            y_step: height / STAVE_KEY_LANES.len() as f32,
+            time_scale: self.viewport.view_rect.width() as f64
+                / self.viewport.time_range.len() as f64,
+        };
+        let has_scale_changed = height != meshes.height || ty.time_scale != meshes.time_scale;
+
+        if has_version_changed || has_scale_changed || has_selection_changed {
+            meshes.events = track.index_events();
+            // (!) Assuming vertice indices will not change in subsequent transformations.
+            meshes.out_events.clear();
+            meshes.scaled.clear();
+
+            if let Some(trans) = &self.transition {
+                let mut before = Mesh::default();
+                let mut after = Mesh::default();
+                // dbg!("anim-new/changes", &trans.changeset.changes.iter().take(5));
+                for (_ev_id, action) in &trans.changeset.changes {
+                    if let Some((shape_a, shape_b)) = self.note_animation(action, &ty) {
+                        tessellator.tessellate_shape(shape_a, &mut before);
+                        tessellator.tessellate_shape(shape_b, &mut after);
+                    } else if let Some((shape_a, shape_b)) = self.cc_animation(action, &ty) {
+                        tessellator.tessellate_shape(shape_a, &mut before);
+                        tessellator.tessellate_shape(shape_b, &mut after);
+                    } else {
+                        // E.g. a bookmark.
+                    }
+                }
+                // Current animation procedure assumes that only vertices change.
+                // Hence, "before" to "after" mapping should be 1 to 1.
+                assert_eq!(before.indices.len(), after.indices.len());
+                assert_eq!(before.vertices.len(), after.vertices.len());
+                meshes.transition = Some((before, after));
+                dbg!("anim-new/id", meshes.version_id);
+            }
+
+            let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
+            for event in &track.events {
+                if meshes.transition.is_some() {
+                    if let Some(trans) = &self.transition {
+                        if trans.changeset.changes.contains_key(&event.id) {
+                            dbg!("skip id", event.id);
+                            continue;
+                        }
+                    }
+                }
+                match &event.event {
+                    TrackEventType::Note(note) => {
+                        let shape = self.note_event_shape(&event, &note, &ty);
+                        tessellator.tessellate_shape(shape, &mut meshes.scaled);
+                    }
+                    TrackEventType::Controller(cc) => {
+                        if let Some(shape) =
+                            self.default_track_cc_shape(&mut last_damper_value, &event, &cc, &ty)
+                        {
+                            tessellator.tessellate_shape(shape, &mut meshes.scaled);
+                        }
+                    }
+                    TrackEventType::Bookmark => {
+                        let shape = self.cursor_shape(
+                            &self.viewport.view_rect.y_range(),
+                            ty.x(&event.at),
+                            Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
+                        );
+                        tessellator.tessellate_shape(shape, &mut meshes.scaled);
+                    }
+                }
+                while meshes.out_events.len() < meshes.scaled.indices.len() / 3 {
+                    meshes.out_events.push(event.id);
+                }
+            }
+            assert!(meshes.out_events.len() <= meshes.scaled.indices.len() / 3);
+            meshes.version_id = version_id;
+            meshes.selection_version = self.note_selection.version;
+            meshes.time_selection = self.time_selection;
+            meshes.height = height;
+            meshes.time_scale = ty.time_scale;
+        }
+
+        let mut animated = Mesh::default();
+        if let Some(EditTransition { coeff, .. }) = self.transition {
+            debug_assert!(0.0 <= coeff && coeff <= 1.0);
+            debug_assert!(meshes.transition.is_some());
+            if let Some((mesh_a, mesh_b)) = &meshes.transition {
+                dbg!("anim-lerp", meshes.version_id, coeff);
+                animated.clone_from(mesh_a);
+                animated.vertices.clear();
+                for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
+                    animated.vertices.push(Vertex {
+                        pos: Pos2 {
+                            x: emath::lerp(va.pos.x..=vb.pos.x, coeff),
+                            y: emath::lerp(va.pos.y..=vb.pos.y, coeff),
+                        },
+                        uv: va.uv,
+                        color: emath::lerp(Rgba::from(va.color)..=Rgba::from(vb.color), coeff)
+                            .into(),
+                    });
+                }
+                debug_assert!(animated.is_valid());
+            }
+        } else if meshes.transition.is_some() {
+            // Animation end.
+            meshes.transition = None;
+            meshes.version_id = -1; // Force repaint without animation parts next time.
+            dbg!("anim-reset", meshes.version_id);
+        }
+
+        let is_animating = !animated.is_empty();
+        // Horizontal zoom and scrolling.
+        let has_position_changed = meshes.xy != self.viewport.view_rect.min
+            || meshes.time_start != self.viewport.time_range.0;
+        let shift = self.viewport.view_rect.min
+            // Time scrolling
+            + Vec2 {
+                x: -ty.x(&self.viewport.time_range.0),
+                y: 0f32,
+            };
+        if has_version_changed
+            || has_scale_changed
+            || has_selection_changed
+            || has_position_changed
+            || is_animating
+        {
+            let mut mesh = Mesh::default();
+            mesh.clone_from(&meshes.scaled);
+            mesh.append(animated);
+            Self::shift_mesh(&mut mesh, &shift);
+            meshes.xy = self.viewport.view_rect.min;
+            meshes.time_start = self.viewport.time_range.0;
+            // debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
+            meshes.out = Arc::new(mesh);
+        }
+        painter.add(Shape::mesh(meshes.out.to_owned()));
+
+        // Contains shapes that may change every frame, not caching these.
+        // TODO (cleanup) Maybe animation meshes should also be here.
+        let mut transients_mesh = Mesh::default();
+        // TODO (optimization) Linear lookup (see also selection hints). This and other parts of this
+        //  pipeline can be optimized with a spatial tree, but it is fast enough for now.
+        if let Some(&pointer_pos) = pointer_pos.as_ref() {
+            // Hover
+            for triangle in 0..meshes.out_events.len() {
+                let event_id = meshes.out_events[triangle];
+                // if self.note_selection.contains(&event_id) {
+                //     let (a, b, c) = nth_triangle_indices(&meshes.out, triangle);
+                //     transients_mesh.(a, b, c);
+                // }
+                if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
+                    *note_hovered = Some(event_id);
+                    let ev = meshes
+                        .events
+                        .get(&event_id)
+                        .expect("hovered event is on the track");
+                    if let Some(hover_shape) = Stave::hover_shape(&ev, &ty) {
+                        tessellator.tessellate_shape(hover_shape, &mut transients_mesh);
+                    }
+                    break;
+                }
+            }
+        }
+        /* Paint some sign at the visible border of the stave to hint that
+        there are also selected events that are not currently visible,
+        This should help avoiding inadvertent edits. */
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
-        let mut should_be_visible = None;
-        for i in 0..track.events.len() {
-            let event = &track.events[i];
-            if let Some(trans) = &self.transition {
-                if trans.changeset.changes.contains_key(&event.id) {
-                    continue;
-                }
-            }
-            match &event.event {
-                TrackEventType::Note(note) => {
-                    if self.note_selection.contains(&event) {
-                        if x_range.max < self.x_from_time(event.at) {
-                            selection_hints_right.insert(note.pitch);
-                        } else if self.x_from_time(event.at + note.duration) < x_range.min {
-                            selection_hints_left.insert(note.pitch);
-                        }
+        for event in &track.events {
+            if let TrackEventType::Note(note) = &event.event {
+                if self.note_selection.contains(&event.id) {
+                    // // Visibility can also be determined by comparing triangles coordinate's.
+                    if x_range.max < ty.x(&event.at) + shift.x {
+                        selection_hints_right.insert(note.pitch);
+                    } else if ty.x(&(event.at + note.duration)) + shift.x < x_range.min {
+                        selection_hints_left.insert(note.pitch);
                     }
-                    let note_rect =
-                        self.draw_track_note(key_ys, half_tone_step, &painter, &event, &note);
-                    // Alternatively, can return the known rect from draw_track_note above and check that.
-                    if let Some(r) = note_rect {
-                        if let Some(&pointer_pos) = pointer_pos.as_ref() {
-                            if r.contains(pointer_pos) {
-                                *note_hovered = Some(event.id);
-                                painter.rect_stroke(
-                                    r,
-                                    CornerRadius::ZERO,
-                                    Stroke::new(2.0, COLOR_HOVERED),
-                                    StrokeKind::Inside,
-                                );
-                            }
-                        }
-                    }
-                }
-                TrackEventType::Controller(cc) => self.draw_track_cc(
-                    &key_ys,
-                    half_tone_step,
-                    &painter,
-                    &mut last_damper_value,
-                    &event,
-                    &cc,
-                ),
-                TrackEventType::Bookmark => self.draw_cursor(
-                    &painter,
-                    self.x_from_time(event.at),
-                    Rgba::from_rgba_unmultiplied(0.0, 0.4, 0.0, 0.3).into(),
-                ),
-            }
-        }
-        if let Some(trans) = &self.transition {
-            for (_ev_id, action) in &trans.changeset.changes {
-                // TODO (cleanup) Restrict actions to not change event types,
-                //      this should reduce number of cases to consider.
-
-                let note_a = Stave::note_animation_params(action.before());
-                let note_b = Stave::note_animation_params(action.after());
-                if note_a.is_some() || note_b.is_some() {
-                    self.draw_note_transition(
-                        key_ys,
-                        half_tone_step,
-                        painter,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        false,
-                        note_a,
-                        note_b,
-                    );
-                }
-
-                let cc_a = Stave::cc_animation_params(action.before());
-                let cc_b = Stave::cc_animation_params(action.after());
-                if cc_a.is_some() || cc_b.is_some() {
-                    self.draw_cc_transition(
-                        key_ys,
-                        half_tone_step,
-                        painter,
-                        &mut should_be_visible,
-                        trans.coeff,
-                        cc_a,
-                        cc_b,
-                    );
-                }
-
-                if !(note_a.is_some() || note_b.is_some() || cc_a.is_some() || cc_b.is_some()) {
-                    // TODO (implementation) Handle bookmarks (can be either animated somehow or just ignored).
-                    log::trace!("No animation params (a bookmark?).");
                 }
             }
         }
+        Self::shift_mesh(&mut transients_mesh, &shift);
+        painter.add(Shape::mesh(transients_mesh));
+
         draw_selection_hints(
             &painter,
             &key_ys,
@@ -549,14 +823,11 @@ impl Stave {
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
-        self.transition = self
-            .transition
-            .take()
-            .map(|tr| tr.update(&ui.ctx()))
-            .filter(|tr| tr.value().is_some());
-        if self.transition.is_none() {
-            ui.ctx().clear_animations();
+        // dbg!("before", &self.transition);
+        if let Some(transition) = &mut self.transition {
+            transition.update(&ui.ctx())
         }
+        // dbg!("after", &self.transition);
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
@@ -568,6 +839,15 @@ impl Stave {
             }
         }
 
+        let had_transition = self.transition.is_some();
+        self.transition = self.transition.take().filter(|tr| tr.value().is_some());
+        if had_transition && self.transition.is_none() {
+            ui.ctx().clear_animations();
+            ui.ctx().request_repaint();
+            dbg!("CLEAR", &self.transition);
+        }
+        // dbg!("drawn", &self.history.read().unwrap().version());
+
         let inner = &stave_response.response;
         self.update_new_note_draw(
             inner,
@@ -575,11 +855,23 @@ impl Stave {
             &stave_response.time_hovered,
             &stave_response.pitch_hovered,
         );
+
         self.update_time_selection(&inner, &stave_response.time_hovered);
+
+        let dbg_version_before = self.history.read().unwrap().version();
         let new_cursor_position = self.handle_commands(&inner);
         if let Some(pos) = new_cursor_position {
             self.cursor_position = pos;
             self.ensure_visible(pos);
+        }
+
+        // dbg!("commands-handled", self.history.read().unwrap().version());
+        if dbg_version_before != self.history.read().unwrap().version() {
+            dbg!(
+                "requesting-repaint",
+                &self.history.read().unwrap().version()
+            );
+            ui.ctx().request_repaint();
         }
 
         StaveResponse {
@@ -648,7 +940,12 @@ impl Stave {
             ))
         }) {
             if let Some(time_selection) = &self.time_selection.clone() {
-                let id_seq = &self.history.borrow().id_seq.clone();
+                let id_seq = &self
+                    .history
+                    .read()
+                    .expect("Read stave.history.")
+                    .id_seq
+                    .clone();
                 self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                     tape_delete(id_seq, track, &(time_selection.0, time_selection.1))
                 });
@@ -788,7 +1085,12 @@ impl Stave {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
         }) {
             let mut changes = vec![];
-            let edit_state = if self.history.borrow_mut().undo(&mut changes) {
+            let edit_state = if self
+                .history
+                .write()
+                .expect("Write stave.history.")
+                .undo(&mut changes)
+            {
                 Some((EditCommandId::Undo, changes))
             } else {
                 None
@@ -803,7 +1105,12 @@ impl Stave {
                 ))
         }) {
             let mut changes = vec![];
-            let edit_state = if self.history.borrow_mut().redo(&mut changes) {
+            let edit_state = if self
+                .history
+                .write()
+                .expect("Write stave.history.")
+                .redo(&mut changes)
+            {
                 Some((EditCommandId::Redo, changes))
             } else {
                 None
@@ -816,7 +1123,12 @@ impl Stave {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
         }) {
             let at = self.cursor_position;
-            let id_seq = &self.history.borrow().id_seq.clone();
+            let id_seq = &self
+                .history
+                .read()
+                .expect("Read stave.history.")
+                .id_seq
+                .clone();
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                 set_bookmark(track, id_seq, &at)
             });
@@ -839,7 +1151,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave history.")
                 .with_track(|track| {
                     track
                         .events
@@ -860,7 +1173,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave history.")
                 .with_track(move |track| {
                     track
                         .events
@@ -881,7 +1195,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(|track| track.events.iter().rfind(|ev| ev.at < at).cloned())
                 .map(|ev| ev.at)
                 .or(Some(0));
@@ -896,7 +1211,8 @@ impl Stave {
             let at = self.cursor_position;
             return self
                 .history
-                .borrow()
+                .read()
+                .expect("Read stave.history.")
                 .with_track(move |track| track.events.iter().find(|ev| ev.at > at).cloned())
                 .map(|ev| ev.at)
                 .or(Some(self.max_time()));
@@ -919,7 +1235,7 @@ impl Stave {
         }
         if let Some(hover_pos) = response.hover_pos() {
             if response.middle_clicked() {
-                let at = self.time_from_x(hover_pos.x);
+                let at = self.viewport.time_from_x(hover_pos.x);
                 return Some(at);
             }
         }
@@ -970,18 +1286,22 @@ impl Stave {
     ) -> CommandApplication {
         let diff = self
             .history
-            .borrow_mut()
+            .write()
+            .expect("Write stave.history.")
             .update_track(|track| action(&self, track));
         self.transition = Self::animate_edit(
             context,
             transition_id,
-            diff.clone().map(|diff| (diff.0 .0, diff.1)),
+            diff.clone().map(|diff| (diff.0.0, diff.1)),
         );
         diff
     }
 
     fn max_time(&self) -> Time {
-        self.history.borrow().with_track(|track| track.max_time())
+        self.history
+            .read()
+            .expect("Read stave.history.")
+            .with_track(|track| track.max_time())
     }
 
     fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
@@ -1028,7 +1348,12 @@ impl Stave {
             if let Some(draw) = &self.note_draw.clone() {
                 if !draw.time.is_empty() {
                     let time_range = (draw.time.0, draw.time.1);
-                    let id_seq = &self.history.borrow().id_seq.clone();
+                    let id_seq = &self
+                        .history
+                        .read()
+                        .expect("Read stave.history.")
+                        .id_seq
+                        .clone();
                     self.do_edit_command(&response.ctx, response.id, |_stave, track| {
                         if draw.pitch == PIANO_DAMPER_LANE {
                             set_damper(id_seq, track, &time_range, !modifiers.alt)
@@ -1048,22 +1373,54 @@ impl Stave {
         }
     }
 
-    fn draw_cursor(&self, painter: &Painter, x: Pix, color: Color32) {
-        painter.vline(
-            x,
-            painter.clip_rect().y_range(),
-            Stroke { width: 2.0, color },
-        );
+    fn cursor_shape(&self, y_range: &Rangef, x: Pix, color: Color32) -> Shape {
+        Shape::vline(x, *y_range, Stroke { width: 2.0, color })
     }
 
-    fn note_animation_params(ev: Option<&TrackEvent>) -> Option<((Time, Time), Pitch, Level)> {
-        ev.and_then(|ev| {
-            if let TrackEventType::Note(n) = &ev.event {
-                Some(((ev.at, ev.at + n.duration), n.pitch, n.velocity))
-            } else {
-                None // CC is animated separately.
-            }
-        })
+    fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shape, Shape)> {
+        debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
+        match (action.before(), action.after()) {
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
+            ) => Some((
+                self.track_note_shape(id_a, at_a, a, None, ty),
+                self.track_note_shape(id_b, at_b, b, None, ty),
+            )),
+            // New note
+            (
+                None,
+                Some(TrackEvent {
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
+            ) => Some((
+                self.track_note_shape(id_b, at_b, b, Some(COLOR_NOTHING), ty),
+                self.track_note_shape(id_b, at_b, b, None, ty),
+            )),
+            // Deleted note
+            (
+                Some(TrackEvent {
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
+                None,
+            ) => Some((
+                self.track_note_shape(id_a, at_a, a, None, ty),
+                self.track_note_shape(id_a, at_a, a, Some(COLOR_NOTHING), ty),
+            )),
+            _ => None,
+        }
     }
 
     fn note_color(&self, velocity: &Level, selected: bool) -> Color32 {
@@ -1074,83 +1431,98 @@ impl Stave {
         }
     }
 
-    fn draw_track_note(
+    // TODO (cleanup) Remove now redundant painting procedures
+    fn note_event_shape(&self, event: &TrackEvent, note: &Note, ty: &TYScale) -> Shape {
+        self.track_note_shape(&event.id, &event.at, note, None, ty)
+    }
+
+    fn track_note_shape(
         &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        event: &TrackEvent,
+        event_id: &EventId,
+        at: &Time,
         note: &Note,
-    ) -> Option<Rect> {
-        if let Some(y) = key_ys.get(&note.pitch) {
-            Some(self.draw_note(
-                &painter,
-                (event.at, event.at + note.duration),
-                *y,
-                *half_tone_step,
-                self.note_color(&note.velocity, self.note_selection.contains(&event)),
-            ))
-        } else {
-            None
+        color: Option<Color32>,
+        ty: &TYScale,
+    ) -> Shape {
+        Self::note_shape(
+            (*at, at + note.duration),
+            &note.pitch,
+            color.unwrap_or(
+                self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
+            ),
+            ty,
+        )
+    }
+
+    fn note_shape(time_range: (Time, Time), pitch: &Pitch, color: Color32, ty: &TYScale) -> Shape {
+        Shape::Rect(RectShape::filled(
+            Self::event_rect(time_range, &pitch, ty),
+            CornerRadius::ZERO,
+            color,
+        ))
+    }
+
+    fn event_rect(time_range: (Time, Time), pitch: &Pitch, ty: &TYScale) -> Rect {
+        let y = ty.y(&pitch);
+        Rect {
+            min: Pos2 {
+                x: ty.x(&time_range.0),
+                y: y - ty.y_step * 0.5,
+            },
+            max: Pos2 {
+                x: ty.x(&time_range.1),
+                y: y + ty.y_step * 0.5,
+            },
         }
     }
 
-    fn draw_note_transition(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        should_be_visible: &mut Option<range::Range<Time>>,
-        coeff: f32,
-        is_selected: bool,
-        a: Option<((Time, Time), Pitch, Level)>,
-        b: Option<((Time, Time), Pitch, Level)>,
-    ) {
-        // Interpolate the note states.
-        assert!(a.is_some() || b.is_some());
-        let ((t1_a, t2_a), p_a, v_a) = a.or(b).unwrap();
-        let ((t1_b, t2_b), p_b, v_b) = b.or(a).unwrap();
-
-        *should_be_visible = should_be_visible
-            .map(|(a, b)| (a.min(t1_a), b.max(t2_a)))
-            .or(Some((t1_a, t2_a)));
-
-        // May want to handle gracefully when note gets in/out of visible pitch range.
-        // Just patching with existing y for now.
-        let y_a = key_ys.get(&p_a).or(key_ys.get(&p_b)).unwrap();
-        let y_b = key_ys.get(&p_b).or(key_ys.get(&p_a)).unwrap();
-        let y = egui::lerp(*y_a..=*y_b, coeff);
-
-        let t1 = egui::lerp(t1_a as f64..=t1_b as f64, coeff as f64) as i64;
-        let t2 = egui::lerp(t2_a as f64..=t2_b as f64, coeff as f64) as i64;
-
-        let c_a = self.note_color(&v_a, is_selected);
-        let c_b = self.note_color(&v_b, is_selected);
-        let color = Self::transition_color(c_a, c_b, coeff);
-
-        self.draw_note(&painter, (t1, t2), y, *half_tone_step, color);
+    fn hover_shape(event: &TrackEvent, ty: &TYScale) -> Option<Shape> {
+        match &event.event {
+            TrackEventType::Note(note) => Some(Shape::Rect(RectShape::stroke(
+                Self::event_rect((event.at, event.at + note.duration), &note.pitch, ty),
+                CornerRadius::ZERO,
+                Stroke::new(2.0, COLOR_HOVERED),
+                StrokeKind::Middle,
+            ))),
+            _ => None,
+        }
     }
 
-    fn draw_note(
-        &self,
-        painter: &Painter,
-        time_range: (Time, Time),
-        y: Pix,
-        height: Pix,
-        color: Color32,
-    ) -> Rect {
+    // To draw note immediately (without intermediate meshes).
+    fn paint_note(&self, time_range: (Time, Time), y: Pix, height: Pix, color: Color32) -> Shape {
         let paint_rect = Rect {
             min: Pos2 {
-                x: self.x_from_time(time_range.0),
+                x: self.viewport.x_from_time(time_range.0),
                 y: y - height * 0.45,
             },
             max: Pos2 {
-                x: self.x_from_time(time_range.1),
+                x: self.viewport.x_from_time(time_range.1),
                 y: y + height * 0.45,
             },
         };
-        painter.rect_filled(paint_rect, CornerRadius::ZERO, color);
-        paint_rect
+        Shape::Rect(RectShape::filled(paint_rect, CornerRadius::ZERO, color))
+    }
+
+    fn default_draw_note(
+        &self,
+        velocity: Level,
+        x_range: (Time, Time),
+        y: Pix,
+        height: Pix,
+        selected: bool,
+    ) -> Shape {
+        self.paint_note(x_range, y, height, self.note_color(&velocity, selected))
+    }
+
+    fn point_accent_shape(time: &Time, pitch: &Pitch, color: Color32, ty: &TYScale) -> Shape {
+        Shape::circle_filled(
+            Pos2 {
+                x: ty.x(time),
+                y: ty.y(pitch),
+            },
+            ty.y_step / 2.2,
+            color,
+        )
     }
 
     fn draw_point_accent(
@@ -1163,29 +1535,11 @@ impl Stave {
     ) {
         painter.circle_filled(
             Pos2 {
-                x: self.x_from_time(time),
+                x: self.viewport.x_from_time(time),
                 y,
             },
             height / 2.2,
             color,
-        );
-    }
-
-    fn default_draw_note(
-        &self,
-        painter: &Painter,
-        velocity: Level,
-        x_range: (Time, Time),
-        y: Pix,
-        height: Pix,
-        selected: bool,
-    ) {
-        self.draw_note(
-            painter,
-            x_range,
-            y,
-            height,
-            self.note_color(&velocity, selected),
         );
     }
 
@@ -1202,66 +1556,99 @@ impl Stave {
         }
     }
 
-    fn cc_animation_params(ev: Option<&TrackEvent>) -> Option<(Time, Level)> {
-        ev.and_then(|ev| {
-            if let TrackEventType::Controller(cc) = &ev.event {
-                debug_assert_eq!(cc.controller_id, MIDI_CC_SUSTAIN_ID);
-                Some((ev.at, cc.value))
-            } else {
-                None
-            }
-        })
-    }
-
-    fn draw_cc_transition(
-        &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
-        should_be_visible: &mut Option<range::Range<Time>>,
-        coeff: f32,
-        a: Option<(Time, Level)>,
-        b: Option<(Time, Level)>,
-    ) {
-        assert!(a.is_some() || b.is_some());
-        if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-            let (t1, v1) = a.or(b).unwrap();
-            let (t2, v2) = b.or(a).unwrap();
-
-            let t = egui::lerp(t1 as f64..=t2 as f64, coeff as f64) as i64;
-
-            let c_a = self.note_color(&v1, false);
-            let c_b = self.note_color(&v2, false);
-            let color = Self::transition_color(c_a, c_b, coeff);
-            *should_be_visible = should_be_visible
-                .map(|r| (r.0.min(t2), r.1.max(t2)))
-                .or(Some((t2, t2)));
-            debug_assert!(should_be_visible.is_some());
-            // Previous CC value is not available here, so just showing an accent here for now.
-            self.draw_point_accent(painter, t, *y, *half_tone_step, color);
+    fn cc_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shape, Shape)> {
+        match (action.before(), action.after()) {
+            (
+                Some(TrackEvent {
+                    id: _id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
+                Some(TrackEvent {
+                    id: _id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
+            ) => Some((
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&a.value, false),
+                    ty,
+                ),
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&b.value, false),
+                    ty,
+                ),
+            )),
+            // New CC value
+            (
+                None,
+                Some(TrackEvent {
+                    id: _id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
+            ) => Some((
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&b.value, false),
+                    ty,
+                ),
+                Self::point_accent_shape(
+                    at_b,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&b.value, false),
+                    ty,
+                ),
+            )),
+            // Deleted value
+            (
+                Some(TrackEvent {
+                    id: _id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
+                None,
+            ) => Some((
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&a.value, false),
+                    ty,
+                ),
+                Self::point_accent_shape(
+                    at_a,
+                    &PIANO_DAMPER_LANE,
+                    self.note_color(&a.value, false),
+                    ty,
+                ),
+            )),
+            _ => None,
         }
     }
 
-    fn draw_track_cc(
+    fn default_track_cc_shape(
         &self,
-        key_ys: &BTreeMap<Pitch, Pix>,
-        half_tone_step: &Pix,
-        painter: &Painter,
         last_damper_value: &mut (Time, Level),
         event: &TrackEvent,
         cc: &ControllerSetValue,
-    ) {
+        ty: &TYScale,
+    ) -> Option<Shape> {
         if cc.controller_id == MIDI_CC_SUSTAIN_ID {
-            if let Some(y) = key_ys.get(&PIANO_DAMPER_LANE) {
-                self.draw_note(
-                    painter,
-                    (last_damper_value.0, event.at),
-                    *y,
-                    *half_tone_step,
-                    self.note_color(&last_damper_value.1, false),
-                );
-                *last_damper_value = (event.at, cc.value);
-            }
+            let shape = Self::note_shape(
+                (last_damper_value.0, event.at),
+                &PIANO_DAMPER_LANE,
+                self.note_color(&last_damper_value.1, false),
+                ty,
+            );
+            *last_damper_value = (event.at, cc.value);
+            Some(shape)
+        } else {
+            None
         }
     }
 
@@ -1297,11 +1684,11 @@ impl Stave {
         let clip = painter.clip_rect();
         let area = Rect {
             min: Pos2 {
-                x: self.x_from_time(selection.0),
+                x: self.viewport.x_from_time(selection.0),
                 y: clip.min.y,
             },
             max: Pos2 {
-                x: self.x_from_time(selection.1),
+                x: self.viewport.x_from_time(selection.1),
                 y: clip.max.y,
             },
         };
@@ -1325,19 +1712,22 @@ impl Stave {
     }
 
     fn ensure_visible(&mut self, at: Time) {
-        let x_range = self.view_rect.x_range();
-        let x = self.x_from_time(at);
+        let x_range = self.viewport.view_rect.x_range();
+        let x = self.viewport.x_from_time(at);
         if !x_range.contains(x) {
             if x_range.max < x {
-                self.scroll_to(at, 0.7);
+                self.viewport.scroll_to(at, 0.7);
             } else {
-                self.scroll_to(at, 0.3);
+                self.viewport.scroll_to(at, 0.3);
             }
         }
     }
 
     fn is_visible(&self, at: Time) -> bool {
-        self.view_rect.x_range().contains(self.x_from_time(at))
+        self.viewport
+            .view_rect
+            .x_range()
+            .contains(self.viewport.x_from_time(at))
     }
 }
 
@@ -1362,10 +1752,131 @@ fn is_black_key(tone: &Pitch) -> bool {
 fn closest_pitch(pitch_ys: &BTreeMap<Pitch, Pix>, pointer_pos: Pos2) -> Pitch {
     *pitch_ys
         .iter()
-        .min_by_key(|(_, &y)| OrderedFloat((y - pointer_pos.y).abs()))
+        .min_by_key(|(_, y)| OrderedFloat((**y - pointer_pos.y).abs()))
         .unwrap()
         .0
 }
 
+// Barycentric sign test
+#[inline]
+fn cross_prod(u: Vec2, v: Vec2) -> f32 {
+    u.x * v.y - u.y * v.x
+}
+
+#[inline]
+fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
+    let c1 = cross_prod(b - a, p - a);
+    let c2 = cross_prod(c - b, p - b);
+    let c3 = cross_prod(a - c, p - c);
+
+    (c1 >= 0.0 && c2 >= 0.0 && c3 >= 0.0) || (c1 <= 0.0 && c2 <= 0.0 && c3 <= 0.0)
+}
+
+// #[inline]
+// fn nth_triangle_indices(mesh: &Mesh, triangle_idx: usize) -> (u32, u32, u32) {
+//     let idx = triangle_idx * 3;
+//     (
+//         mesh.indices[idx],
+//         mesh.indices[idx + 1],
+//         mesh.indices[idx + 2],
+//     )
+// }
+
+#[inline]
+fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {
+    let idx = triangle_idx * 3;
+    let a = mesh.vertices[mesh.indices[idx] as usize].pos;
+    let b = mesh.vertices[mesh.indices[idx + 1] as usize].pos;
+    let c = mesh.vertices[mesh.indices[idx + 2] as usize].pos;
+    point_in_triangle(p, a, b, c)
+}
+
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::Viewport;
+    use eframe::egui::{Pos2, Rect};
+
+    #[test]
+    fn check_default_lanes_y_scaling() {
+        let viewport = Viewport {
+            time_range: (0, 2000),
+            view_rect: Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 { x: 200.0, y: 108.0 },
+            },
+        };
+        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.0));
+        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
+        // let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
+        // // dbg!(step, &pitches);
+        // assert_eq!(
+        //     Viewport::pitch_y_default(&PIANO_LOWEST_KEY),
+        //     Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32
+        // );
+        // assert_eq!(
+        //     Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)),
+        //     0.0
+        // );
+        // for p in STAVE_KEY_LANES.range() {
+        //     let pitch_y = pitches.get(&p);
+        //     let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
+        //     dbg!(
+        //         p,
+        //         &pitch_y.unwrap(),
+        //         translated_y,
+        //         pitch_y.unwrap() - translated_y
+        //     );
+        //     assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
+        // }
+    }
+
+    #[test]
+    fn check_time_x_scaling() {
+        let viewport = Viewport {
+            time_range: (0, 2_345_678),
+            view_rect: Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 {
+                    x: 1000.0,
+                    y: 108.0,
+                },
+            },
+        };
+        for t in [-13, 0, 1234, 23, 100006] {
+            assert!((viewport.time_from_x(viewport.x_from_time(t)) - t).abs() <= 1);
+        }
+        for x in [-3.3, 0.0, 0.01, 0.044, 134.0, 1.8765444e7] {
+            assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
+        }
+
+        // TODO Check key_ys and pre-render events ys match.
+        // dbg!(
+        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
+        //     Viewport::DEFAULT_TIME_SCALE_DENOM
+        // );
+        // assert!(
+        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS))
+        //         < Viewport::DEFAULT_TIME_SCALE_DENOM
+        // );
+
+        // for t in [
+        //     -123454321,
+        //     -33001,
+        //     0,
+        //     33,
+        //     1564,
+        //     7000,
+        //     8321,
+        //     123_000_098,
+        //     Viewport::ZOOM_TIME_LIMIT,
+        // ] {
+        //     let tt = viewport.x_from_time(Viewport::x_default_from_time(t));
+        //     assert!(
+        //         (viewport.x_from_default(Viewport::x_default_from_time(t))
+        //             - viewport.x_from_time(t))
+        //         .abs()
+        //             < 0.01
+        //     );
+        // }
+    }
+}

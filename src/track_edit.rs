@@ -6,7 +6,6 @@ use crate::track::{is_cc_switch_on, ControllerId, ControllerSetValue, EventId, L
 use crate::util::IdSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use log::log;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub enum EditCommandId {
@@ -351,9 +350,8 @@ pub fn accent_selected_notes(
 }
 
 pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Option<AppliedCommand> {
-    let mut diff = vec![];
     assert!(range.1 - range.0 > 0);
-    diff.push(CommandDiff::ChangeList {
+    let action = CommandDiff::ChangeList {
         patch: vec![EventAction::Insert(TrackEvent {
             id: id_seq.next(),
             at: range.0,
@@ -363,8 +361,8 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
                 duration: range.1 - range.0,
             }),
         })],
-    });
-    Some((EditCommandId::AddNote, diff))
+    };
+    Some((EditCommandId::AddNote, vec![action]))
 }
 
 fn cc_event(id_seq: &IdSeq, at: &Time, value: Level) -> TrackEvent {
