@@ -685,7 +685,7 @@ impl Stave {
                     }
                     TrackEventType::Bookmark => {
                         let shape = self.cursor_shape(
-                            &self.viewport.view_rect.y_range(),
+                            &Rangef::new(0.0, self.viewport.view_rect.y_range().span()),
                             ty.x(&event.at),
                             Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         );
@@ -1467,11 +1467,11 @@ impl Stave {
         Rect {
             min: Pos2 {
                 x: ty.x(&time_range.0),
-                y: y - ty.y_step * 0.5,
+                y: y - ty.y_step * 0.45,
             },
             max: Pos2 {
                 x: ty.x(&time_range.1),
-                y: y + ty.y_step * 0.5,
+                y: y + ty.y_step * 0.45,
             },
         }
     }
