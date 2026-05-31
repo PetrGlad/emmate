@@ -148,9 +148,9 @@ impl Default for Viewport {
 
 // Zoom and scroll parameters.
 impl Viewport {
-    /// Limit viewable range to +-30 hours to avoid under/overflows and stay in a sensible range.
-    /// World record playing piano seems to be 130 hours, so some might find this limiting.
-    // I would like to use Duration but that is not "const compatible" yet.
+    /// Limit viewable range to [-30,30] hours to avoid under/overflows and stay in a sensible range.
+    /// World record playing piano continuously is 130 hours, so someone might find this limiting.
+    // I would like to use Duration here but that is not "const compatible" yet.
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
     pub fn lanes_y_half_tone(&self) -> f32 {
@@ -181,27 +181,6 @@ impl Viewport {
         debug_assert!(self.view_rect.width() > 0.0);
         self.time_range.0 + ((x - self.view_rect.min.x) / self.time_scale()) as Time
     }
-
-    // #[inline]
-    // pub fn x_from_default(&self, x_default: Pix) -> Pix {
-    //     debug_assert!(self.view_rect.width() > 0.0);
-    //     self.view_rect.min.x
-    //         + (x_default - Viewport::x_default_from_time(self.time_range.0))
-    //             * self.time_scale()
-    //             * Self::DEFAULT_TIME_SCALE_DENOM as f32
-    // }
-
-    // #[inline]
-    // pub fn y_from_default(&self, y: &Pix) -> Pix {
-    //     emath::remap(
-    //         *y,
-    //         Rangef::new(
-    //             Viewport::DEFAULT_HALF_TONE_STEP,
-    //             Viewport::DEFAULT_HALF_TONE_STEP * STAVE_KEY_LANES.len() as f32,
-    //         ),
-    //         self.lanes_y_range(),
-    //     )
-    // }
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that time position under mouse pointer stays put.
@@ -254,35 +233,16 @@ pub struct Stave {
     // Velocity -> note_color lookup map
     note_colors: Vec<Color32>,
 
-    // Experimental
-    // Using SyncCOW to support multithreaded mesh generation. Is not needed otherwise.
-    // TODO Multithreaded generation does help to offload from single cpu but is rather inefficient still.
-    //   Now I wan to experiment with on-demand mesh generation and using lerp on mesh itself for animation
-    //   (because I am curious, that is why):
-    //   * During transitions use 2 meshes "before" and "after" and generate the output by interpolation for animation.
-    //   * Only re-generate mesh when track changes.
-    //   * Scale the mesh itself to support zoom/scroll. Maybe this would look like:
-    //             out := lerp(before, after); zoom(&mut out)
-    //   * When showing and edit action, generate another mesh with the new state.
-    //      * Update "before" one with placeholders for insertions.
-    //      * After mesh would have placeholders for deletions.
-    //   This would require:
-    //   * To tessellate track at some default scale.
-    //   * Ensure size(before.vertices) == size(after.vertices), deleted state can be represented as completely transparent color.
-    //   * When animation finishes, before := after; discard_deleted(&mut before); truncate(&mut after).
-    //   * The generated mesh can include notes and CC. I would not want to scale bookmarks or text.
-    //   * No need to allocate meshes every time
     meshes: RefCell<Meshes>,
 }
 
-/**
-Track view model.
-Mesh data flow: (a, b) -> interpolate -> unscaled -> vertical-remap -> scaled_y -> zoom-scroll -> out -> render
-This is split into stages to shift most frequent updates later so we can re-use the calculations.
-*/
+// Track view model.
+// Mesh data flow: (before, after) -> interpolate -> pre-scaled -> zoom-scroll -> out -> render
+// This is split into stages to shift most frequent updates later so we can
+// re-use the calculations and save battery.
 #[derive(Default, Clone)]
 struct Meshes {
-    // TODO (cleanup) This change tracing becomes a bit tedious. Is there a generic implementation?
+    // TODO (cleanup) This change tracing becomes a bit tedious. Can there be a more generic implementation?
     // Track version id, used to detect changes in events (edit changes).
     version_id: VersionId,
     // Track selection changes.
@@ -300,8 +260,8 @@ struct Meshes {
     scaled: Mesh,
 
     // Horizontal/vertical scaling.
-    height: Pix,
-    time_scale: f64,
+    ty: TYScale,
+
     // Scroll/translation.
     time_start: Time,
     xy: Pos2,
@@ -312,15 +272,27 @@ struct Meshes {
     out: Arc<Mesh>,
 }
 
-// Holds time (x) and vertical (y, lanes) scaling for stave.
+// Holds time (x) and vertical (y, lanes) scaling that corresponds to a Stave's Viewport.
+#[derive(Default, Clone, PartialEq)]
 struct TYScale {
     // Pix/uSec
     time_scale: f64,
+    // Viewport height
+    height: Pix,
     // Y step per lane
     y_step: Pix,
 }
 
 impl TYScale {
+    fn new(viewport: &Viewport) -> Self {
+        let height = viewport.view_rect.height();
+        TYScale {
+            time_scale: viewport.view_rect.width() as f64 / viewport.time_range.len() as f64,
+            height,
+            y_step: height / STAVE_KEY_LANES.len() as f32,
+        }
+    }
+
     #[inline]
     pub fn x(&self, at: &Time) -> Pix {
         (*at as f64 * self.time_scale) as Pix
@@ -605,7 +577,6 @@ impl Stave {
         let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
 
-        // TODO Use tesselator scale from settings.
         let tessel_options = TessellationOptions::default();
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
@@ -614,13 +585,8 @@ impl Stave {
         let has_selection_changed = meshes.selection_version != self.note_selection.version
             || meshes.time_selection != self.time_selection;
 
-        let height = self.viewport.view_rect.height();
-        let ty = TYScale {
-            y_step: height / STAVE_KEY_LANES.len() as f32,
-            time_scale: self.viewport.view_rect.width() as f64
-                / self.viewport.time_range.len() as f64,
-        };
-        let has_scale_changed = height != meshes.height || ty.time_scale != meshes.time_scale;
+        let ty = TYScale::new(&self.viewport);
+        let has_scale_changed = meshes.ty != ty;
         let mut animation_bounds = Rect::NOTHING;
 
         if has_version_changed || has_scale_changed || has_selection_changed {
@@ -639,8 +605,8 @@ impl Stave {
                     } else if let Some((shape_a, shape_b)) = self.cc_animation(action, &ty) {
                         tessellator.tessellate_shape(shape_a, &mut before);
                         tessellator.tessellate_shape(shape_b, &mut after);
-                    } else {
-                        // E.g. a bookmark.
+                    } else { // E.g. a bookmark.
+                        // Note that missing animation means view will not be scrolled to these events on undo/redo.
                     }
                 }
                 // Current animation procedure assumes that only vertices change.
@@ -694,8 +660,7 @@ impl Stave {
             meshes.version_id = version_id;
             meshes.selection_version = self.note_selection.version;
             meshes.time_selection = self.time_selection;
-            meshes.height = height;
-            meshes.time_scale = ty.time_scale;
+            meshes.ty = ty.to_owned();
         }
 
         let mut animated = Mesh::default();
@@ -1752,16 +1717,6 @@ fn point_in_triangle(p: Pos2, a: Pos2, b: Pos2, c: Pos2) -> bool {
     (c1 >= 0.0 && c2 >= 0.0 && c3 >= 0.0) || (c1 <= 0.0 && c2 <= 0.0 && c3 <= 0.0)
 }
 
-// #[inline]
-// fn nth_triangle_indices(mesh: &Mesh, triangle_idx: usize) -> (u32, u32, u32) {
-//     let idx = triangle_idx * 3;
-//     (
-//         mesh.indices[idx],
-//         mesh.indices[idx + 1],
-//         mesh.indices[idx + 2],
-//     )
-// }
-
 #[inline]
 fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool {
     let idx = triangle_idx * 3;
@@ -1796,7 +1751,9 @@ mod tests {
                 max: Pos2 { x: 200.0, y: 108.0 },
             },
         };
-        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.0));
+
+        // FIXME update the tests: check that view-port scaling is consistent with TYScale
+        // dbg!(TYScale::pitch_y_default(&PIANO_KEY_LINES.0));
         // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
         // let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
         // // dbg!(step, &pitches);
