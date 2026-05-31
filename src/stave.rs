@@ -115,15 +115,12 @@ impl EditTransition {
 
     pub fn update(&mut self, ctx: &Context) {
         self.coeff = ctx.animate_bool(self.animation_id, true);
-        dbg!(self.coeff);
     }
 
     pub fn value(&self) -> Option<f32> {
         if self.coeff >= 1.0 {
-            dbg!("end-coeff", self.coeff);
             None
         } else {
-            dbg!(self.coeff);
             Some(self.coeff)
         }
     }
@@ -584,10 +581,9 @@ impl Stave {
         )
     }
 
-    fn shift_mesh(mesh: &mut Mesh, xy: &Pos2) {
+    fn shift_mesh(mesh: &mut Mesh, by: &Vec2) {
         for v in &mut mesh.vertices {
-            v.pos.x += xy.x;
-            v.pos.y += xy.y;
+            v.pos += *by;
         }
     }
 
@@ -625,6 +621,7 @@ impl Stave {
                 / self.viewport.time_range.len() as f64,
         };
         let has_scale_changed = height != meshes.height || ty.time_scale != meshes.time_scale;
+        let mut animation_bounds = Rect::NOTHING;
 
         if has_version_changed || has_scale_changed || has_selection_changed {
             meshes.events = track.index_events();
@@ -635,7 +632,6 @@ impl Stave {
             if let Some(trans) = &self.transition {
                 let mut before = Mesh::default();
                 let mut after = Mesh::default();
-                // dbg!("anim-new/changes", &trans.changeset.changes.iter().take(5));
                 for (_ev_id, action) in &trans.changeset.changes {
                     if let Some((shape_a, shape_b)) = self.note_animation(action, &ty) {
                         tessellator.tessellate_shape(shape_a, &mut before);
@@ -652,12 +648,12 @@ impl Stave {
                 assert_eq!(before.indices.len(), after.indices.len());
                 assert_eq!(before.vertices.len(), after.vertices.len());
 
+                if !before.is_empty() {
+                    // Only triggering this once per edit, it seems to be sufficient.
+                    bounding_rect(&before, &mut animation_bounds);
+                    bounding_rect(&after, &mut animation_bounds);
+                }
                 meshes.transition = Some((before, after));
-                /* TODO Restore function: show all affected event on edit action.
-                        Calculate single bounding box of before and after
-                        into should_be_visible.
-                */
-                dbg!("anim-new/id", meshes.version_id);
             }
 
             let mut last_damper_value: (Time, Level) = (0, DEFAULT_CC_LEVEL);
@@ -665,7 +661,6 @@ impl Stave {
                 if meshes.transition.is_some() {
                     if let Some(trans) = &self.transition {
                         if trans.changeset.changes.contains_key(&event.id) {
-                            dbg!("skip id", event.id);
                             continue;
                         }
                     }
@@ -708,7 +703,6 @@ impl Stave {
             debug_assert!(0.0 <= coeff && coeff <= 1.0);
             debug_assert!(meshes.transition.is_some());
             if let Some((mesh_a, mesh_b)) = &meshes.transition {
-                dbg!("anim-lerp", meshes.version_id, coeff);
                 animated.clone_from(mesh_a);
                 animated.vertices.clear();
                 for (va, vb) in mesh_a.vertices.iter().zip(mesh_b.vertices.iter()) {
@@ -728,19 +722,25 @@ impl Stave {
             // Animation end.
             meshes.transition = None;
             meshes.version_id = -1; // Force repaint without animation parts next time.
-            dbg!("anim-reset", meshes.version_id);
         }
 
         let is_animating = !animated.is_empty();
         // Horizontal zoom and scrolling.
         let has_position_changed = meshes.xy != self.viewport.view_rect.min
             || meshes.time_start != self.viewport.time_range.0;
-        let shift = self.viewport.view_rect.min
+        // Diff between 0,0 origin of default mesh rendering and viewport position.
+        let shift = self.viewport.view_rect.min.to_vec2()
             // Time scrolling
             + Vec2 {
                 x: -ty.x(&self.viewport.time_range.0),
                 y: 0f32,
             };
+        if is_animating && animation_bounds != Rect::NOTHING {
+            should_be_visible = Some((
+                self.viewport.time_from_x(animation_bounds.min.x + shift.x),
+                self.viewport.time_from_x(animation_bounds.max.x + shift.x),
+            ));
+        }
         if has_version_changed
             || has_scale_changed
             || has_selection_changed
@@ -759,18 +759,13 @@ impl Stave {
         painter.add(Shape::mesh(meshes.out.to_owned()));
 
         // Contains shapes that may change every frame, not caching these.
-        // TODO (cleanup) Maybe animation meshes should also be here.
         let mut transients_mesh = Mesh::default();
-        // TODO (optimization) Linear lookup (see also selection hints). This and other parts of this
-        //  pipeline can be optimized with a spatial tree, but it is fast enough for now.
+        // TODO (optimization) Linear lookup (see also selection hints). This and other parts of
+        //   this pipeline can be optimized with a spatial tree, but it is fast enough for now.
         if let Some(&pointer_pos) = pointer_pos.as_ref() {
             // Hover
             for triangle in 0..meshes.out_events.len() {
                 let event_id = meshes.out_events[triangle];
-                // if self.note_selection.contains(&event_id) {
-                //     let (a, b, c) = nth_triangle_indices(&meshes.out, triangle);
-                //     transients_mesh.(a, b, c);
-                // }
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(event_id);
                     let ev = meshes
@@ -822,11 +817,9 @@ impl Stave {
     }
 
     pub fn show(&mut self, ui: &mut Ui) -> StaveResponse {
-        // dbg!("before", &self.transition);
         if let Some(transition) = &mut self.transition {
             transition.update(&ui.ctx())
         }
-        // dbg!("after", &self.transition);
         let stave_response = self.view(ui);
 
         if let Some(note_id) = stave_response.note_hovered {
@@ -843,9 +836,7 @@ impl Stave {
         if had_transition && self.transition.is_none() {
             ui.ctx().clear_animations();
             ui.ctx().request_repaint();
-            dbg!("CLEAR", &self.transition);
         }
-        // dbg!("drawn", &self.history.read().unwrap().version());
 
         let inner = &stave_response.response;
         self.update_new_note_draw(
@@ -857,20 +848,10 @@ impl Stave {
 
         self.update_time_selection(&inner, &stave_response.time_hovered);
 
-        let dbg_version_before = self.history.read().unwrap().version();
         let new_cursor_position = self.handle_commands(&inner);
         if let Some(pos) = new_cursor_position {
             self.cursor_position = pos;
             self.ensure_visible(pos);
-        }
-
-        // dbg!("commands-handled", self.history.read().unwrap().version());
-        if dbg_version_before != self.history.read().unwrap().version() {
-            dbg!(
-                "requesting-repaint",
-                &self.history.read().unwrap().version()
-            );
-            ui.ctx().request_repaint();
         }
 
         StaveResponse {
@@ -1788,6 +1769,17 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
     let b = mesh.vertices[mesh.indices[idx + 1] as usize].pos;
     let c = mesh.vertices[mesh.indices[idx + 2] as usize].pos;
     point_in_triangle(p, a, b, c)
+}
+
+fn bounding_rect(mesh: &Mesh, bounds: &mut Rect) {
+    assert!(!mesh.vertices.is_empty());
+    for v in &mesh.vertices[0..] {
+        let p = v.pos;
+        bounds.min.x = bounds.min.x.min(p.x);
+        bounds.min.y = bounds.min.y.min(p.y);
+        bounds.max.x = bounds.max.x.max(p.x);
+        bounds.max.y = bounds.max.y.max(p.y);
+    }
 }
 
 #[cfg(test)]
