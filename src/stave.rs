@@ -2,16 +2,16 @@ use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
-    export_smf, ControllerSetValue, EventId, Level, Note, Pitch, Track,
-    TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID,
+    ControllerSetValue, DEFAULT_CC_LEVEL, EventId, Level, MAX_LEVEL, MIDI_CC_SUSTAIN_ID, Note,
+    Pitch, Track, TrackEvent, TrackEventType, export_smf,
 };
 use crate::track_edit::{
-    accent_selected_notes, add_new_note, clear_bookmark, delete_selected, set_bookmark,
-    set_damper, shift_selected, shift_tail, stretch_selected_notes, tape_delete, tape_insert,
-    tape_stretch, transpose_selected_notes, AppliedCommand, EditCommandId,
+    AppliedCommand, EditCommandId, accent_selected_notes, add_new_note, clear_bookmark,
+    delete_selected, set_bookmark, set_damper, shift_selected, shift_tail, stretch_selected_notes,
+    tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{range, Pix};
+use crate::{Pix, range};
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
@@ -294,12 +294,12 @@ impl TYScale {
     }
 
     #[inline]
-    pub fn x(&self, at: &Time) -> Pix {
+    fn x(&self, at: &Time) -> Pix {
         (*at as f64 * self.time_scale) as Pix
     }
 
     #[inline]
-    pub fn y(&self, pitch: &Pitch) -> f32 {
+    fn y(&self, pitch: &Pitch) -> Pix {
         (STAVE_KEY_LANES.len() + PIANO_LOWEST_KEY - pitch - CONTROL_LANES_COUNT) as Pix
             * self.y_step
             - self.y_step / 2.0
@@ -1727,7 +1727,6 @@ fn point_inside_mesh_triangle(mesh: &Mesh, triangle_idx: usize, p: Pos2) -> bool
 }
 
 fn bounding_rect(mesh: &Mesh, bounds: &mut Rect) {
-    assert!(!mesh.vertices.is_empty());
     for v in &mesh.vertices[0..] {
         let p = v.pos;
         bounds.min.x = bounds.min.x.min(p.x);
@@ -1739,51 +1738,40 @@ fn bounding_rect(mesh: &Mesh, bounds: &mut Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::Viewport;
+    use super::{PIANO_DAMPER_LANE, STAVE_KEY_LANES, TYScale, Viewport, key_line_ys};
+    use crate::range::RangeLike;
     use eframe::egui::{Pos2, Rect};
 
+    // Check that y (lanes) coordinates in mesh rendering is consistent with direct paints.
     #[test]
-    fn check_default_lanes_y_scaling() {
+    fn check_viewport_lanes_y_scaling() {
         let viewport = Viewport {
             time_range: (0, 2000),
             view_rect: Rect {
-                min: Pos2 { x: 0.0, y: 0.0 },
+                min: Pos2 { x: 13.0, y: 17.0 },
                 max: Pos2 { x: 200.0, y: 108.0 },
             },
         };
-
-        // FIXME update the tests: check that view-port scaling is consistent with TYScale
-        // dbg!(TYScale::pitch_y_default(&PIANO_KEY_LINES.0));
-        // dbg!(Viewport::pitch_y_default(&PIANO_KEY_LINES.1));
-        // let (pitches, step) = super::key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
-        // // dbg!(step, &pitches);
-        // assert_eq!(
-        //     Viewport::pitch_y_default(&PIANO_LOWEST_KEY),
-        //     Viewport::DEFAULT_HALF_TONE_STEP * PIANO_KEY_COUNT as f32
-        // );
-        // assert_eq!(
-        //     Viewport::pitch_y_default(&(PIANO_LOWEST_KEY + PIANO_KEY_COUNT)),
-        //     0.0
-        // );
-        // for p in STAVE_KEY_LANES.range() {
-        //     let pitch_y = pitches.get(&p);
-        //     let translated_y = viewport.y_from_default(&Viewport::pitch_y_default(&p));
-        //     dbg!(
-        //         p,
-        //         &pitch_y.unwrap(),
-        //         translated_y,
-        //         pitch_y.unwrap() - translated_y
-        //     );
-        //     assert!((pitch_y.unwrap() - &translated_y).abs() < 0.05f32);
-        // }
+        let ty = TYScale::new(&viewport);
+        let (pitches, step) = key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
+        assert_eq!(ty.y_step, step);
+        let translated_y = |pitch| ty.y(&pitch) + viewport.view_rect.min.y;
+        assert!(
+            (translated_y(PIANO_DAMPER_LANE) - pitches.get(&PIANO_DAMPER_LANE).unwrap()).abs()
+                < 0.001f32
+        );
+        for pitch in STAVE_KEY_LANES.range() {
+            assert!((translated_y(pitch) - pitches.get(&pitch).unwrap()).abs() < 0.001f32);
+        }
     }
 
+    // Check that x (time) coordinates in mesh rendering is consistent with direct paints.
     #[test]
-    fn check_time_x_scaling() {
+    fn check_viewport_time_x_scaling() {
         let viewport = Viewport {
             time_range: (0, 2_345_678),
             view_rect: Rect {
-                min: Pos2 { x: 0.0, y: 0.0 },
+                min: Pos2 { x: 13.0, y: 31.0 },
                 max: Pos2 {
                     x: 1000.0,
                     y: 108.0,
@@ -1797,34 +1785,27 @@ mod tests {
             assert!((viewport.x_from_time(viewport.time_from_x(x)) - x).abs() < 1e-3);
         }
 
-        // TODO Check key_ys and pre-render events ys match.
-        // dbg!(
-        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS)),
-        //     Viewport::DEFAULT_TIME_SCALE_DENOM
-        // );
-        // assert!(
-        //     (Viewport::ZOOM_TIME_LIMIT / (1i64 << Pix::MANTISSA_DIGITS))
-        //         < Viewport::DEFAULT_TIME_SCALE_DENOM
-        // );
-
-        // for t in [
-        //     -123454321,
-        //     -33001,
-        //     0,
-        //     33,
-        //     1564,
-        //     7000,
-        //     8321,
-        //     123_000_098,
-        //     Viewport::ZOOM_TIME_LIMIT,
-        // ] {
-        //     let tt = viewport.x_from_time(Viewport::x_default_from_time(t));
-        //     assert!(
-        //         (viewport.x_from_default(Viewport::x_default_from_time(t))
-        //             - viewport.x_from_time(t))
-        //         .abs()
-        //             < 0.01
-        //     );
-        // }
+        let ty = TYScale::new(&viewport);
+        for t in [
+            -123454321,
+            -33001,
+            0,
+            33,
+            1564,
+            7000,
+            8321,
+            123_000_098,
+            Viewport::ZOOM_TIME_LIMIT,
+        ] {
+            dbg!(
+                &t,
+                ty.x(&t) + viewport.view_rect.min.x,
+                viewport.x_from_time(t),
+                ((ty.x(&t) + viewport.view_rect.min.x) / viewport.x_from_time(t))
+            );
+            assert!(
+                ((ty.x(&t) + viewport.view_rect.min.x) / viewport.x_from_time(t)) - 1.0 < 1e-12
+            );
+        }
     }
 }
