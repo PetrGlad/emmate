@@ -93,7 +93,7 @@ pub struct EditTransition {
     pub animation_id: egui::Id,
     pub command_id: EditCommandId,
     pub changeset: Changeset,
-    /// 0.0 -> 1.0
+    /// Interpolation coefficient in [0.0,1.0]
     pub coeff: f32,
 }
 
@@ -184,7 +184,6 @@ impl Viewport {
 
     pub fn zoom(&mut self, zoom_factor: f32, mouse_x: Pix) {
         // Zoom so that time position under mouse pointer stays put.
-        // TODO (cleanup) Consider using emath::remap
         let at = self.time_from_x(mouse_x);
         self.time_range.0 = (at - ((at - self.time_range.0) as f32 / zoom_factor) as Time)
             .max(-Self::ZOOM_TIME_LIMIT)
@@ -845,7 +844,7 @@ impl Stave {
      * Applies the command and returns time to move the stave cursor to.
      */
     fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
-        // TODO Have to see if duplication here can be reduced. Likely the dispatch needs some
+        // TODO (cleanup) Have to see if duplication here can be reduced. Likely the dispatch needs some
         //   hash map that for each input state defines a unique command.
         //   Need to support focus somehow so the commands only active when stave is focused.
         //   Currently commands also affect other widgets (e.g. arrows change button focus).
@@ -1275,7 +1274,7 @@ impl Stave {
         time: &Option<Time>,
         pitch: &Option<Pitch>,
     ) {
-        // TODO Extract the drag pattern? See also update_time_selection.
+        // TODO (cleanup) Extract the drag pattern? See also update_time_selection.
         //      See how egui can help, there seem to be already some drag&drop support.
         let drag_button = PointerButton::Middle;
         if response.clicked_by(drag_button) {
@@ -1376,7 +1375,6 @@ impl Stave {
         }
     }
 
-    // TODO (cleanup) Remove now redundant painting procedures
     fn note_event_shape(&self, event: &TrackEvent, note: &Note, ty: &TYScale) -> Shape {
         self.track_note_shape(&event.id, &event.at, note, None, ty)
     }
