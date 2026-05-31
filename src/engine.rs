@@ -1,14 +1,14 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use midir::MidiOutputConnection;
-use midly::live::LiveEvent;
-use midly::num::u7;
 use midly::MidiMessage;
 use midly::MidiMessage::NoteOff;
+use midly::live::LiveEvent;
+use midly::num::u7;
 
 use crate::common::Time;
 use crate::track::{ChannelId, MIDI_CC_SUSTAIN_ID};

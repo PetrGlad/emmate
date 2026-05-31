@@ -1,7 +1,7 @@
 use crate::track_history::TrackHistory;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{absolute, Path, PathBuf};
+use std::path::{Path, PathBuf, absolute};
 use std::sync::{Arc, RwLock};
 
 // Persistence format version

@@ -2,7 +2,10 @@ use crate::changeset::{EventAction, EventActionsList};
 use crate::common::Time;
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::stave::PIANO_KEY_LINES;
-use crate::track::{is_cc_switch_on, ControllerId, ControllerSetValue, EventId, Level, Note, Pitch, Track, TrackEvent, TrackEventType, DEFAULT_CC_LEVEL, MAX_LEVEL, MIDI_CC_SUSTAIN_ID};
+use crate::track::{
+    ControllerId, ControllerSetValue, DEFAULT_CC_LEVEL, EventId, Level, MAX_LEVEL,
+    MIDI_CC_SUSTAIN_ID, Note, Pitch, Track, TrackEvent, TrackEventType, is_cc_switch_on,
+};
 use crate::util::IdSeq;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -379,7 +382,6 @@ fn cc_event(id_seq: &IdSeq, at: &Time, value: Level) -> TrackEvent {
 fn sustain_event(id_seq: &IdSeq, at: &Time, on: bool) -> TrackEvent {
     cc_event(id_seq, at, if on { MAX_LEVEL } else { 0 })
 }
-
 
 /// Set damper CC value.
 pub fn set_damper(

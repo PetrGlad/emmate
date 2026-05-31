@@ -1,5 +1,5 @@
 use std::sync::mpsc::Sender;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use midir::{MidiInput, MidiInputConnection, MidiOutputConnection};
 use midly::live::LiveEvent;

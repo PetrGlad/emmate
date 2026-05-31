@@ -1,9 +1,9 @@
 use std::time::Duration;
 
+use midly::MidiMessage::Controller;
 use midly::io::WriteResult;
 use midly::live::LiveEvent;
 use midly::num::u15;
-use midly::MidiMessage::Controller;
 use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent};
 
 use crate::common::Time;
@@ -79,7 +79,9 @@ fn usec_per_tick(timing: &Timing) -> u32 {
     let usec_per_tick = 1_000_000 / (DEFAULT_BEATS_PER_SEC * tick_per_beat);
     log::info!(
         "tick/beat {:#?}, beat/second  {:#?}, usec/tick {:#?}",
-        tick_per_beat, DEFAULT_BEATS_PER_SEC, usec_per_tick
+        tick_per_beat,
+        DEFAULT_BEATS_PER_SEC,
+        usec_per_tick
     );
     usec_per_tick
 }

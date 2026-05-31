@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::project::PROJECT_FORMAT_ID;
-use crate::track::{import_smf, Track};
-use crate::track_edit::{apply_diffs, revert_diffs, AppliedCommand, CommandDiff, EditCommandId};
+use crate::track::{Track, import_smf};
+use crate::track_edit::{AppliedCommand, CommandDiff, EditCommandId, apply_diffs, revert_diffs};
 use crate::util;
 use crate::util::IdSeq;
 use glob::glob;
@@ -110,7 +110,11 @@ impl TrackHistory {
         let version = self.get_version(version_id);
         assert_eq!(version.id, version_id);
         if version.is_empty() {
-            log::info!("No track version found for version_id={} (max_version_id={}).", version_id, self.max_version);
+            log::info!(
+                "No track version found for version_id={} (max_version_id={}).",
+                version_id,
+                self.max_version
+            );
             return false;
         }
         {

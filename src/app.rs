@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use eframe::egui::{Modifiers, Vec2};
-use eframe::{self, egui, CreationContext};
+use eframe::{self, CreationContext, egui};
 use egui_extras::{Size, StripBuilder};
 
 use crate::common::Time;

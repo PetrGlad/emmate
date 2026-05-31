@@ -2,11 +2,11 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic;
 
+use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use flate2::Compression;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Default)]
 pub struct IdSeq(atomic::AtomicU64);
