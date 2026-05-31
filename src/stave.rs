@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-// Tone 60 is C3, tones start at C-2 (tone 21).
+// Tone 60 is C3, piano tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
 const PIANO_KEY_COUNT: Pitch = 88;
 /// Reserve this ley lane for damper display.
@@ -1797,12 +1797,6 @@ mod tests {
             123_000_098,
             Viewport::ZOOM_TIME_LIMIT,
         ] {
-            dbg!(
-                &t,
-                ty.x(&t) + viewport.view_rect.min.x,
-                viewport.x_from_time(t),
-                ((ty.x(&t) + viewport.view_rect.min.x) / viewport.x_from_time(t))
-            );
             assert!(
                 ((ty.x(&t) + viewport.view_rect.min.x) / viewport.x_from_time(t)) - 1.0 < 1e-12
             );
