@@ -26,6 +26,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use arrayvec::ArrayVec;
 
 // Tone 60 is C3, piano tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -214,6 +215,8 @@ impl Viewport {
         );
     }
 }
+
+type Shapes = ArrayVec<Shape, 2>;
 
 // #[derive(Debug)]
 pub struct Stave {
@@ -598,8 +601,12 @@ impl Stave {
                 let mut after = Mesh::default();
                 for (_ev_id, action) in &trans.changeset.changes {
                     if let Some((shape_a, shape_b)) = self.note_animation(action, &ty) {
-                        tessellator.tessellate_shape(shape_a, &mut before);
-                        tessellator.tessellate_shape(shape_b, &mut after);
+                        for s in shape_a {
+                            tessellator.tessellate_shape(s, &mut before);
+                        }
+                        for s in shape_b {
+                            tessellator.tessellate_shape(s, &mut after);
+                        }
                     } else if let Some((shape_a, shape_b)) = self.cc_animation(action, &ty) {
                         tessellator.tessellate_shape(shape_a, &mut before);
                         tessellator.tessellate_shape(shape_b, &mut after);
@@ -631,8 +638,10 @@ impl Stave {
                 }
                 match &event.event {
                     TrackEventType::Note(note) => {
-                        let shape = self.note_event_shape(&event, &note, &ty);
-                        tessellator.tessellate_shape(shape, &mut meshes.scaled);
+                        let shapes = self.note_event_shape(&event, &note, &ty);
+                        for s in shapes {
+                            tessellator.tessellate_shape(s, &mut meshes.scaled);
+                        }
                     }
                     TrackEventType::Controller(cc) => {
                         if let Some(shape) =
@@ -735,7 +744,7 @@ impl Stave {
                         .events
                         .get(&event_id)
                         .expect("hovered event is on the track");
-                    if let Some(hover_shape) = Stave::hover_shape(&ev, &ty) {
+                    if let Some(hover_shape) = Stave::event_outline_shape(&ev, &ty) {
                         tessellator.tessellate_shape(hover_shape, &mut transients_mesh);
                     }
                     break;
@@ -1320,7 +1329,7 @@ impl Stave {
         Shape::vline(x, *y_range, Stroke { width: 2.0, color })
     }
 
-    fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shape, Shape)> {
+    fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shapes, Shapes)> {
         debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
         match (action.before(), action.after()) {
             (
@@ -1374,7 +1383,7 @@ impl Stave {
         }
     }
 
-    fn note_event_shape(&self, event: &TrackEvent, note: &Note, ty: &TYScale) -> Shape {
+    fn note_event_shape(&self, event: &TrackEvent, note: &Note, ty: &TYScale) -> Shapes {
         self.track_note_shape(&event.id, &event.at, note, None, ty)
     }
 
@@ -1385,15 +1394,26 @@ impl Stave {
         note: &Note,
         color: Option<Color32>,
         ty: &TYScale,
-    ) -> Shape {
-        Self::note_shape(
+    ) -> Shapes {
+        let mut shapes = ArrayVec::new();
+        shapes.push(Self::note_shape(
             (*at, at + note.duration),
             &note.pitch,
             color.unwrap_or(
-                self.note_color(&note.velocity, self.note_selection.contains(&event_id)),
+                self.note_color(&note.velocity, false),
             ),
             ty,
-        )
+        ));
+        if self.note_selection.contains(&event_id) {
+            let at1 = *at;
+            shapes.push(Shape::Rect(RectShape::stroke(
+                Self::event_rect((at1, at1 + note.duration), &note.pitch, ty),
+                CornerRadius::ZERO,
+                Stroke::new(2.0, COLOR_SELECTED),
+                StrokeKind::Inside,
+                )));
+        }
+        shapes
     }
 
     fn note_shape(time_range: (Time, Time), pitch: &Pitch, color: Color32, ty: &TYScale) -> Shape {
@@ -1418,14 +1438,18 @@ impl Stave {
         }
     }
 
-    fn hover_shape(event: &TrackEvent, ty: &TYScale) -> Option<Shape> {
+    fn event_outline_shape(event: &TrackEvent, ty: &TYScale) -> Option<Shape> {
         match &event.event {
-            TrackEventType::Note(note) => Some(Shape::Rect(RectShape::stroke(
-                Self::event_rect((event.at, event.at + note.duration), &note.pitch, ty),
-                CornerRadius::ZERO,
-                Stroke::new(2.0, COLOR_HOVERED),
-                StrokeKind::Middle,
-            ))),
+            TrackEventType::Note(note) => {
+                let at = event.at;
+                Some(
+                    Shape::Rect(RectShape::stroke(
+                        Self::event_rect((at, at + note.duration), &note.pitch, ty),
+                        CornerRadius::ZERO,
+                        Stroke::new(2.0, COLOR_HOVERED),
+                        StrokeKind::Middle,
+                    )))
+            }
             _ => None,
         }
     }
