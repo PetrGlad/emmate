@@ -172,35 +172,42 @@ impl Engine {
         if !self.paused {
             self.update_realtime();
         }
-        self.command_sender
-            .send(Box::new(|engine| {
-                if engine.paused {
-                    // Mute ongoing notes before clearing.
-                    engine.queue.clear();
-                    for key in 0..u7::max_value().into() {
-                        engine.process(LiveEvent::Midi {
-                            channel: MIDI_CHANNEL.into(),
-                            message: NoteOff {
-                                key: key.into(),
-                                vel: 64.into(),
-                            },
-                        });
-                    }
-                    engine.process(LiveEvent::Midi {
-                        channel: MIDI_CHANNEL.into(),
-                        message: MidiMessage::Controller {
-                            controller: MIDI_CC_SUSTAIN_ID.into(),
-                            value: 0.into(),
-                        },
-                    });
-                } else if let Some(sustain) = engine.current_sustain {
-                    engine.queue.push(EngineEvent {
-                        at: engine.running_at,
-                        event: sustain,
-                    });
-                }
-            }))
-            .unwrap();
+        self.process_paused_state();
+    }
+
+    pub fn stop(&mut self) {
+        self.paused = true;
+        self.process_paused_state();
+    }
+
+    fn process_paused_state(&mut self) {
+        if self.paused {
+            // Mute ongoing notes before clearing.
+            self.queue.clear();
+            for key in 0..u7::max_value().into() {
+                self.process(LiveEvent::Midi {
+                    channel: MIDI_CHANNEL.into(),
+                    message: NoteOff {
+                        key: key.into(),
+                        vel: 64.into(),
+                    },
+                });
+            }
+            self.process(LiveEvent::Midi {
+                channel: MIDI_CHANNEL.into(),
+                message: MidiMessage::Controller {
+                    controller: MIDI_CC_SUSTAIN_ID.into(),
+                    value: 0.into(),
+                },
+            });
+        } else if let Some(sustain) = self.current_sustain {
+            // TODO (playback) Lookup sustain state from the track at current
+            //      time position instead. Would this require cloent-side logic?
+            self.queue.push(EngineEvent {
+                at: self.running_at,
+                event: sustain,
+            });
+        }
     }
 
     /// Stop all sounds.
