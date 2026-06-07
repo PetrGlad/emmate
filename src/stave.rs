@@ -24,7 +24,7 @@ use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
 use egui::Rgba;
 use ordered_float::OrderedFloat;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -156,13 +156,6 @@ impl Viewport {
 
     pub fn lanes_y_half_tone(&self) -> f32 {
         self.view_rect.height() / STAVE_KEY_LANES.len() as f32
-    }
-
-    pub fn lanes_y_range(&self) -> Rangef {
-        Rangef::new(
-            self.view_rect.top() + self.lanes_y_half_tone() / 2.0,
-            self.view_rect.bottom() - self.lanes_y_half_tone() / 2.0,
-        )
     }
 
     /// Pixel/uSec, can be cached.
@@ -827,20 +820,6 @@ impl Stave {
         }
     }
 
-    fn event_hovered(
-        pitch_hovered: &Option<Pitch>,
-        time_hovered: &Option<Time>,
-        event: &TrackEvent,
-        pitch: &Pitch,
-    ) -> bool {
-        if let Some(t) = &time_hovered {
-            if let Some(p) = pitch_hovered {
-                return event.is_active_at(*t) && p == pitch;
-            }
-        }
-        false
-    }
-
     const KEYBOARD_TIME_STEP: Time = 10_000;
 
     /**
@@ -1500,6 +1479,7 @@ impl Stave {
         );
     }
 
+    // TODO (usability) Reimplement mid-transition color flash?
     fn transition_color(color_a: Color32, color_b: Color32, coeff: f32) -> Color32 {
         // color a -> red -> color b
         if coeff < 0.5 {
