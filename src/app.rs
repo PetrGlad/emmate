@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use eframe::egui::{Modifiers, Vec2};
@@ -23,12 +24,14 @@ pub struct EmApp {
     engine_command_send: mpsc::Sender<Box<EngineCommand>>,
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
+    stop_app: Arc<AtomicBool>,
 }
 
 impl EmApp {
     pub fn new(
         ctx: &CreationContext,
         engine_command_send: mpsc::Sender<Box<EngineCommand>>,
+        stop_app: Arc<AtomicBool>,
         project: Project,
     ) -> EmApp {
         let (message_sender, message_receiver) = mpsc::channel();
@@ -40,6 +43,7 @@ impl EmApp {
             engine_command_send,
             message_receiver,
             follow_playback: false,
+            stop_app,
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -94,6 +98,9 @@ impl EmApp {
 
 impl eframe::App for EmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.stop_app.load(std::sync::atomic::Ordering::Relaxed) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
                 Message::UpdateTime(t) => {
@@ -105,6 +112,7 @@ impl eframe::App for EmApp {
                 }
             }
         }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
@@ -242,7 +250,7 @@ impl eframe::App for EmApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        log::info!("Closing.");
+        log::info!("Bye.");
         self.engine_command_send
             .send(Box::new(move |engine| engine.stop()))
             .unwrap();

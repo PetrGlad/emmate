@@ -55,6 +55,7 @@ clap_complete = "4.6.0"
 indoc = "2"
 dirs = "6"
 arrayvec = "0.7.6"
+signal-hook = "0.4.4"
 
 num = "0.4.3"
 # rhai = "1.20.1"

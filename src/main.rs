@@ -8,11 +8,15 @@ use clap::Command;
 use clap_complete::aot as cli_complete;
 use eframe::egui;
 use indoc::indoc;
-use midir::MidiOutput;
 use midir::os::unix::VirtualOutput;
+use midir::MidiOutput;
+use signal_hook::consts::signal::*;
+use signal_hook::flag;
 use std::io;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -111,6 +115,8 @@ pub fn main() {
             .send(Box::new(|engine| engine.add(Box::new(track_midi_source))))
             .unwrap();
     }
+    let interrupted = Arc::new(AtomicBool::new(false));
+    flag::register(SIGINT, Arc::clone(&interrupted)).expect("set Ctrl-C handler");
 
     let mut midi_inputs = vec![]; // Keeps inputs open
     midi_inputs.push(audio_setup::midi_keyboard_input(
@@ -138,7 +144,7 @@ pub fn main() {
                 style.visuals = egui::Visuals::light();
                 style.animation_time = 0.2;
             });
-            Ok(Box::new(EmApp::new(ctx, engine_command_sender, project)))
+            Ok(Box::new(EmApp::new(ctx, engine_command_sender, interrupted, project)))
         }),
     )
     .expect("Emmate UI")
