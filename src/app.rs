@@ -240,4 +240,11 @@ impl eframe::App for EmApp {
                 });
         });
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        log::info!("Closing.");
+        self.engine_command_send
+            .send(Box::new(move |engine| engine.stop()))
+            .unwrap();
+    }
 }
