@@ -12,6 +12,7 @@ use crate::track_edit::{
 };
 use crate::track_history::{CommandApplication, TrackHistory};
 use crate::{Pix, range};
+use arrayvec::ArrayVec;
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
@@ -26,7 +27,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use arrayvec::ArrayVec;
 
 // Tone 60 is C3, piano tones start at C-2 (tone 21).
 const PIANO_LOWEST_KEY: Pitch = 21;
@@ -250,10 +250,6 @@ struct Meshes {
     // Track selection changes.
     selection_version: u64,
     time_selection: Option<Range<Time>>,
-
-    // TODO (cleanup) This map can be cached in the tack itself, but need to ensure
-    //      it is updated after each track change.
-    events: HashMap<EventId, TrackEvent>,
 
     // Beginning and end of ongoing animation.
     transition: Option<(Mesh, Mesh)>,
@@ -591,7 +587,6 @@ impl Stave {
         let mut animation_bounds = Rect::NOTHING;
 
         if has_version_changed || has_scale_changed || has_selection_changed {
-            meshes.events = track.index_events();
             // (!) Assuming vertice indices will not change in subsequent transformations.
             meshes.out_events.clear();
             meshes.scaled.clear();
@@ -740,8 +735,8 @@ impl Stave {
                 let event_id = meshes.out_events[triangle];
                 if point_inside_mesh_triangle(&meshes.out, triangle, pointer_pos) {
                     *note_hovered = Some(event_id);
-                    let ev = meshes
-                        .events
+                    let ev = track
+                        .track_map
                         .get(&event_id)
                         .expect("hovered event is on the track");
                     if let Some(hover_shape) = Stave::event_outline_shape(&ev, &ty) {
@@ -1330,7 +1325,7 @@ impl Stave {
     }
 
     fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shapes, Shapes)> {
-        debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT);
+        debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT); // Transparent is optimized out by epaint.
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
@@ -1399,19 +1394,16 @@ impl Stave {
         shapes.push(Self::note_shape(
             (*at, at + note.duration),
             &note.pitch,
-            color.unwrap_or(
-                self.note_color(&note.velocity, false),
-            ),
+            color.unwrap_or(self.note_color(&note.velocity, false)),
             ty,
         ));
         if self.note_selection.contains(&event_id) {
-            let at1 = *at;
             shapes.push(Shape::Rect(RectShape::stroke(
-                Self::event_rect((at1, at1 + note.duration), &note.pitch, ty),
+                Self::event_rect((*at, *at + note.duration), &note.pitch, ty),
                 CornerRadius::ZERO,
                 Stroke::new(2.0, COLOR_SELECTED),
                 StrokeKind::Inside,
-                )));
+            )));
         }
         shapes
     }
@@ -1442,13 +1434,12 @@ impl Stave {
         match &event.event {
             TrackEventType::Note(note) => {
                 let at = event.at;
-                Some(
-                    Shape::Rect(RectShape::stroke(
-                        Self::event_rect((at, at + note.duration), &note.pitch, ty),
-                        CornerRadius::ZERO,
-                        Stroke::new(2.0, COLOR_HOVERED),
-                        StrokeKind::Middle,
-                    )))
+                Some(Shape::Rect(RectShape::stroke(
+                    Self::event_rect((at, at + note.duration), &note.pitch, ty),
+                    CornerRadius::ZERO,
+                    Stroke::new(2.0, COLOR_HOVERED),
+                    StrokeKind::Middle,
+                )))
             }
             _ => None,
         }

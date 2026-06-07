@@ -99,11 +99,13 @@ pub struct Track {
     /* Events must always be kept ordered by start time ascending.
     This is a requirement of TrackSource. */
     pub events: Vec<TrackEvent>,
+    pub track_map: HashMap<EventId, TrackEvent>,
 }
 
 impl Track {
     pub fn reset(&mut self, snapshot: Snapshot) {
         self.events = snapshot.events;
+        self.track_map = self.index_events();
     }
 
     pub fn index_events(&self) -> HashMap<EventId, TrackEvent> {
@@ -114,27 +116,26 @@ impl Track {
         track_map
     }
 
-    fn splat_events(&mut self, indexed: &HashMap<EventId, TrackEvent>) {
-        self.events = indexed.values().cloned().collect();
+    fn splat_events(&mut self) {
+        self.events = self.track_map.values().cloned().collect();
         self.events.sort();
     }
 
     pub fn patch(&mut self, changes: &EventActionsList) {
-        let mut track_map = self.index_events();
         for ea in changes {
             match ea.after() {
                 Some(ev) => {
                     assert_eq!(
-                        track_map.insert(ev.id, ev.clone()).is_some(),
+                        self.track_map.insert(ev.id, ev.clone()).is_some(),
                         matches!(ea, EventAction::Update(_, _))
                     );
                 }
                 None => {
-                    assert!(track_map.remove(&ea.event_id()).is_some());
+                    assert!(self.track_map.remove(&ea.event_id()).is_some());
                 }
             }
         }
-        self.splat_events(&track_map);
+        self.splat_events();
     }
 
     pub fn commit(&mut self) {
@@ -143,6 +144,7 @@ impl Track {
 
     pub fn insert_event(&mut self, ev: TrackEvent) {
         let idx = self.events.partition_point(|x| x < &ev);
+        self.track_map.insert(ev.id, ev.to_owned());
         self.events.insert(idx, ev);
         self.commit();
     }
