@@ -284,11 +284,10 @@ struct TYScale {
 
 impl TYScale {
     fn new(viewport: &Viewport) -> Self {
-        let height = viewport.view_rect.height();
         TYScale {
             time_scale: viewport.view_rect.width() as f64 / viewport.time_range.len() as f64,
-            height,
-            y_step: height / STAVE_KEY_LANES.len() as f32,
+            height: viewport.view_rect.height(),
+            y_step: viewport.lanes_y_half_tone(),
         }
     }
 
@@ -1740,7 +1739,7 @@ mod tests {
     use crate::range::RangeLike;
     use eframe::egui::{Pos2, Rect};
 
-    // Check that y (lanes) coordinates in mesh rendering is consistent with direct paints.
+    // Check that y (lanes) coordinates in mesh rendering are consistent with direct paints.
     #[test]
     fn check_viewport_lanes_y_scaling() {
         let viewport = Viewport {
@@ -1763,7 +1762,7 @@ mod tests {
         }
     }
 
-    // Check that x (time) coordinates in mesh rendering is consistent with direct paints.
+    // Check that x (time) coordinates in mesh rendering are consistent with direct paints.
     #[test]
     fn check_viewport_time_x_scaling() {
         let viewport = Viewport {
