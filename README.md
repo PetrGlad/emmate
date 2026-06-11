@@ -75,7 +75,7 @@ E.g. one can launch stand-alone Pianoteq for that.
 
 ## TODO
 
-- [ ] (bug) Events are not displayed when stave zoomed-in too close.
+- [ ] (improvement) Audition hovered lanes, and notes. Should be optional, turned off by default. Hold Alt, maybe?
 - [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time,
   though. Use tabs? Alternatively, several emmate windows may cooperate, each showing one stave at a time.
   This will probably require support for opening all related scores at once, as a project, or at least have "recent scores" menu.
@@ -83,12 +83,14 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [ ] (improvement) Use intermediate state snapshots in edit history (currently diffs also include previous state).
   Need also logic to decide when the snapshot should be made. This change should produce more compact on-disk files
   without duplication.
+- [ ] (bug, graphics) Events are not displayed when stave zoomed-in too close.
 - [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (snapshot version can be marked on export).
 - [ ] (usability) Do not undo initial import (it is confusing).
 - [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
   Use spatial tree: set of ranges, with mapping range -> events-visible-in-that-range.
   This lookup can also speed-up selection hints and hovers.
 - [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
+- [ ] (usability) Vertical zoom.
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
 - [ ] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.
@@ -100,11 +102,12 @@ E.g. one can launch stand-alone Pianoteq for that.
   is note height jitter on zoom.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
-- [ ] (improvement) Stop all sounds when program is closed.
 - [ ] (improvement) Play from new position should reflect current damper CC state (in cases when pedal is pressed
-  earlier and there are no CC event at the cursor).
-- [x] (cleanup) Stave rendering cleanup: there is some now-unused code left after Meshes rendering revamp. 
-- [x] (test) Implement xy-scaling check in tests. 
+  earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
+  the CC info is on track, but engine should query when playback is started.
+- [x] (improvement) Stop all sounds when program is closed.
+- [x] (cleanup) Stave rendering cleanup: there is some now-unused code left after Meshes rendering revamp.
+- [x] (test) Implement xy-scaling check in tests.
 - [x] (performance) Render events into a mesh that can be scrolled and re-used when track does not change.
   Now there is 0 CPU usage when paused, and <<100% CPU usage on follow-playback scrolling. Can be optimized
   further with spatial tree.
