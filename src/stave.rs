@@ -806,7 +806,11 @@ impl Stave {
             &stave_response.pitch_hovered,
         );
 
-        self.update_time_selection(&inner, &stave_response.time_hovered);
+        self.update_time_selection(
+            inner,
+            &stave_response.modifiers,
+            &stave_response.time_hovered,
+        );
 
         let new_cursor_position = self.handle_commands(&inner);
         if let Some(pos) = new_cursor_position {
@@ -1230,17 +1234,23 @@ impl Stave {
             .with_track(|track| track.max_time())
     }
 
-    fn update_time_selection(&mut self, response: &egui::Response, time: &Option<Time>) {
+    fn update_time_selection(
+        &mut self,
+        response: &egui::Response,
+        modifiers: &Modifiers,
+        time: &Option<Time>,
+    ) {
         let drag_button = PointerButton::Primary;
+        // TODO (cleanup) Extract the drag pattern? See also update_new_note_draw.
         if response.clicked_by(drag_button) {
             self.time_selection = None;
-        } else if response.drag_started_by(drag_button) {
+        } else if response.drag_started_by(drag_button) && modifiers.is_none() {
             if let Some(time) = time {
                 self.time_selection = Some((*time, *time));
             }
         } else if response.drag_stopped_by(drag_button) {
             // Just documenting how it can be handled
-        } else if response.dragged_by(drag_button) {
+        } else if response.dragged_by(drag_button) && modifiers.is_none() {
             if let Some(time) = time {
                 if let Some(selection) = &mut self.time_selection {
                     selection.1 = *time;
@@ -1257,11 +1267,10 @@ impl Stave {
         pitch: &Option<Pitch>,
     ) {
         // TODO (cleanup) Extract the drag pattern? See also update_time_selection.
-        //      See how egui can help, there seem to be already some drag&drop support.
-        let drag_button = PointerButton::Middle;
+        let drag_button = PointerButton::Primary;
         if response.clicked_by(drag_button) {
             self.note_draw = None;
-        } else if response.drag_started_by(drag_button) {
+        } else if response.drag_started_by(drag_button) && modifiers.alt {
             if let Some(time) = time {
                 if let Some(pitch) = pitch {
                     self.note_draw = Some(NoteDraw {

@@ -105,6 +105,7 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [ ] (improvement) Play from new position should reflect current damper CC state (in cases when pedal is pressed
   earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
   the CC info is on track, but engine should query when playback is started.
+- [x] (improvement) Support note drawing with touchpad (on ThinkPad, scroll button does not seem to be registered as middle click).
 - [x] (improvement) Stop all sounds when program is closed.
 - [x] (cleanup) Stave rendering cleanup: there is some now-unused code left after Meshes rendering revamp.
 - [x] (test) Implement xy-scaling check in tests.
