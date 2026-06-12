@@ -378,7 +378,7 @@ impl Stave {
                 {
                     // TODO (cleanup) Use stack layout instead?
                     let mut ruler_rect = bounds.clone();
-                    let style = ui.ctx().style();
+                    let style = ui.ctx().global_style();
                     let ruler_height = style.text_styles[&Body].size;
                     *bounds.top_mut() += ruler_height;
                     self.viewport.view_rect = bounds;

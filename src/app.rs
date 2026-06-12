@@ -3,21 +3,15 @@ use crate::engine::{Engine, EngineCommand, StatusEvent};
 use crate::note_sampler::NoteTester;
 use crate::project::Project;
 use crate::stave::Stave;
-use crate::track::{Level, Pitch};
-use clap::command;
-use eframe::egui::{Key, Modifiers, Vec2};
+use eframe::egui::{Key, Modifiers, Ui, Vec2};
 use eframe::{self, CreationContext, egui};
 use egui_extras::{Size, StripBuilder};
-use midly::MidiMessage;
-use midly::live::LiveEvent;
-use midly::num::{u4, u7};
 use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
-use std::thread::sleep;
 use std::time::Duration;
-use std::{fs, thread};
 
 enum Message {
     UpdateTime(Time),
@@ -105,9 +99,9 @@ impl EmApp {
 }
 
 impl eframe::App for EmApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         if self.stop_app.load(std::sync::atomic::Ordering::Relaxed) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if let Some(message) = self.message_receiver.try_iter().last() {
             match message {
@@ -121,7 +115,7 @@ impl eframe::App for EmApp {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     Modifiers::NONE,
@@ -145,7 +139,7 @@ impl eframe::App for EmApp {
             }) {
                 self.stave
                     .viewport
-                    .scroll_by(ctx.available_rect().width() / -4.0);
+                    .scroll_by(ui.ctx().content_rect().width() / -4.0);
             } else if ui.input_mut(|i| {
                 i.consume_shortcut(&egui::KeyboardShortcut::new(
                     Modifiers::NONE,
@@ -154,7 +148,7 @@ impl eframe::App for EmApp {
             }) {
                 self.stave
                     .viewport
-                    .scroll_by(ctx.available_rect().width() / 4.0);
+                    .scroll_by(ui.ctx().content_rect().width() / 4.0);
             }
 
             {
@@ -263,10 +257,10 @@ impl eframe::App for EmApp {
         });
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        log::info!("Bye.");
-        self.engine_command_send
-            .send(Box::new(move |engine| engine.stop()))
-            .unwrap();
-    }
+    // fn on_exit(&mut self, _gl: Option<&eframe::Context>) {
+    //     log::info!("Bye.");
+    //     self.engine_command_send
+    //         .send(Box::new(move |engine| engine.stop()))
+    //         .unwrap();
+    // }
 }

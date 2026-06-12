@@ -1,9 +1,6 @@
 use crate::engine::EngineCommand;
-use crate::track::{ChannelId, Level, Pitch};
+use crate::track::Pitch;
 use crate::{engine, midi};
-use midly::MidiMessage;
-use midly::live::LiveEvent;
-use midly::num::{u4, u7};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::thread::sleep;
@@ -33,7 +30,7 @@ impl NoteTester {
         let pitch = *pitch;
         let lock = self.lock.clone();
         thread::spawn(move || {
-            let Ok(lock) = lock.try_lock() else {
+            let Ok(_lock) = lock.try_lock() else {
                 return; // Just try next time.
             };
             command_sender

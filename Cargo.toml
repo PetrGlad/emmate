@@ -18,8 +18,8 @@ tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
 # tracing-tree = "0.2.1"
 
 ordered-float = "5.1.0"
-eframe = { version = "0.33.3"}
-egui_extras = { version = "0.33.3" }
+eframe = { version = "0.34.3"}
+egui_extras = { version = "0.34.3" }
 # rayon = "1.11.0"
 
 # https://github.com/negamartin/midly
