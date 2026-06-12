@@ -209,6 +209,7 @@ impl Viewport {
     }
 }
 
+// Currently only using at most 2 elements, extend this if necessary.
 type Shapes = ArrayVec<Shape, 2>;
 
 // #[derive(Debug)]
@@ -569,7 +570,8 @@ impl Stave {
         let font_tex_size = [0, 0]; // unused
         let prepared_discs = vec![]; // unused
 
-        let tessel_options = TessellationOptions::default();
+        let mut tessel_options = TessellationOptions::default();
+        tessel_options.coarse_tessellation_culling = false;
         let mut tessellator = Tessellator::new(1.0, tessel_options, font_tex_size, prepared_discs);
 
         let mut meshes = self.meshes.borrow_mut();
@@ -603,7 +605,13 @@ impl Stave {
                     } else { // E.g. a bookmark.
                         // Note that missing animation means view will not be scrolled to these events on undo/redo.
                     }
+                    // Even if care is taken to match numbers of elements in `before` and `after` meshes,
+                    // epaint may optimize out some elements. Patching the difference to ensure animation
+                    // interpolation will work in any case.
+                    debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT); // Transparent is optimized out by epaint.
+                    match_animation_meshes(&mut before, &mut after, &COLOR_NOTHING);
                 }
+
                 // Current animation procedure assumes that only vertices change.
                 // Hence, "before" to "after" mapping should be 1 to 1.
                 assert_eq!(before.indices.len(), after.indices.len());
@@ -694,9 +702,9 @@ impl Stave {
         let shift = self.viewport.view_rect.min.to_vec2()
             // Time scrolling
             + Vec2 {
-                x: -ty.x(&self.viewport.time_range.0),
-                y: 0f32,
-            };
+            x: -ty.x(&self.viewport.time_range.0),
+            y: 0f32,
+        };
         if is_animating && animation_bounds != Rect::NOTHING {
             should_be_visible = Some((
                 self.viewport.time_from_x(animation_bounds.min.x + shift.x),
@@ -1321,7 +1329,6 @@ impl Stave {
     }
 
     fn note_animation(&self, action: &EventAction, ty: &TYScale) -> Option<(Shapes, Shapes)> {
-        debug_assert!(COLOR_NOTHING != Color32::TRANSPARENT); // Transparent is optimized out by epaint.
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
@@ -1347,7 +1354,7 @@ impl Stave {
                     event: TrackEventType::Note(b),
                 }),
             ) => Some((
-                self.track_note_shape(id_b, at_b, b, Some(COLOR_NOTHING), ty),
+                ArrayVec::new(),
                 self.track_note_shape(id_b, at_b, b, None, ty),
             )),
             // Deleted note
@@ -1360,7 +1367,7 @@ impl Stave {
                 None,
             ) => Some((
                 self.track_note_shape(id_a, at_a, a, None, ty),
-                self.track_note_shape(id_a, at_a, a, Some(COLOR_NOTHING), ty),
+                ArrayVec::new(),
             )),
             _ => None,
         }
@@ -1742,6 +1749,32 @@ fn bounding_rect(mesh: &Mesh, bounds: &mut Rect) {
         bounds.min.y = bounds.min.y.min(p.y);
         bounds.max.x = bounds.max.x.max(p.x);
         bounds.max.y = bounds.max.y.max(p.y);
+    }
+}
+
+#[inline]
+fn extend_to_match<T: Clone>(src: &Vec<T>, dst: &mut Vec<T>) {
+    debug_assert!(dst.len() < src.len());
+    dst.extend_from_slice(&src[dst.len()..]);
+}
+
+fn fill_mesh_to_match(source: &Mesh, target: &mut Mesh, fill_color: &Color32) {
+    let vertices_from = target.vertices.len();
+    extend_to_match(&source.indices, &mut target.indices);
+    extend_to_match(&source.vertices, &mut target.vertices);
+    for i in vertices_from..target.vertices.len() {
+        target.vertices[i].color = fill_color.to_owned();
+    }
+}
+
+#[inline]
+fn match_animation_meshes(before: &mut Mesh, after: &mut Mesh, fill_color: &Color32) {
+    if before.indices.len() < after.indices.len() {
+        debug_assert!(before.vertices.len() < after.vertices.len());
+        fill_mesh_to_match(after, before, fill_color);
+    } else if before.indices.len() > after.indices.len() {
+        debug_assert!(before.vertices.len() > after.vertices.len());
+        fill_mesh_to_match(before, after, fill_color);
     }
 }
 
