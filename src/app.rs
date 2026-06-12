@@ -257,10 +257,10 @@ impl eframe::App for EmApp {
         });
     }
 
-    // fn on_exit(&mut self, _gl: Option<&eframe::Context>) {
-    //     log::info!("Bye.");
-    //     self.engine_command_send
-    //         .send(Box::new(move |engine| engine.stop()))
-    //         .unwrap();
-    // }
+    fn on_exit(&mut self) {
+        self.engine_command_send
+            .send(Box::new(move |engine| engine.stop()))
+            .unwrap();
+        log::info!("Bye.");
+    }
 }
