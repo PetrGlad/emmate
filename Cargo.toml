@@ -6,8 +6,6 @@ authors = ["Petr Gladkikh <petrglad@gmail.com>"]
 description = "A MIDI editor."
 homepage = "https://github.com/PetrGlad/emmate"
 
-# See also https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [profile.dev]
 panic = 'abort'
 
@@ -35,7 +33,7 @@ midly = { version = "0.5.3", features = ["alloc"] }
 # alsa = "0.8.1"
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
-midir = "0.10.3"
+midir = "0.11.0"
 
 log = "0.4.29"
 env_logger = "0.11.9"

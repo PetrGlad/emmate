@@ -498,8 +498,8 @@ pub fn clear_bookmark(track: &Track, at: &Time) -> Option<AppliedCommand> {
 
 #[cfg(test)]
 mod tests {
-    use crate::changeset::Snapshot;
     use super::*;
+    use crate::changeset::Snapshot;
 
     fn make_test_track() -> Track {
         let mut events: Vec<TrackEvent> = vec![];

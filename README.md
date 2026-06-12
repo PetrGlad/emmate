@@ -72,13 +72,12 @@ ALSA wrapper dependency (used for MIDI input)
 For audio output you can use any synth or DAW that can read the system's sequencer device.
 E.g. one can launch stand-alone Pianoteq for that.
 
-
 ## TODO
 
-- [ ] (improvement) Audition hovered lanes, and notes. Should be optional, turned off by default. Hold Alt, maybe?
 - [ ] (workflow) Multi-track UI (for snippets, flight recorder, and copy/paste buffer). Can show only one at a time,
   though. Use tabs? Alternatively, several emmate windows may cooperate, each showing one stave at a time.
-  This will probably require support for opening all related scores at once, as a project, or at least have "recent scores" menu.
+  This will probably require support for opening all related scores at once, as a project, or at least have
+  "recent scores" menu.
 - [ ] (workflow) Copy/cut/paste notes and time ranges (should also be supported between tracks).
 - [ ] (improvement) Use intermediate state snapshots in edit history (currently diffs also include previous state).
   Need also logic to decide when the snapshot should be made. This change should produce more compact on-disk files
@@ -89,7 +88,8 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
   Use spatial tree: set of ranges, with mapping range -> events-visible-in-that-range.
   This lookup can also speed-up selection hints and hovers.
-- [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow / RightArrow
+- [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow /
+  RightArrow
 - [ ] (usability) Vertical zoom.
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
@@ -105,7 +105,12 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [ ] (improvement) Play from new position should reflect current damper CC state (in cases when pedal is pressed
   earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
   the CC info is on track, but engine should query when playback is started.
-- [x] (improvement) Support note drawing with touchpad (on ThinkPad, scroll button does not seem to be registered as middle click).
+- [ ] (improvement) Audition hovered notes. It is currently only implemented for lanes. Auditioning actual notes would
+  help to evaluate velocity without playing track.
+- [ ] (refactoring, nice-to-have) Use async in engine. sleeps ot really a performance problem, will just produce
+  a nicer implementation.
+- [x] (improvement) Support note drawing with touchpad (on ThinkPad, scroll button does not seem to be registered as
+  middle click).
 - [x] (improvement) Stop all sounds when program is closed.
 - [x] (cleanup) Stave rendering cleanup: there is some now-unused code left after Meshes rendering revamp.
 - [x] (test) Implement xy-scaling check in tests.
@@ -165,15 +170,16 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [x] Piano roll.
 - [x] Paint notes.
 
-Also, some big scary problems
+Also, some scary problems
 
 * May need to use midi events directly (instead of intermediate internal representation). E.g. `track::from_midi_events`
   may not be necessary. In particular tail shifts will become simpler. This will require
     * To handle ignored/unused events along with notes and sustain.
-    * Midi events have starting times relative to previous ones. May need some indexing mechanism (e.g. a range tree)
-      that would help to find absolute timings of the midi events, and connect beginnings and endings of notes. MIDI
-      allows overlapping notes index should be able to handle that.
-* Optimize rendering drawing only visible items, may also need some index. In the simplest casevisible notes can be
+    * (tried, will not do) Midi events have starting times relative to previous ones. May need some indexing mechanism
+      (e.g. a range tree) that would help to find absolute timings of the midi events, and connect beginnings and
+      endings
+      of notes. MIDI allows overlapping notes index should be able to handle that.
+* Optimize rendering drawing only visible items, may also need some index. In the simplest case visible notes can be
   determined when zoom changes, and then re-use the visible set.
 * Optimize engine to reduce CPU usage - may need to switch to some async framework (`tokio`).
 

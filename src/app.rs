@@ -1,17 +1,23 @@
-use std::fs;
-use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
-use std::sync::atomic::AtomicBool;
-use std::time::Duration;
-
-use eframe::egui::{Modifiers, Vec2};
-use eframe::{self, CreationContext, egui};
-use egui_extras::{Size, StripBuilder};
-
 use crate::common::Time;
 use crate::engine::{Engine, EngineCommand, StatusEvent};
+use crate::note_sampler::NoteTester;
 use crate::project::Project;
 use crate::stave::Stave;
+use crate::track::{Level, Pitch};
+use clap::command;
+use eframe::egui::{Key, Modifiers, Vec2};
+use eframe::{self, CreationContext, egui};
+use egui_extras::{Size, StripBuilder};
+use midly::MidiMessage;
+use midly::live::LiveEvent;
+use midly::num::{u4, u7};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, mpsc};
+use std::thread::sleep;
+use std::time::Duration;
+use std::{fs, thread};
 
 enum Message {
     UpdateTime(Time),
@@ -25,6 +31,7 @@ pub struct EmApp {
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
     stop_app: Arc<AtomicBool>,
+    note_tester: NoteTester,
 }
 
 impl EmApp {
@@ -40,10 +47,11 @@ impl EmApp {
             title: project.title,
             home_path: project.home_path,
             stave: Stave::new(project.history),
-            engine_command_send,
+            engine_command_send: engine_command_send.to_owned(),
             message_receiver,
             follow_playback: false,
             stop_app,
+            note_tester: NoteTester::new(engine_command_send.to_owned()),
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -159,9 +167,9 @@ impl eframe::App for EmApp {
                 .size(Size::exact(20.0))
                 .vertical(|mut strip| {
                     strip.cell(|ui| {
-                        let response = self.stave.show(ui);
+                        let stave_response = self.stave.show(ui);
 
-                        if let Some(hover_pos) = response.ui_response.hover_pos() {
+                        if let Some(hover_pos) = stave_response.ui_response.hover_pos() {
                             let dz = ui.input(|i| i.zoom_delta());
                             if dz != 1.0 {
                                 self.stave.viewport.zoom(dz, hover_pos.x);
@@ -171,7 +179,13 @@ impl eframe::App for EmApp {
                                 self.stave.viewport.scroll_by(scroll_delta.x);
                             }
                         }
-                        if let Some(pos) = response.new_cursor_position {
+                        // TODO (improvement) Handle also note-hovered (this requires to resolve note itself).
+                        if let Some(pitch_hovered) = stave_response.pitch_hovered
+                            && ui.input(|i| i.keys_down == HashSet::from([Key::T]))
+                        {
+                            self.note_tester.play_sample(&pitch_hovered);
+                        }
+                        if let Some(pos) = stave_response.new_cursor_position {
                             self.engine_seek(pos);
                         }
                     });

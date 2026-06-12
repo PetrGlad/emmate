@@ -17,7 +17,7 @@ use chrono::Duration;
 use eframe::egui::TextStyle::Body;
 use eframe::egui::{
     self, Align2, Color32, Context, CornerRadius, FontId, Frame, Margin, Mesh, Modifiers, Painter,
-    PointerButton, Pos2, Rangef, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+    PointerButton, Pos2, Rangef, Rect, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
 use eframe::emath;
 use eframe::epaint::{RectShape, TessellationOptions, Tessellator, Vertex};
@@ -315,6 +315,8 @@ struct InnerResponse {
 pub struct StaveResponse {
     pub ui_response: egui::Response,
     pub new_cursor_position: Option<Time>,
+    pub note_hovered: Option<EventId>,
+    pub pitch_hovered: Option<Pitch>,
 }
 
 impl Stave {
@@ -798,21 +800,20 @@ impl Stave {
             ui.ctx().request_repaint();
         }
 
-        let inner = &stave_response.response;
         self.update_new_note_draw(
-            inner,
+            &stave_response.response,
             &stave_response.modifiers,
             &stave_response.time_hovered,
             &stave_response.pitch_hovered,
         );
 
         self.update_time_selection(
-            inner,
+            &stave_response.response,
             &stave_response.modifiers,
             &stave_response.time_hovered,
         );
 
-        let new_cursor_position = self.handle_commands(&inner);
+        let new_cursor_position = self.handle_commands(&stave_response.response);
         if let Some(pos) = new_cursor_position {
             self.cursor_position = pos;
             self.ensure_visible(pos);
@@ -820,6 +821,8 @@ impl Stave {
 
         StaveResponse {
             ui_response: stave_response.response,
+            note_hovered: stave_response.note_hovered,
+            pitch_hovered: stave_response.pitch_hovered,
             new_cursor_position,
         }
     }
@@ -1173,7 +1176,12 @@ impl Stave {
         None
     }
 
-    fn adjust_tempo(&mut self, response: &Response, time_selection: &Range<Time>, ratio: f32) {
+    fn adjust_tempo(
+        &mut self,
+        response: &egui::Response,
+        time_selection: &Range<Time>,
+        ratio: f32,
+    ) {
         if self
             .do_edit_command(&response.ctx, response.id, |_stave, track| {
                 tape_stretch(track, &(time_selection.0, time_selection.1), ratio)

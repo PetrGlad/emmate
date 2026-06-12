@@ -19,6 +19,9 @@ pub type Level = u8;
 pub type ChannelId = u8;
 pub type EventId = u64;
 
+// Channel is hard coded.
+const MIDI_CHANNEL: u8 = 0;
+
 pub const MAX_LEVEL: Level = 127; // Should be equal to u7::max_value().as_int();
 pub const DEFAULT_CC_LEVEL: Level = 0;
 
@@ -235,7 +238,7 @@ pub fn to_midi_events(
     events: &Vec<TrackEvent>,
     usec_per_tick: u32,
 ) -> Vec<midly::TrackEvent<'static>> {
-    let channel = u4::from(0); // Channel hard coded.
+    let channel = u4::from(MIDI_CHANNEL);
     let mut buffer: Vec<(Time, TrackEventKind)> = vec![];
     for ev in events {
         match &ev.event {
