@@ -97,6 +97,13 @@ impl Ord for TrackEvent {
     }
 }
 
+pub type EventList = Vec<TrackEvent>;
+
+// FIXME Implement functions supporting clip-buffer.
+// impl EventList {
+//
+// }
+
 #[derive(Debug, Default, Clone)]
 pub struct Track {
     /* Events must always be kept ordered by start time ascending.

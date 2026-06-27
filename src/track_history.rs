@@ -43,11 +43,13 @@ impl TrackHistory {
     const SNAPSHOT_NAME_EXT: &'static str = "snapshot";
     const DIFF_NAME_EXT: &'static str = "changeset";
 
+    // Read-only operation with track.
     pub fn with_track<Out, Action: FnOnce(&Track) -> Out>(&self, action: Action) -> Out {
         let track = self.track.read();
         action(&track)
     }
 
+    // Edit/update track.
     pub fn update_track<Action: FnOnce(&Track) -> Option<AppliedCommand>>(
         &mut self,
         action: Action,

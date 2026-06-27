@@ -1,6 +1,6 @@
 [package]
 name = "emmate"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["Petr Gladkikh <petrglad@gmail.com>"]
 description = "A MIDI editor."

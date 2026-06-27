@@ -1,4 +1,5 @@
 use crate::changeset::{Changeset, EventAction, EventActionsList};
+use crate::clipboard::Clipboard;
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
@@ -215,6 +216,7 @@ type Shapes = ArrayVec<Shape, 2>;
 // #[derive(Debug)]
 pub struct Stave {
     pub history: Arc<RwLock<TrackHistory>>,
+    clipboard: Clipboard,
 
     pub viewport: Viewport,
 
@@ -300,7 +302,7 @@ impl TYScale {
 const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
 const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 
-// Egui optimizes away transparent shapes. This placeholder color is used as starting or end point
+// Epaint optimizes away transparent shapes. This placeholder color is used as starting or end point
 // in insertions/deletions to ensure the shape is always there.
 const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 1);
 // const COLOR_NOTHING: Color32 = Color32::GREEN; // DEBUG // Making it stand out for diagnostics.
@@ -336,6 +338,7 @@ impl Stave {
 
         Stave {
             history,
+            clipboard: Clipboard::init(),
             viewport: Viewport {
                 time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
                 view_rect: Rect::NOTHING,
@@ -1058,6 +1061,28 @@ impl Stave {
             };
             self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
         }
+
+        // Clipboard operations
+        // if response.ctx.input_mut(|i| {
+        //     i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::C))
+        // }) {
+        //     // FIXME Implement copy:
+        //     //  1. extract matching events, time selection only for starters.
+        //     //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
+        //     let at = self.cursor_position;
+        //     self
+        //         .history
+        //         .read()
+        //         .expect("Read stave history.")
+        //         .with_track(|track| {
+        //             track
+        //                 .events
+        //                 .iter()
+        //                 .rfind(|ev| ev.at < at && ev.event == TrackEventType::Bookmark)
+        //                 .cloned()
+        //         });
+        //         (id_seq, track, &(time_selection.0, time_selection.1))
+        // }
 
         // Bookmarks & time navigation
         if response.ctx.input_mut(|i| {
