@@ -537,7 +537,7 @@ mod tests {
             }),
         });
         let mut track = Track::default();
-        track.reset(Snapshot { version: 1, events });
+        track.reset(events);
         track
     }
 

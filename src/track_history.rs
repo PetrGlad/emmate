@@ -143,7 +143,9 @@ impl TrackHistory {
         //   Should use snapshot if it is found but diff is missing.
         //   Maybe prefer snapshots when both diff and snapshot are present.
         if let Some(snapshot_path) = version.snapshot_path {
-            track.reset(util::load(&snapshot_path));
+            let snapshot = util::load::<Snapshot>(&snapshot_path);
+            assert_eq!(&snapshot.version, &version.id);
+            track.reset(snapshot.events);
             self.set_version(version.id);
             log::debug!("Found a snapshot for revision {}.", version.id);
         }
@@ -277,8 +279,9 @@ impl TrackHistory {
         let initial_version_id = 0;
         {
             self.id_seq = Arc::new(IdSeq::new(meta.next_id));
-            self.track
-                .edit(|track| track.reset(util::load(&self.snapshot_path(initial_version_id))));
+            let snapshot: Snapshot = util::load(&self.snapshot_path(initial_version_id));
+            assert_eq!(snapshot.version, initial_version_id);
+            self.track.edit(|track| track.reset(snapshot.events));
         }
         self.set_version(initial_version_id);
         assert!(self.go_to_version(meta.current_version, &mut vec![]));

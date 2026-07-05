@@ -113,8 +113,8 @@ pub struct Track {
 }
 
 impl Track {
-    pub fn reset(&mut self, snapshot: Snapshot) {
-        self.events = snapshot.events;
+    pub fn reset(&mut self, events: Vec<TrackEvent>) {
+        self.events = events;
         self.track_map = self.index_events();
     }
 

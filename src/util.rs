@@ -37,7 +37,8 @@ pub fn load<T: DeserializeOwned>(file_path: &PathBuf) -> T {
 // TODO (cleanup) Return a Result instead of panicking.
 pub fn store<T: Serialize>(x: &T, file_path: &PathBuf, compact: bool) {
     // TODO (improvement) When using compact representation (without field names),
-    //   add some format version info in the data and/or in file names. Consider using protobuf.
+    //   add some format version info in the data and/or in file names anyway.
+    //   Consider using protobuf.
     let mut binary = Vec::new();
     let mut serializer = rmp_serde::Serializer::new(&mut binary);
     if compact {
