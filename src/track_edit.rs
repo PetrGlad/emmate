@@ -27,6 +27,7 @@ pub enum EditCommandId {
     Undo,
     Redo,
     Load,
+    Paste,
     // Workspace-related changes that are tied to the stave.
     SetBookmark,
     ClearBookmark,
@@ -366,6 +367,30 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
         })],
     };
     Some((EditCommandId::AddNote, vec![action]))
+}
+
+pub fn paste_events(
+    id_seq: &IdSeq,
+    at: &Time,
+    snippet: &[TrackEvent],
+) -> Option<AppliedCommand> {
+    if snippet.is_empty() {
+        return None;
+    }
+    // TODO Include duration to the snippet data. See ends_after()
+    let patch: Vec<EventAction> = snippet
+        .iter()
+        .map(|ev| {
+            let mut new_ev = ev.clone();
+            new_ev.id = id_seq.next();
+            new_ev.at = ev.at + at;
+            EventAction::Insert(new_ev)
+        })
+        .collect();
+    Some((
+        EditCommandId::Paste,
+        vec![CommandDiff::ChangeList { patch }],
+    ))
 }
 
 fn cc_event(id_seq: &IdSeq, at: &Time, value: Level) -> TrackEvent {

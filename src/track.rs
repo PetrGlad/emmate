@@ -63,10 +63,10 @@ pub struct TrackEvent {
 }
 
 impl TrackEvent {
-    pub fn is_active_at(&self, at: Time) -> bool {
+    pub fn ends_at(&self) -> Time {
         match &self.event {
-            TrackEventType::Note(n) => (self.at, self.at + n.duration).contains(&at),
-            _ => false,
+            TrackEventType::Note(n) => n.duration,
+            _ => self.at,
         }
     }
 
@@ -298,6 +298,15 @@ pub fn to_midi_events(
     }
     midi_events
 }
+
+pub fn ends_after(from: Time, sequence: Vec<TrackEvent>) -> Time {
+    let mut end = from;
+    for ev in sequence {
+        end = end.max(ev.ends_at());
+    }
+    end
+}
+
 
 #[cfg(test)]
 mod tests {

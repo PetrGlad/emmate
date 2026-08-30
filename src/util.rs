@@ -53,7 +53,7 @@ pub fn store<T: Serialize>(x: &T, file_path: &PathBuf, compact: bool) {
         .write_all(&binary.as_slice())
         .expect("gzip serialized");
     let binary = encoder.finish().expect("gzip serialized");
-    std::fs::write(file_path, &binary).expect(&*format!("write to {}", &file_path.display()));
+    std::fs::write(&file_path, &binary).expect(&*format!("write to {}", &file_path.display()));
 }
 
 #[cfg(test)]

@@ -8,11 +8,11 @@ use crate::track::{
 };
 use crate::track_edit::{
     AppliedCommand, EditCommandId, accent_selected_notes, add_new_note, clear_bookmark,
-    delete_selected, set_bookmark, set_damper, shift_selected, shift_tail, stretch_selected_notes,
-    tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
+    delete_selected, paste_events, set_bookmark, set_damper, shift_selected, shift_tail,
+    stretch_selected_notes, tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{Pix, range};
+use crate::{Pix, range, util};
 use arrayvec::ArrayVec;
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
@@ -332,7 +332,7 @@ impl Stave {
                     Rgba::from_rgb(0.6, 0.7, 0.7)..=Rgba::from_rgb(0.0, 0.0, 0.0),
                     velocity as f32 / MAX_LEVEL as f32,
                 )
-                .into(),
+                    .into(),
             );
         }
 
@@ -1044,9 +1044,9 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
                 || i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    Modifiers::CTRL | Modifiers::SHIFT,
-                    egui::Key::Z,
-                ))
+                Modifiers::CTRL | Modifiers::SHIFT,
+                egui::Key::Z,
+            ))
         }) {
             let mut changes = vec![];
             let edit_state = if self
@@ -1062,27 +1062,65 @@ impl Stave {
             self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
         }
 
-        // Clipboard operations
-        // if response.ctx.input_mut(|i| {
-        //     i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::C))
-        // }) {
-        //     // FIXME Implement copy:
-        //     //  1. extract matching events, time selection only for starters.
-        //     //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
-        //     let at = self.cursor_position;
-        //     self
-        //         .history
-        //         .read()
-        //         .expect("Read stave history.")
-        //         .with_track(|track| {
-        //             track
-        //                 .events
-        //                 .iter()
-        //                 .rfind(|ev| ev.at < at && ev.event == TrackEventType::Bookmark)
-        //                 .cloned()
-        //         });
-        //         (id_seq, track, &(time_selection.0, time_selection.1))
-        // }
+        let (copy, pasted) = response.ctx.input_mut(|i| {
+            let mut copy = false;
+            let mut pasted = None;
+            i.events.retain(|e| match e {
+                egui::Event::Copy => { copy = true; false }
+                egui::Event::Paste(t) => { pasted = Some(t.to_owned()); false }
+                _ => true,
+            });
+            (copy, pasted)
+        });
+
+        // Clipboard/clipbuffer operations, copy
+        if copy {
+            if let Some(time_selection) = &self.time_selection.clone() {
+                // FIXME Implement copy:
+                //  1. extract matching events, time selection only for starters.
+                //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
+                let mut snippet = self.history
+                    .read()
+                    .expect("read stave history")
+                    .with_track(|track| {
+                        let mut snippet = vec![];
+                        for ev in &track.events {
+                            if ev.intersects(&time_selection) {
+                                snippet.push(ev.clone());
+                            }
+                        }
+                        snippet
+                    });
+                for ev in &mut snippet {
+                    ev.at -= time_selection.0;
+                }
+                // TODO Use clipboard.rs to get file path.
+                util::store(&snippet, &"./clipboard-content".into(), false);
+                response.ctx.copy_text("./clipboard-content".into())
+            }
+        }
+
+        // Clipboard/clipbuffer operations, paste
+        if let Some(buffer_file) = pasted {
+            // TODO (clip-buffer) Use clipboard.rs to get file path?
+            // TODO (clip-buffer, reliability) Verify that file (buffer_file) is readable
+            //      and has required format. Ignore with debug log otherwise.
+            let clipboard_path: PathBuf = "./clipboard-content".into();
+            if clipboard_path.exists() {
+                // TODO Check result, skip action when cannot read (now just panics).
+                let snippet: Vec<TrackEvent> = util::load(&clipboard_path);
+                let insert_at = self.cursor_position;
+                let id_seq = self
+                    .history
+                    .read()
+                    .expect("read stave history")
+                    .id_seq
+                    .clone();
+                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
+                    paste_events(&id_seq, &insert_at, &snippet)
+                });
+            }
+        }
 
         // Bookmarks & time navigation
         if response.ctx.input_mut(|i| {
@@ -1092,7 +1130,7 @@ impl Stave {
             let id_seq = &self
                 .history
                 .read()
-                .expect("Read stave.history.")
+                .expect("read stave history")
                 .id_seq
                 .clone();
             self.do_edit_command(&response.ctx, response.id, |_stave, track| {
@@ -1118,7 +1156,7 @@ impl Stave {
             return self
                 .history
                 .read()
-                .expect("Read stave history.")
+                .expect("read stave history")
                 .with_track(|track| {
                     track
                         .events
@@ -1140,7 +1178,7 @@ impl Stave {
             return self
                 .history
                 .read()
-                .expect("Read stave history.")
+                .expect("read stave history")
                 .with_track(move |track| {
                     track
                         .events
@@ -1357,15 +1395,15 @@ impl Stave {
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
-                    id: id_a,
-                    at: at_a,
-                    event: TrackEventType::Note(a),
-                }),
+                         id: id_a,
+                         at: at_a,
+                         event: TrackEventType::Note(a),
+                     }),
                 Some(TrackEvent {
-                    id: id_b,
-                    at: at_b,
-                    event: TrackEventType::Note(b),
-                }),
+                         id: id_b,
+                         at: at_b,
+                         event: TrackEventType::Note(b),
+                     }),
             ) => Some((
                 self.track_note_shape(id_a, at_a, a, None, ty),
                 self.track_note_shape(id_b, at_b, b, None, ty),
@@ -1374,10 +1412,10 @@ impl Stave {
             (
                 None,
                 Some(TrackEvent {
-                    id: id_b,
-                    at: at_b,
-                    event: TrackEventType::Note(b),
-                }),
+                         id: id_b,
+                         at: at_b,
+                         event: TrackEventType::Note(b),
+                     }),
             ) => Some((
                 ArrayVec::new(),
                 self.track_note_shape(id_b, at_b, b, None, ty),
@@ -1385,10 +1423,10 @@ impl Stave {
             // Deleted note
             (
                 Some(TrackEvent {
-                    id: id_a,
-                    at: at_a,
-                    event: TrackEventType::Note(a),
-                }),
+                         id: id_a,
+                         at: at_a,
+                         event: TrackEventType::Note(a),
+                     }),
                 None,
             ) => Some((
                 self.track_note_shape(id_a, at_a, a, None, ty),
@@ -1538,7 +1576,7 @@ impl Stave {
                 Rgba::from(Color32::RED)..=Rgba::from(color_b),
                 2.0 * f32::abs(coeff - 0.5),
             )
-            .into()
+                .into()
         }
     }
 
@@ -1546,15 +1584,15 @@ impl Stave {
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
-                    id: _id_a,
-                    at: at_a,
-                    event: TrackEventType::Controller(a),
-                }),
+                         id: _id_a,
+                         at: at_a,
+                         event: TrackEventType::Controller(a),
+                     }),
                 Some(TrackEvent {
-                    id: _id_b,
-                    at: at_b,
-                    event: TrackEventType::Controller(b),
-                }),
+                         id: _id_b,
+                         at: at_b,
+                         event: TrackEventType::Controller(b),
+                     }),
             ) => Some((
                 Self::point_accent_shape(
                     at_a,
@@ -1573,10 +1611,10 @@ impl Stave {
             (
                 None,
                 Some(TrackEvent {
-                    id: _id_b,
-                    at: at_b,
-                    event: TrackEventType::Controller(b),
-                }),
+                         id: _id_b,
+                         at: at_b,
+                         event: TrackEventType::Controller(b),
+                     }),
             ) => Some((
                 Self::point_accent_shape(
                     at_b,
@@ -1594,10 +1632,10 @@ impl Stave {
             // Deleted value
             (
                 Some(TrackEvent {
-                    id: _id_a,
-                    at: at_a,
-                    event: TrackEventType::Controller(a),
-                }),
+                         id: _id_a,
+                         at: at_a,
+                         event: TrackEventType::Controller(a),
+                     }),
                 None,
             ) => Some((
                 Self::point_accent_shape(
