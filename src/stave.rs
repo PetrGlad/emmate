@@ -322,6 +322,34 @@ pub struct StaveResponse {
     pub pitch_hovered: Option<Pitch>,
 }
 
+/// True when a copy was requested (e.g. Ctrl+C) while the pointer is over the widget.
+fn got_copy_event(response: &egui::Response) -> bool {
+    response.hovered()
+        && response
+            .ctx
+            .input(|i| {
+                i.filtered_events(&egui::EventFilter::default())
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Copy))
+            })
+}
+
+/// Text of the last paste requested (e.g. Ctrl+V) while the pointer is over the widget.
+fn got_paste_event(response: &egui::Response) -> Option<String> {
+    if !response.hovered() {
+        return None;
+    }
+    response.ctx.input(|i| {
+        i.filtered_events(&egui::EventFilter::default())
+            .into_iter()
+            .rev()
+            .find_map(|e| match e {
+                egui::Event::Paste(text) => Some(text),
+                _ => None,
+            })
+    })
+}
+
 impl Stave {
     pub fn new(history: Arc<RwLock<TrackHistory>>) -> Stave {
         let mut note_colors = vec![];
@@ -1062,19 +1090,8 @@ impl Stave {
             self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
         }
 
-        let (copy, pasted) = response.ctx.input_mut(|i| {
-            let mut copy = false;
-            let mut pasted = None;
-            i.events.retain(|e| match e {
-                egui::Event::Copy => { copy = true; false }
-                egui::Event::Paste(t) => { pasted = Some(t.to_owned()); false }
-                _ => true,
-            });
-            (copy, pasted)
-        });
-
         // Clipboard/clipbuffer operations, copy
-        if copy {
+        if got_copy_event(response) {
             if let Some(time_selection) = &self.time_selection.clone() {
                 // FIXME Implement copy:
                 //  1. extract matching events, time selection only for starters.
@@ -1101,7 +1118,7 @@ impl Stave {
         }
 
         // Clipboard/clipbuffer operations, paste
-        if let Some(buffer_file) = pasted {
+        if let Some(buffer_file) = got_paste_event(response) {
             // TODO (clip-buffer) Use clipboard.rs to get file path?
             // TODO (clip-buffer, reliability) Verify that file (buffer_file) is readable
             //      and has required format. Ignore with debug log otherwise.
