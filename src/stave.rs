@@ -303,7 +303,7 @@ const COLOR_SELECTED: Rgba = Rgba::from_rgb(0.7, 0.1, 0.3);
 const COLOR_HOVERED: Rgba = Rgba::from_rgb(0.2, 0.5, 0.55);
 
 // Epaint optimizes away transparent shapes. This placeholder color is used as starting or end point
-// in insertions/deletions to ensure the shape is always there.
+// in insertion/deletion animations to ensure the shape is always there.
 const COLOR_NOTHING: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 1);
 // const COLOR_NOTHING: Color32 = Color32::GREEN; // DEBUG // Making it stand out for diagnostics.
 
@@ -325,13 +325,11 @@ pub struct StaveResponse {
 /// True when a copy was requested (e.g. Ctrl+C) while the pointer is over the widget.
 fn got_copy_event(response: &egui::Response) -> bool {
     response.hovered()
-        && response
-            .ctx
-            .input(|i| {
-                i.filtered_events(&egui::EventFilter::default())
-                    .iter()
-                    .any(|e| matches!(e, egui::Event::Copy))
-            })
+        && response.ctx.input(|i| {
+            i.filtered_events(&egui::EventFilter::default())
+                .iter()
+                .any(|e| matches!(e, egui::Event::Copy))
+        })
 }
 
 /// Text of the last paste requested (e.g. Ctrl+V) while the pointer is over the widget.
@@ -360,7 +358,7 @@ impl Stave {
                     Rgba::from_rgb(0.6, 0.7, 0.7)..=Rgba::from_rgb(0.0, 0.0, 0.0),
                     velocity as f32 / MAX_LEVEL as f32,
                 )
-                    .into(),
+                .into(),
             );
         }
 
@@ -435,10 +433,11 @@ impl Stave {
                 if let Some(s) = &self.time_selection {
                     self.draw_time_selection(&painter, &s, &selection_color);
                 }
+                // Gray out negative time.
                 self.draw_time_selection(
                     &painter,
                     &(self.viewport.time_range.0, 0),
-                    &Color32::from_black_alpha(15),
+                    &Color32::from_black_alpha(30),
                 );
                 let mut note_hovered = None;
                 let should_be_visible;
@@ -1072,9 +1071,9 @@ impl Stave {
         if response.ctx.input_mut(|i| {
             i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
                 || i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL | Modifiers::SHIFT,
-                egui::Key::Z,
-            ))
+                    Modifiers::CTRL | Modifiers::SHIFT,
+                    egui::Key::Z,
+                ))
         }) {
             let mut changes = vec![];
             let edit_state = if self
@@ -1096,18 +1095,19 @@ impl Stave {
                 // FIXME Implement copy:
                 //  1. extract matching events, time selection only for starters.
                 //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
-                let mut snippet = self.history
-                    .read()
-                    .expect("read stave history")
-                    .with_track(|track| {
-                        let mut snippet = vec![];
-                        for ev in &track.events {
-                            if ev.intersects(&time_selection) {
-                                snippet.push(ev.clone());
+                let mut snippet =
+                    self.history
+                        .read()
+                        .expect("read stave history")
+                        .with_track(|track| {
+                            let mut snippet = vec![];
+                            for ev in &track.events {
+                                if ev.intersects(&time_selection) {
+                                    snippet.push(ev.clone());
+                                }
                             }
-                        }
-                        snippet
-                    });
+                            snippet
+                        });
                 for ev in &mut snippet {
                     ev.at -= time_selection.0;
                 }
@@ -1412,15 +1412,15 @@ impl Stave {
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
-                         id: id_a,
-                         at: at_a,
-                         event: TrackEventType::Note(a),
-                     }),
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
                 Some(TrackEvent {
-                         id: id_b,
-                         at: at_b,
-                         event: TrackEventType::Note(b),
-                     }),
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
             ) => Some((
                 self.track_note_shape(id_a, at_a, a, None, ty),
                 self.track_note_shape(id_b, at_b, b, None, ty),
@@ -1429,10 +1429,10 @@ impl Stave {
             (
                 None,
                 Some(TrackEvent {
-                         id: id_b,
-                         at: at_b,
-                         event: TrackEventType::Note(b),
-                     }),
+                    id: id_b,
+                    at: at_b,
+                    event: TrackEventType::Note(b),
+                }),
             ) => Some((
                 ArrayVec::new(),
                 self.track_note_shape(id_b, at_b, b, None, ty),
@@ -1440,10 +1440,10 @@ impl Stave {
             // Deleted note
             (
                 Some(TrackEvent {
-                         id: id_a,
-                         at: at_a,
-                         event: TrackEventType::Note(a),
-                     }),
+                    id: id_a,
+                    at: at_a,
+                    event: TrackEventType::Note(a),
+                }),
                 None,
             ) => Some((
                 self.track_note_shape(id_a, at_a, a, None, ty),
@@ -1593,7 +1593,7 @@ impl Stave {
                 Rgba::from(Color32::RED)..=Rgba::from(color_b),
                 2.0 * f32::abs(coeff - 0.5),
             )
-                .into()
+            .into()
         }
     }
 
@@ -1601,15 +1601,15 @@ impl Stave {
         match (action.before(), action.after()) {
             (
                 Some(TrackEvent {
-                         id: _id_a,
-                         at: at_a,
-                         event: TrackEventType::Controller(a),
-                     }),
+                    id: _id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
                 Some(TrackEvent {
-                         id: _id_b,
-                         at: at_b,
-                         event: TrackEventType::Controller(b),
-                     }),
+                    id: _id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
             ) => Some((
                 Self::point_accent_shape(
                     at_a,
@@ -1628,10 +1628,10 @@ impl Stave {
             (
                 None,
                 Some(TrackEvent {
-                         id: _id_b,
-                         at: at_b,
-                         event: TrackEventType::Controller(b),
-                     }),
+                    id: _id_b,
+                    at: at_b,
+                    event: TrackEventType::Controller(b),
+                }),
             ) => Some((
                 Self::point_accent_shape(
                     at_b,
@@ -1649,10 +1649,10 @@ impl Stave {
             // Deleted value
             (
                 Some(TrackEvent {
-                         id: _id_a,
-                         at: at_a,
-                         event: TrackEventType::Controller(a),
-                     }),
+                    id: _id_a,
+                    at: at_a,
+                    event: TrackEventType::Controller(a),
+                }),
                 None,
             ) => Some((
                 Self::point_accent_shape(
