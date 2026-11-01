@@ -1,10 +1,18 @@
 use crate::commands::Command;
-use eframe::egui::{self, Align, Align2, Context, Key, Layout, Modifiers, RichText};
+use eframe::egui::{
+    self, Align, Align2, Context, Key, Layout, Modifiers, RichText, TextStyle,
+};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use strum::IntoEnumIterator;
 
 const MAX_SHORTCUTS_SHOWN: usize = 3;
+const PALETTE_WIDTH: f32 = 480.0;
+/// Height of the command list as a fraction of the app window height, but not less than the minimum.
+const LIST_HEIGHT_RATIO: f32 = 0.3;
+const MIN_LIST_HEIGHT: f32 = 120.0;
+/// Space between the shortcuts text and the scroll bar, in text heights.
+const SHORTCUTS_MARGIN_EM: f32 = 0.25;
 
 /// Pop-up list of commands filtered by the text typed by the user.
 #[derive(Default)]
@@ -74,13 +82,15 @@ impl CommandPalette {
             return None;
         }
 
+        let list_height = (ctx.content_rect().height() * LIST_HEIGHT_RATIO).max(MIN_LIST_HEIGHT);
         let mut chosen = None;
         let mut query_changed = false;
         let window = egui::Window::new("Command palette")
             .title_bar(false)
             .resizable(false)
             .anchor(Align2::CENTER_TOP, [0.0, 60.0])
-            .fixed_size([480.0, 0.0])
+            .min_width(PALETTE_WIDTH)
+            .max_width(PALETTE_WIDTH)
             .show(ctx, |ui| {
                 let edit = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
@@ -104,7 +114,8 @@ impl CommandPalette {
                 }
                 ui.separator();
                 egui::ScrollArea::vertical()
-                    .max_height(320.0)
+                    .auto_shrink([false, false])
+                    .max_height(list_height)
                     .show(ui, |ui| {
                         for (n, cmd) in found.iter().enumerate() {
                             let selected = n == self.selected;
@@ -118,6 +129,12 @@ impl CommandPalette {
                                     let shortcuts = shortcuts_text(ctx, cmd);
                                     if !shortcuts.is_empty() {
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            // The scroll bar floats over the list, keep the text clear of it.
+                                            ui.add_space(
+                                                ui.spacing().scroll.bar_width
+                                                    + SHORTCUTS_MARGIN_EM
+                                                        * ui.text_style_height(&TextStyle::Body),
+                                            );
                                             ui.label(RichText::new(shortcuts).weak());
                                         });
                                     }

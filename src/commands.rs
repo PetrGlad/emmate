@@ -1,3 +1,4 @@
+use eframe::egui::gui_zoom::kb_shortcuts;
 use eframe::egui::{Context, Key, KeyboardShortcut, Modifiers};
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -14,6 +15,11 @@ pub enum Command {
     FollowPlayback,
     ScrollPageLeft,
     ScrollPageRight,
+    // App, shortcuts handled by egui itself
+    Quit,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     // Stave: selection and view
     ClearNoteSelection,
     ZoomToFit,
@@ -52,6 +58,8 @@ pub struct CommandDescription {
     /// Key combinations that trigger the command, primary first.
     pub shortcuts: Vec<KeyboardShortcut>,
     /// Shortcuts to show next to the title, primary first.
+    /// Some commands are handled by egui (e.g. Copy/Paste) so separate collection
+    /// is used for display purposes.
     pub display_shortcuts: Vec<KeyboardShortcut>,
 }
 
@@ -74,12 +82,16 @@ fn desc<const N: usize>(
     }
 }
 
-/// Copy and Paste are delivered by egui as events, not keys, so dthey have no dispatch shortcuts.
-fn event_desc(title: &'static str, display_shortcut: KeyboardShortcut) -> CommandDescription {
+/// For commands whose shortcuts are handled by egui itself (Copy/Paste events, quit, GUI zoom):
+/// `pressed()` must not consume them, the shortcuts are only shown to the user.
+fn egui_desc<const N: usize>(
+    title: &'static str,
+    display_shortcuts: [KeyboardShortcut; N],
+) -> CommandDescription {
     CommandDescription {
         title,
         shortcuts: vec![],
-        display_shortcuts: vec![display_shortcut],
+        display_shortcuts: display_shortcuts.into(),
     }
 }
 
@@ -88,14 +100,25 @@ fn build_description(command: Command) -> CommandDescription {
     let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
     let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
     match command {
-        Command::CommandPalette => desc("Command palette", [with(ctrl_shift, Key::P)]),
+        Command::CommandPalette => desc(
+            "Command palette",
+            // egui has no key for `~`: on a US layout it arrives as Shift+Backtick.
+            [with(ctrl_shift, Key::P), with(Modifiers::SHIFT, Key::Backtick)],
+        ),
         Command::Pause => desc("Play/pause", [plain(Key::Space)]),
         Command::Export => desc("Export to MIDI file", [with(ctrl, Key::S)]),
         Command::FollowPlayback => desc("Toggle follow playback", [plain(Key::F)]),
         Command::ScrollPageLeft => desc("Scroll page left", [plain(Key::PageUp)]),
         Command::ScrollPageRight => desc("Scroll page right", [plain(Key::PageDown)]),
+        Command::Quit => egui_desc("Quit", [with(Modifiers::COMMAND, Key::Q)]),
+        Command::ZoomIn => egui_desc(
+            "Zoom in UI",
+            [kb_shortcuts::ZOOM_IN, kb_shortcuts::ZOOM_IN_SECONDARY],
+        ),
+        Command::ZoomOut => egui_desc("Zoom out UI", [kb_shortcuts::ZOOM_OUT]),
+        Command::ZoomReset => egui_desc("Reset UI zoom", [kb_shortcuts::ZOOM_RESET]),
         Command::ClearNoteSelection => desc("Clear note selection", [plain(Key::Q)]),
-        Command::ZoomToFit => desc("Zoom to fit", [with(Modifiers::ALT, Key::A)]),
+        Command::ZoomToFit => desc("Zoom stave to fit", [with(Modifiers::ALT, Key::A)]),
         Command::TempoUp => desc("Tempo: slow down selection", [plain(Key::CloseBracket)]),
         Command::TempoDown => desc("Tempo: speed up selection", [plain(Key::OpenBracket)]),
         Command::DeleteSelection => desc("Delete selection", [plain(Key::Delete)]),
@@ -122,8 +145,8 @@ fn build_description(command: Command) -> CommandDescription {
         Command::AccentDown => desc("Decrease accent of selected notes", [plain(Key::K)]),
         Command::Undo => desc("Undo", [with(ctrl, Key::Z)]),
         Command::Redo => desc("Redo", [with(ctrl, Key::Y), with(ctrl_shift, Key::Z)]),
-        Command::Copy => event_desc("Copy time selection", with(Modifiers::COMMAND, Key::C)),
-        Command::Paste => event_desc("Paste at cursor", with(Modifiers::COMMAND, Key::V)),
+        Command::Copy => egui_desc("Copy time selection", [with(Modifiers::COMMAND, Key::C)]),
+        Command::Paste => egui_desc("Paste at cursor", [with(Modifiers::COMMAND, Key::V)]),
         Command::SetBookmark => desc("Set bookmark at cursor", [plain(Key::M)]),
         Command::ClearBookmark => desc("Clear bookmark at cursor", [plain(Key::N)]),
         Command::PrevBookmark => desc("Go to previous bookmark", [with(ctrl, Key::ArrowLeft)]),

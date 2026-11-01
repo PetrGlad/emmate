@@ -1085,6 +1085,10 @@ impl Stave {
             | Command::Pause
             | Command::Export
             | Command::FollowPlayback
+            | Command::Quit
+            | Command::ZoomIn
+            | Command::ZoomOut
+            | Command::ZoomReset
             | Command::ScrollPageLeft
             | Command::ScrollPageRight => {}
         }

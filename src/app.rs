@@ -101,6 +101,10 @@ impl EmApp {
             Command::Pause => self.toggle_pause(),
             Command::Export => self.export(),
             Command::FollowPlayback => self.follow_playback = !self.follow_playback,
+            Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Command::ZoomIn => egui::gui_zoom::zoom_in(ctx),
+            Command::ZoomOut => egui::gui_zoom::zoom_out(ctx),
+            Command::ZoomReset => ctx.set_zoom_factor(1.0),
             Command::ScrollPageLeft => self
                 .stave
                 .viewport
