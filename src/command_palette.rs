@@ -22,7 +22,7 @@ fn matching_commands(matcher: &SkimMatcherV2, query: &str) -> Vec<Command> {
         .iter()
         .filter_map(|cmd| {
             matcher
-                .fuzzy_match(cmd.title(), query)
+                .fuzzy_match(cmd.description().title, query)
                 .map(|score| (score, *cmd))
         })
         .collect();
@@ -94,13 +94,13 @@ impl CommandPalette {
                             let row = ui.scope(|ui| {
                                 ui.horizontal(|ui| {
                                     ui.set_width(ui.available_width());
-                                    let title = ui.selectable_label(selected, cmd.title());
+                                    let title = ui.selectable_label(selected, cmd.description().title);
                                     if title.clicked() {
                                         chosen = Some(*cmd);
                                     }
-                                    if let Some(shortcut) = cmd.display_shortcut() {
+                                    if let Some(shortcut) = &cmd.description().display_shortcut {
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            ui.label(RichText::new(ctx.format_shortcut(&shortcut)).weak());
+                                            ui.label(RichText::new(ctx.format_shortcut(shortcut)).weak());
                                         });
                                     }
                                 });
