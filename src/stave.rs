@@ -1,5 +1,5 @@
 use crate::changeset::{Changeset, EventAction, EventActionsList};
-use crate::clipboard::Clipboard;
+use crate::clipboard::{Clipboard, Fragment};
 use crate::commands::Command;
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
@@ -13,7 +13,7 @@ use crate::track_edit::{
     stretch_selected_notes, tape_delete, tape_insert, tape_stretch, transpose_selected_notes,
 };
 use crate::track_history::{CommandApplication, TrackHistory};
-use crate::{Pix, range, util};
+use crate::{Pix, range};
 use arrayvec::ArrayVec;
 use chrono::Duration;
 use eframe::egui::TextStyle::Body;
@@ -896,51 +896,52 @@ impl Stave {
     }
 
     fn copy_selection(&mut self, ctx: &Context) {
-        if let Some(time_selection) = &self.time_selection.clone() {
-            // FIXME Implement copy:
-            //  1. extract matching events, time selection only for starters.
-            //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
-            let mut snippet = self
-                .history
-                .read()
-                .expect("read stave history")
-                .with_track(|track| {
-                    let mut snippet = vec![];
-                    for ev in &track.events {
-                        if ev.intersects(&time_selection) {
-                            snippet.push(ev.clone());
-                        }
-                    }
-                    snippet
-                });
-            for ev in &mut snippet {
-                ev.at -= time_selection.0;
-            }
-            // TODO Use clipboard.rs to get file path.
-            util::store(&snippet, &"./clipboard-content".into(), false);
-            ctx.copy_text("./clipboard-content".into())
+        let Some(time_selection) = self.time_selection.clone() else {
+            return;
+        };
+        let mut events = self
+            .history
+            .read()
+            .expect("read stave history")
+            .with_track(|track| {
+                track
+                    .events
+                    .iter()
+                    .filter(|ev| ev.intersects(&time_selection))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            });
+        for ev in &mut events {
+            ev.at -= time_selection.0;
+        }
+        let fragment = Fragment {
+            duration: time_selection.len(),
+            events,
+        };
+        match self.clipboard.set_fragment(&fragment) {
+            Ok(()) => ctx.copy_text(self.clipboard.fragment_file().to_string_lossy().into()),
+            Err(e) => log::error!("Cannot copy to the clipboard: {e}"),
         }
     }
 
     fn paste(&mut self, ctx: &Context) {
-        // TODO (clip-buffer) Use clipboard.rs to get file path?
-        // TODO (clip-buffer, reliability) Verify that file (buffer_file) is readable
-        //      and has required format. Ignore with debug log otherwise.
-        let clipboard_path: PathBuf = "./clipboard-content".into();
-        if clipboard_path.exists() {
-            // TODO Check result, skip action when cannot read (now just panics).
-            let snippet: Vec<TrackEvent> = util::load(&clipboard_path);
-            let insert_at = self.cursor_position;
-            let id_seq = self
-                .history
-                .read()
-                .expect("read stave history")
-                .id_seq
-                .clone();
-            self.do_edit_command(ctx, Self::transition_id(), |_stave, _track| {
-                paste_events(&id_seq, &insert_at, &snippet)
-            });
-        }
+        let fragment = match self.clipboard.get_fragment() {
+            Ok(fragment) => fragment,
+            Err(e) => {
+                log::debug!("Nothing to paste, cannot read the clipboard: {e}");
+                return;
+            }
+        };
+        let insert_at = self.cursor_position;
+        let id_seq = self
+            .history
+            .read()
+            .expect("read stave history")
+            .id_seq
+            .clone();
+        self.do_edit_command(ctx, Self::transition_id(), |_stave, _track| {
+            paste_events(&id_seq, &insert_at, &fragment.events)
+        });
     }
 
     fn undo_redo(&mut self, ctx: &Context, undo: bool) {

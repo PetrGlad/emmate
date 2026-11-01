@@ -82,14 +82,26 @@ pub fn main() {
     // No configurable values at the moment, keeping it here to keep config loader compilable.
     let _config = Config::load(arg_matches.get_one::<PathBuf>("config-file"));
 
+    let new_project = arg_matches.get_flag("new-project");
     let project_dir;
 
     // TODO (improvement) Use positional argument instead  and auto-detect how to open the path (midi or project).
     if let Some(midi_file_path) = arg_matches.get_one::<PathBuf>("midi-file") {
         log::info!("Opening MIDI file {:?}", midi_file_path);
-        project_dir = Project::init_from_midi_file(midi_file_path);
+        let midi_project_dir = Project::directory_for_midi_file(midi_file_path);
+        if new_project && !Project::exists(&midi_project_dir) && !midi_file_path.is_file() {
+            log::info!("Creating a new empty project for {:?}", midi_file_path);
+            project_dir = Project::init_empty(&midi_project_dir);
+        } else {
+            project_dir = Project::init_from_midi_file(midi_file_path);
+        }
     } else if let Some(path) = arg_matches.get_one::<PathBuf>("project") {
-        project_dir = path.clone();
+        if new_project && !Project::exists(path) {
+            log::info!("Creating a new empty project {:?}", path);
+            project_dir = Project::init_empty(path);
+        } else {
+            project_dir = path.clone();
+        }
         log::info!("Opening project {:?}", &project_dir);
     } else {
         log::error!("No MIDI file or project dir to open is given.");
@@ -183,6 +195,14 @@ fn build_cli() -> Command {
             clap::arg!(--"project" <FILE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
                 .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            clap::arg!(--"new-project")
+                .action(clap::ArgAction::SetTrue)
+                .help(
+                    "Create an empty project if the given project, or the project of the given \
+                     MIDI file, does not exist. A MIDI file that exists is still imported.",
+                ),
         )
         .arg(
             clap::arg!(--"shell-completion-script" <SHELL_NAME>)

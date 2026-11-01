@@ -18,9 +18,9 @@ impl Project {
     const HISTORY_DIR_NAME: &'static str = "history";
     const META_FILE_NAME: &'static str = "meta.toml";
 
+    /// Project directory that corresponds to the MIDI file.
     // TODO (cleanup) Return a Result.
-    pub fn init_from_midi_file(source_file: &PathBuf) -> PathBuf {
-        log::info!("Source file {}", source_file.to_string_lossy());
+    pub fn directory_for_midi_file(source_file: &PathBuf) -> PathBuf {
         let mut directory = source_file.to_owned();
         if directory.file_name().is_none() {
             panic!(
@@ -30,7 +30,31 @@ impl Project {
         }
         directory.set_extension("");
         directory.set_extension(Project::DIRECTORY_NAME_SUFFIX);
+        absolute(directory).expect("project directory path can be normalized")
+    }
+
+    pub fn exists(directory: &PathBuf) -> bool {
+        directory.join(Project::META_FILE_NAME).is_file()
+    }
+
+    // TODO (cleanup) Return a Result.
+    pub fn init_from_midi_file(source_file: &PathBuf) -> PathBuf {
+        log::info!("Source file {}", source_file.to_string_lossy());
+        let directory = Self::directory_for_midi_file(source_file);
+        Self::init_directory(&directory, Some(source_file));
+        directory
+    }
+
+    /// Create a project that has no events, unless the project already exists.
+    pub fn init_empty(directory: &PathBuf) -> PathBuf {
         let directory = absolute(directory).expect("project directory path can be normalized");
+        Self::init_directory(&directory, None);
+        directory
+    }
+
+    /// Fill in the missing parts of the project directory.
+    /// An empty track is created when there is no source file.
+    fn init_directory(directory: &PathBuf, source_file: Option<&PathBuf>) {
         log::info!("Project directory {}", &directory.to_string_lossy());
         fs::create_dir_all(&directory)
             .expect(format!("create project directory {:?}", directory.to_string_lossy()).as_str());
@@ -41,7 +65,7 @@ impl Project {
                 format_id: PROJECT_FORMAT_ID,
                 git_revision: env!("GIT_HASH").into(),
                 title: title.clone(),
-                source_file: source_file.clone(),
+                source_file: source_file.cloned(),
             };
             Self::write_meta(&meta, &meta_path);
         }
@@ -52,9 +76,12 @@ impl Project {
             fs::create_dir_all(&history_dir).expect(
                 format!("create history directory {:?}", directory.to_string_lossy()).as_str(),
             );
-            TrackHistory::with_directory(&history_dir).init(&source_file);
+            let history = TrackHistory::with_directory(&history_dir);
+            match source_file {
+                Some(source_file) => history.init(source_file),
+                None => history.init_empty(),
+            };
         };
-        directory
     }
 
     pub fn open(project_path: &PathBuf) -> Project {
@@ -123,7 +150,8 @@ pub struct ProjectMeta {
     pub format_id: u16,
     pub git_revision: String,
     pub title: String,
-    pub source_file: PathBuf,
+    /// Not set for projects created without a MIDI file.
+    pub source_file: Option<PathBuf>,
 }
 
 impl ProjectMeta {
@@ -132,7 +160,7 @@ impl ProjectMeta {
             format_id: PROJECT_FORMAT_ID,
             git_revision: env!("GIT_HASH").into(),
             title: "".to_string(),
-            source_file: source_file.to_owned(),
+            source_file: Some(source_file.to_owned()),
         }
     }
 }

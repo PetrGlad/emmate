@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::changeset::{EventAction, EventActionsList, HistoryLogEntry, Snapshot};
 use crate::common::VersionId;
 use crate::project::PROJECT_FORMAT_ID;
-use crate::track::{Track, import_smf};
+use crate::track::{Track, TrackEvent, import_smf};
 use crate::track_edit::{AppliedCommand, CommandDiff, EditCommandId, apply_diffs, revert_diffs};
 use crate::util;
 use crate::util::IdSeq;
@@ -239,8 +239,17 @@ impl TrackHistory {
         }
     }
 
-    /// Create the fist version of a new history.
-    pub fn init(mut self, source_file: &PathBuf) -> Self {
+    /// Create the fist version of a new history from a MIDI file.
+    pub fn init(self, source_file: &PathBuf) -> Self {
+        self.init_with(|id_seq| import_smf(id_seq, source_file))
+    }
+
+    /// Create the fist version of a new history with an empty track.
+    pub fn init_empty(self) -> Self {
+        self.init_with(|_id_seq| vec![])
+    }
+
+    fn init_with(mut self, load_events: impl FnOnce(&IdSeq) -> Vec<TrackEvent>) -> Self {
         if !self.is_empty() {
             panic!("Cannot init with new source file: the project history is not empty.")
         }
@@ -258,7 +267,7 @@ impl TrackHistory {
             let id_seq = self.id_seq.clone();
             self.update_track(|track| {
                 let mut patch = vec![];
-                for ev in import_smf(&id_seq, source_file) {
+                for ev in load_events(&id_seq) {
                     patch.push(EventAction::Insert(ev));
                 }
                 util::store(

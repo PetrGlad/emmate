@@ -377,7 +377,6 @@ pub fn paste_events(
     if snippet.is_empty() {
         return None;
     }
-    // TODO Include duration to the snippet data. See ends_after()
     let patch: Vec<EventAction> = snippet
         .iter()
         .map(|ev| {
