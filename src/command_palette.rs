@@ -4,6 +4,8 @@ use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use strum::IntoEnumIterator;
 
+const MAX_SHORTCUTS_SHOWN: usize = 3;
+
 /// Pop-up list of commands filtered by the text typed by the user.
 #[derive(Default)]
 pub struct CommandPalette {
@@ -28,6 +30,21 @@ fn matching_commands(matcher: &SkimMatcherV2, query: &str) -> Vec<Command> {
         .collect();
     scored.sort_by_key(|(score, _)| -score); // Stable, so ties keep registry order.
     scored.into_iter().map(|(_, cmd)| cmd).collect()
+}
+
+/// Shortcuts of the command as one line of text, at most `MAX_SHORTCUTS_SHOWN` of them.
+fn shortcuts_text(ctx: &Context, command: &Command) -> String {
+    let shortcuts = &command.description().display_shortcuts;
+    let mut text = shortcuts
+        .iter()
+        .take(MAX_SHORTCUTS_SHOWN)
+        .map(|s| ctx.format_shortcut(s))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if shortcuts.len() > MAX_SHORTCUTS_SHOWN {
+        text.push_str(", …");
+    }
+    text
 }
 
 impl CommandPalette {
@@ -98,9 +115,10 @@ impl CommandPalette {
                                     if title.clicked() {
                                         chosen = Some(*cmd);
                                     }
-                                    if let Some(shortcut) = &cmd.description().display_shortcut {
+                                    let shortcuts = shortcuts_text(ctx, cmd);
+                                    if !shortcuts.is_empty() {
                                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                            ui.label(RichText::new(ctx.format_shortcut(shortcut)).weak());
+                                            ui.label(RichText::new(shortcuts).weak());
                                         });
                                     }
                                 });

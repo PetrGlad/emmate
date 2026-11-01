@@ -51,8 +51,8 @@ pub struct CommandDescription {
     pub title: &'static str,
     /// Key combinations that trigger the command, primary first.
     pub shortcuts: Vec<KeyboardShortcut>,
-    /// Shortcut to show next to the title.
-    pub display_shortcut: Option<KeyboardShortcut>,
+    /// Shortcuts to show next to the title, primary first.
+    pub display_shortcuts: Vec<KeyboardShortcut>,
 }
 
 fn plain(key: Key) -> KeyboardShortcut {
@@ -69,17 +69,17 @@ fn desc<const N: usize>(
 ) -> CommandDescription {
     CommandDescription {
         title,
-        display_shortcut: shortcuts.first().copied(),
+        display_shortcuts: shortcuts.to_vec(),
         shortcuts: shortcuts.into(),
     }
 }
 
-/// Copy and Paste are delivered by egui as events, not keys, so they have no dispatch shortcuts.
+/// Copy and Paste are delivered by egui as events, not keys, so dthey have no dispatch shortcuts.
 fn event_desc(title: &'static str, display_shortcut: KeyboardShortcut) -> CommandDescription {
     CommandDescription {
         title,
         shortcuts: vec![],
-        display_shortcut: Some(display_shortcut),
+        display_shortcuts: vec![display_shortcut],
     }
 }
 
