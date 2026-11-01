@@ -1,9 +1,11 @@
+use crate::command_palette::CommandPalette;
+use crate::commands::{self, Command};
 use crate::common::Time;
 use crate::engine::{Engine, EngineCommand, StatusEvent};
 use crate::note_sampler::NoteTester;
 use crate::project::Project;
 use crate::stave::Stave;
-use eframe::egui::{Key, Modifiers, Ui, Vec2};
+use eframe::egui::{Key, Ui, Vec2};
 use eframe::{self, CreationContext, egui};
 use egui_extras::{Size, StripBuilder};
 use std::collections::HashSet;
@@ -26,6 +28,7 @@ pub struct EmApp {
     follow_playback: bool,
     stop_app: Arc<AtomicBool>,
     note_tester: NoteTester,
+    palette: CommandPalette,
 }
 
 impl EmApp {
@@ -46,6 +49,7 @@ impl EmApp {
             follow_playback: false,
             stop_app,
             note_tester: NoteTester::new(engine_command_send.to_owned()),
+            palette: CommandPalette::default(),
         };
 
         let engine_receiver_ctx = ctx.egui_ctx.clone();
@@ -91,6 +95,29 @@ impl EmApp {
         self.stave.save_to(&PathBuf::from(path));
     }
 
+    fn execute(&mut self, ctx: &egui::Context, command: Command) {
+        match command {
+            Command::CommandPalette => self.palette.toggle(),
+            Command::Pause => self.toggle_pause(),
+            Command::Export => self.export(),
+            Command::FollowPlayback => self.follow_playback = !self.follow_playback,
+            Command::ScrollPageLeft => self
+                .stave
+                .viewport
+                .scroll_by(ctx.content_rect().width() / -4.0),
+            Command::ScrollPageRight => self
+                .stave
+                .viewport
+                .scroll_by(ctx.content_rect().width() / 4.0),
+            _ => {
+                if let Some(pos) = self.stave.execute(ctx, command) {
+                    self.stave.move_cursor_to(pos);
+                    self.engine_seek(pos);
+                }
+            }
+        }
+    }
+
     fn engine_seek(&self, to: Time) {
         self.engine_command_send
             .send(Box::new(move |engine| engine.seek(to)))
@@ -116,39 +143,9 @@ impl eframe::App for EmApp {
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            if ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    Modifiers::NONE,
-                    egui::Key::Space,
-                ))
-            }) {
-                self.toggle_pause();
-            } else if ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::S))
-            }) {
-                self.export();
-            } else if ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::F))
-            }) {
-                self.follow_playback = !self.follow_playback;
-            } else if ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    Modifiers::NONE,
-                    egui::Key::PageUp,
-                ))
-            }) {
-                self.stave
-                    .viewport
-                    .scroll_by(ui.ctx().content_rect().width() / -4.0);
-            } else if ui.input_mut(|i| {
-                i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    Modifiers::NONE,
-                    egui::Key::PageDown,
-                ))
-            }) {
-                self.stave
-                    .viewport
-                    .scroll_by(ui.ctx().content_rect().width() / 4.0);
+            let from_palette = self.palette.show(ui.ctx());
+            if let Some(command) = from_palette.or_else(|| commands::pressed(ui.ctx())) {
+                self.execute(ui.ctx(), command);
             }
 
             {
@@ -212,18 +209,10 @@ impl eframe::App for EmApp {
                                 self.export();
                             }
                             if ui.button("⤵ Undo").clicked() {
-                                self.stave
-                                    .history
-                                    .write()
-                                    .expect("Write stave.history.")
-                                    .undo(&mut vec![]);
+                                self.execute(ui.ctx(), Command::Undo);
                             }
                             if ui.button("⤴ Redo").clicked() {
-                                self.stave
-                                    .history
-                                    .write()
-                                    .expect("Write stave.history.")
-                                    .redo(&mut vec![]);
+                                self.execute(ui.ctx(), Command::Redo);
                             }
                         });
                         ui.horizontal(|ui| {

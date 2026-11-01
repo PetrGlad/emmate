@@ -25,6 +25,8 @@ mod app;
 mod audio_setup;
 mod changeset;
 mod clipboard;
+mod command_palette;
+mod commands;
 mod common;
 mod config;
 mod engine;

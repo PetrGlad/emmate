@@ -56,6 +56,7 @@ arrayvec = "0.7.6"
 signal-hook = "0.4.4"
 
 num = "0.4.3"
+fuzzy-matcher = "0.3.7"
 # rhai = "1.20.1"
 
 # These may be useful

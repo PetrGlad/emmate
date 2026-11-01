@@ -1,5 +1,6 @@
 use crate::changeset::{Changeset, EventAction, EventActionsList};
 use crate::clipboard::Clipboard;
+use crate::commands::Command;
 use crate::common::{Time, VersionId};
 use crate::range::{Range, RangeLike, RangeSpan};
 use crate::track::{
@@ -851,7 +852,7 @@ impl Stave {
             &stave_response.time_hovered,
         );
 
-        let new_cursor_position = self.handle_commands(&stave_response.response);
+        let new_cursor_position = self.handle_input(&stave_response.response);
         if let Some(pos) = new_cursor_position {
             self.cursor_position = pos;
             self.ensure_visible(pos);
@@ -867,411 +868,238 @@ impl Stave {
 
     const KEYBOARD_TIME_STEP: Time = 10_000;
 
-    /**
-     * Applies the command and returns time to move the stave cursor to.
-     */
-    fn handle_commands(&mut self, response: &egui::Response) -> Option<Time> {
-        // TODO (cleanup) Have to see if duplication here can be reduced. Likely the dispatch needs some
-        //   hash map that for each input state defines a unique command.
-        //   Need to support focus somehow so the commands only active when stave is focused.
-        //   Currently commands also affect other widgets (e.g. arrows change button focus).
+    fn transition_id() -> egui::Id {
+        egui::Id::new("stave-edit-transition")
+    }
 
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::Q))
-        }) {
-            self.note_selection.clear();
-        }
+    /// Moves the cursor and scrolls the stave to keep it visible.
+    pub fn move_cursor_to(&mut self, at: Time) {
+        self.cursor_position = at;
+        self.ensure_visible(at);
+    }
 
-        // Tempo adjustment
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::NONE,
-                egui::Key::CloseBracket,
-            ))
-        }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
-                self.adjust_tempo(&response, &time_selection, 1.01);
-            }
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::NONE,
-                egui::Key::OpenBracket,
-            ))
-        }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
-                self.adjust_tempo(&response, &time_selection, 1.0 / 1.01);
-            }
-        }
-        // Tape insert/remove
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::NONE,
-                egui::Key::Delete,
-            ))
-        }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
-                let id_seq = &self
-                    .history
-                    .read()
-                    .expect("Read stave.history.")
-                    .id_seq
-                    .clone();
-                self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                    tape_delete(id_seq, track, &(time_selection.0, time_selection.1))
-                });
-            }
-            if !self.note_selection.selected.is_empty() {
-                self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                    // Deleting both time and event selection in one command for convenience, these can be separate commands.
-                    delete_selected(track, &stave.note_selection.selected)
-                });
-            }
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::NONE,
-                egui::Key::Insert,
-            ))
-        }) {
-            if let Some(time_selection) = &self.time_selection.clone() {
-                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
-                    tape_insert(&(time_selection.0, time_selection.1))
-                });
-            }
-        }
-
-        // Tail shift
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL | Modifiers::SHIFT,
-                egui::Key::ArrowRight,
-            ))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                shift_tail(track, &(stave.cursor_position), &Stave::KEYBOARD_TIME_STEP)
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL | Modifiers::SHIFT,
-                egui::Key::ArrowLeft,
-            ))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                shift_tail(track, &(stave.cursor_position), &-Stave::KEYBOARD_TIME_STEP)
-            });
-        }
-
-        // Note time moves
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::ALT | Modifiers::SHIFT,
-                egui::Key::ArrowRight,
-            )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::L))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                shift_selected(
-                    track,
-                    &stave.note_selection.selected,
-                    &Stave::KEYBOARD_TIME_STEP,
-                )
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::ALT | Modifiers::SHIFT,
-                egui::Key::ArrowLeft,
-            )) || i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::SHIFT, egui::Key::H))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                shift_selected(
-                    track,
-                    &stave.note_selection.selected,
-                    &-Stave::KEYBOARD_TIME_STEP,
-                )
-            });
-        }
-
-        // Note edits
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::H))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                stretch_selected_notes(
-                    track,
-                    &stave.note_selection.selected,
-                    &-Stave::KEYBOARD_TIME_STEP,
-                )
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::L))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                stretch_selected_notes(
-                    track,
-                    &stave.note_selection.selected,
-                    &Stave::KEYBOARD_TIME_STEP,
-                )
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::U))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                transpose_selected_notes(track, &stave.note_selection.selected, 1)
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::J))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                transpose_selected_notes(track, &stave.note_selection.selected, -1)
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::I))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                accent_selected_notes(track, &stave.note_selection.selected, 1)
-            });
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::K))
-        }) {
-            self.do_edit_command(&response.ctx, response.id, |stave, track| {
-                accent_selected_notes(track, &stave.note_selection.selected, -1)
-            });
-        }
-
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::ALT, egui::Key::A))
-        }) {
-            self.zoom_to_fit(Duration::seconds(3).num_microseconds().unwrap_or_default());
-        }
-
-        // Undo/redo
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Z))
-        }) {
-            let mut changes = vec![];
-            let edit_state = if self
-                .history
-                .write()
-                .expect("Write stave.history.")
-                .undo(&mut changes)
-            {
-                Some((EditCommandId::Undo, changes))
-            } else {
-                None
-            };
-            self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::CTRL, egui::Key::Y))
-                || i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    Modifiers::CTRL | Modifiers::SHIFT,
-                    egui::Key::Z,
-                ))
-        }) {
-            let mut changes = vec![];
-            let edit_state = if self
-                .history
-                .write()
-                .expect("Write stave.history.")
-                .redo(&mut changes)
-            {
-                Some((EditCommandId::Redo, changes))
-            } else {
-                None
-            };
-            self.transition = Self::animate_edit(&response.ctx, response.id, edit_state);
-        }
-
-        // Clipboard/clipbuffer operations, copy
+    /// Input that is not a command: copy/paste events and pointer.
+    /// Returns time to move the stave cursor to.
+    fn handle_input(&mut self, response: &egui::Response) -> Option<Time> {
         if got_copy_event(response) {
-            if let Some(time_selection) = &self.time_selection.clone() {
-                // FIXME Implement copy:
-                //  1. extract matching events, time selection only for starters.
-                //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
-                let mut snippet =
-                    self.history
-                        .read()
-                        .expect("read stave history")
-                        .with_track(|track| {
-                            let mut snippet = vec![];
-                            for ev in &track.events {
-                                if ev.intersects(&time_selection) {
-                                    snippet.push(ev.clone());
-                                }
-                            }
-                            snippet
-                        });
-                for ev in &mut snippet {
-                    ev.at -= time_selection.0;
-                }
-                // TODO Use clipboard.rs to get file path.
-                util::store(&snippet, &"./clipboard-content".into(), false);
-                response.ctx.copy_text("./clipboard-content".into())
+            self.copy_selection(&response.ctx);
+        }
+        if got_paste_event(response).is_some() {
+            self.paste(&response.ctx);
+        }
+        if let Some(hover_pos) = response.hover_pos() {
+            if response.middle_clicked() {
+                return Some(self.viewport.time_from_x(hover_pos.x));
             }
         }
+        None
+    }
 
-        // Clipboard/clipbuffer operations, paste
-        if let Some(buffer_file) = got_paste_event(response) {
-            // TODO (clip-buffer) Use clipboard.rs to get file path?
-            // TODO (clip-buffer, reliability) Verify that file (buffer_file) is readable
-            //      and has required format. Ignore with debug log otherwise.
-            let clipboard_path: PathBuf = "./clipboard-content".into();
-            if clipboard_path.exists() {
-                // TODO Check result, skip action when cannot read (now just panics).
-                let snippet: Vec<TrackEvent> = util::load(&clipboard_path);
-                let insert_at = self.cursor_position;
-                let id_seq = self
-                    .history
-                    .read()
-                    .expect("read stave history")
-                    .id_seq
-                    .clone();
-                self.do_edit_command(&response.ctx, response.id, |_stave, _track| {
-                    paste_events(&id_seq, &insert_at, &snippet)
+    fn copy_selection(&mut self, ctx: &Context) {
+        if let Some(time_selection) = &self.time_selection.clone() {
+            // FIXME Implement copy:
+            //  1. extract matching events, time selection only for starters.
+            //  2. Pass them to the EmApp for clipboard processing? Or clipboard should be in Stave?
+            let mut snippet = self
+                .history
+                .read()
+                .expect("read stave history")
+                .with_track(|track| {
+                    let mut snippet = vec![];
+                    for ev in &track.events {
+                        if ev.intersects(&time_selection) {
+                            snippet.push(ev.clone());
+                        }
+                    }
+                    snippet
                 });
+            for ev in &mut snippet {
+                ev.at -= time_selection.0;
             }
+            // TODO Use clipboard.rs to get file path.
+            util::store(&snippet, &"./clipboard-content".into(), false);
+            ctx.copy_text("./clipboard-content".into())
         }
+    }
 
-        // Bookmarks & time navigation
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::M))
-        }) {
-            let at = self.cursor_position;
-            let id_seq = &self
+    fn paste(&mut self, ctx: &Context) {
+        // TODO (clip-buffer) Use clipboard.rs to get file path?
+        // TODO (clip-buffer, reliability) Verify that file (buffer_file) is readable
+        //      and has required format. Ignore with debug log otherwise.
+        let clipboard_path: PathBuf = "./clipboard-content".into();
+        if clipboard_path.exists() {
+            // TODO Check result, skip action when cannot read (now just panics).
+            let snippet: Vec<TrackEvent> = util::load(&clipboard_path);
+            let insert_at = self.cursor_position;
+            let id_seq = self
                 .history
                 .read()
                 .expect("read stave history")
                 .id_seq
                 .clone();
-            self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                set_bookmark(track, id_seq, &at)
+            self.do_edit_command(ctx, Self::transition_id(), |_stave, _track| {
+                paste_events(&id_seq, &insert_at, &snippet)
             });
         }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(Modifiers::NONE, egui::Key::N))
-        }) {
-            let at = self.cursor_position;
-            self.do_edit_command(&response.ctx, response.id, |_stave, track| {
-                clear_bookmark(track, &at)
-            });
-        }
-        // Previous bookmark
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL,
-                egui::Key::ArrowLeft,
-            ))
-        }) {
-            let at = self.cursor_position;
-            return self
-                .history
-                .read()
-                .expect("read stave history")
-                .with_track(|track| {
-                    track
-                        .events
-                        .iter()
-                        .rfind(|ev| ev.at < at && ev.event == TrackEventType::Bookmark)
-                        .cloned()
-                })
-                .map(|ev| ev.at)
-                .or(Some(0));
-        }
-        // Next bookmark
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL,
-                egui::Key::ArrowRight,
-            ))
-        }) {
-            let at = self.cursor_position;
-            return self
-                .history
-                .read()
-                .expect("read stave history")
-                .with_track(move |track| {
-                    track
-                        .events
-                        .iter()
-                        .find(|ev| ev.at > at && ev.event == TrackEventType::Bookmark)
-                        .cloned()
-                })
-                .map(|ev| ev.at)
-                .or(Some(self.max_time()));
-        }
-        // Previous note/event
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::ALT,
-                egui::Key::ArrowLeft,
-            ))
-        }) {
-            let at = self.cursor_position;
-            return self
-                .history
-                .read()
-                .expect("Read stave.history.")
-                .with_track(|track| track.events.iter().rfind(|ev| ev.at < at).cloned())
-                .map(|ev| ev.at)
-                .or(Some(0));
-        }
-        // Next note/event
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::ALT,
-                egui::Key::ArrowRight,
-            ))
-        }) {
-            let at = self.cursor_position;
-            return self
-                .history
-                .read()
-                .expect("Read stave.history.")
-                .with_track(move |track| track.events.iter().find(|ev| ev.at > at).cloned())
-                .map(|ev| ev.at)
-                .or(Some(self.max_time()));
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL,
-                egui::Key::Home,
-            ))
-        }) {
-            return Some(0);
-        }
-        if response.ctx.input_mut(|i| {
-            i.consume_shortcut(&egui::KeyboardShortcut::new(
-                Modifiers::CTRL,
-                egui::Key::End,
-            ))
-        }) {
-            return Some(self.max_time());
-        }
-        if let Some(hover_pos) = response.hover_pos() {
-            if response.middle_clicked() {
-                let at = self.viewport.time_from_x(hover_pos.x);
-                return Some(at);
-            }
-        }
+    }
 
+    fn undo_redo(&mut self, ctx: &Context, undo: bool) {
+        let mut changes = vec![];
+        let mut history = self.history.write().expect("Write stave.history.");
+        let edit_state = if undo {
+            history
+                .undo(&mut changes)
+                .then_some((EditCommandId::Undo, changes))
+        } else {
+            history
+                .redo(&mut changes)
+                .then_some((EditCommandId::Redo, changes))
+        };
+        drop(history);
+        self.transition = Self::animate_edit(ctx, Self::transition_id(), edit_state);
+    }
+
+    fn neighbour_time(
+        &self,
+        forward: bool,
+        only_bookmarks: bool,
+    ) -> Time {
+        let at = self.cursor_position;
+        let is_target = |ev: &&TrackEvent| {
+            (if forward { ev.at > at } else { ev.at < at })
+                && (!only_bookmarks || ev.event == TrackEventType::Bookmark)
+        };
+        self.history
+            .read()
+            .expect("read stave history")
+            .with_track(|track| {
+                if forward {
+                    track.events.iter().find(|ev| is_target(ev)).cloned()
+                } else {
+                    track.events.iter().rfind(|ev| is_target(ev)).cloned()
+                }
+            })
+            .map(|ev| ev.at)
+            .unwrap_or(if forward { self.max_time() } else { 0 })
+    }
+
+    /**
+     * Applies a stave command and returns time to move the stave cursor to.
+     * Commands that are not handled by the stave are ignored.
+     */
+    pub fn execute(&mut self, ctx: &Context, command: Command) -> Option<Time> {
+        let id = Self::transition_id();
+        let step = Stave::KEYBOARD_TIME_STEP;
+        match command {
+            Command::ClearNoteSelection => self.note_selection.clear(),
+            Command::TempoUp | Command::TempoDown => {
+                if let Some(time_selection) = &self.time_selection.clone() {
+                    let ratio = if command == Command::TempoUp { 1.01 } else { 1.0 / 1.01 };
+                    self.adjust_tempo(ctx, id, time_selection, ratio);
+                }
+            }
+            Command::DeleteSelection => {
+                if let Some(time_selection) = &self.time_selection.clone() {
+                    let id_seq = &self
+                        .history
+                        .read()
+                        .expect("Read stave.history.")
+                        .id_seq
+                        .clone();
+                    self.do_edit_command(ctx, id, |_stave, track| {
+                        tape_delete(id_seq, track, &(time_selection.0, time_selection.1))
+                    });
+                }
+                if !self.note_selection.selected.is_empty() {
+                    self.do_edit_command(ctx, id, |stave, track| {
+                        // Deleting both time and event selection in one command for convenience, these can be separate commands.
+                        delete_selected(track, &stave.note_selection.selected)
+                    });
+                }
+            }
+            Command::InsertTape => {
+                if let Some(time_selection) = &self.time_selection.clone() {
+                    self.do_edit_command(ctx, id, |_stave, _track| {
+                        tape_insert(&(time_selection.0, time_selection.1))
+                    });
+                }
+            }
+            Command::ShiftTailLater | Command::ShiftTailEarlier => {
+                let delta = if command == Command::ShiftTailLater { step } else { -step };
+                self.do_edit_command(ctx, id, |stave, track| {
+                    shift_tail(track, &(stave.cursor_position), &delta)
+                });
+            }
+            Command::ShiftNotesLater | Command::ShiftNotesEarlier => {
+                let delta = if command == Command::ShiftNotesLater { step } else { -step };
+                self.do_edit_command(ctx, id, |stave, track| {
+                    shift_selected(track, &stave.note_selection.selected, &delta)
+                });
+            }
+            Command::StretchNotesLonger | Command::StretchNotesShorter => {
+                let delta = if command == Command::StretchNotesLonger { step } else { -step };
+                self.do_edit_command(ctx, id, |stave, track| {
+                    stretch_selected_notes(track, &stave.note_selection.selected, &delta)
+                });
+            }
+            Command::TransposeUp | Command::TransposeDown => {
+                let delta = if command == Command::TransposeUp { 1 } else { -1 };
+                self.do_edit_command(ctx, id, |stave, track| {
+                    transpose_selected_notes(track, &stave.note_selection.selected, delta)
+                });
+            }
+            Command::AccentUp | Command::AccentDown => {
+                let delta = if command == Command::AccentUp { 1 } else { -1 };
+                self.do_edit_command(ctx, id, |stave, track| {
+                    accent_selected_notes(track, &stave.note_selection.selected, delta)
+                });
+            }
+            Command::ZoomToFit => {
+                self.zoom_to_fit(Duration::seconds(3).num_microseconds().unwrap_or_default());
+            }
+            Command::Undo => self.undo_redo(ctx, true),
+            Command::Redo => self.undo_redo(ctx, false),
+            Command::Copy => self.copy_selection(ctx),
+            Command::Paste => self.paste(ctx),
+            Command::SetBookmark => {
+                let at = self.cursor_position;
+                let id_seq = &self
+                    .history
+                    .read()
+                    .expect("read stave history")
+                    .id_seq
+                    .clone();
+                self.do_edit_command(ctx, id, |_stave, track| set_bookmark(track, id_seq, &at));
+            }
+            Command::ClearBookmark => {
+                let at = self.cursor_position;
+                self.do_edit_command(ctx, id, |_stave, track| clear_bookmark(track, &at));
+            }
+            Command::PrevBookmark => return Some(self.neighbour_time(false, true)),
+            Command::NextBookmark => return Some(self.neighbour_time(true, true)),
+            Command::PrevEvent => return Some(self.neighbour_time(false, false)),
+            Command::NextEvent => return Some(self.neighbour_time(true, false)),
+            Command::CursorStart => return Some(0),
+            Command::CursorEnd => return Some(self.max_time()),
+            Command::CommandPalette
+            | Command::Pause
+            | Command::Export
+            | Command::FollowPlayback
+            | Command::ScrollPageLeft
+            | Command::ScrollPageRight => {}
+        }
         None
     }
 
     fn adjust_tempo(
         &mut self,
-        response: &egui::Response,
+        ctx: &Context,
+        id: egui::Id,
         time_selection: &Range<Time>,
         ratio: f32,
     ) {
         if self
-            .do_edit_command(&response.ctx, response.id, |_stave, track| {
+            .do_edit_command(ctx, id, |_stave, track| {
                 tape_stretch(track, &(time_selection.0, time_selection.1), ratio)
             })
             .is_some()
