@@ -932,6 +932,8 @@ impl Stave {
                 return;
             }
         };
+        // TODO (clip-buffer) Also process fragment.duration, e.g. select the pasted time range
+        //   or move the cursor to its end. Now only the events are pasted.
         let insert_at = self.cursor_position;
         let id_seq = self
             .history
