@@ -1,10 +1,11 @@
 use eframe::egui::{Context, Key, KeyboardShortcut, Modifiers};
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use strum::{EnumIter, IntoEnumIterator};
 
-/// All user-invokable actions. Single source of titles and keyboard shortcuts
+/// All user-invokable actions, listed in the palette in declaration order. Single source of titles and keyboard shortcuts
 /// for shortcut dispatch and the command palette.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, EnumIter)]
 pub enum Command {
     CommandPalette,
     // App
@@ -45,44 +46,6 @@ pub enum Command {
     CursorStart,
     CursorEnd,
 }
-
-/// In the order they are listed in the palette when nothing is typed.
-pub const ALL: &[Command] = &[
-    Command::CommandPalette,
-    Command::Pause,
-    Command::Export,
-    Command::FollowPlayback,
-    Command::ScrollPageLeft,
-    Command::ScrollPageRight,
-    Command::ClearNoteSelection,
-    Command::ZoomToFit,
-    Command::TempoUp,
-    Command::TempoDown,
-    Command::DeleteSelection,
-    Command::InsertTape,
-    Command::ShiftTailLater,
-    Command::ShiftTailEarlier,
-    Command::ShiftNotesLater,
-    Command::ShiftNotesEarlier,
-    Command::StretchNotesLonger,
-    Command::StretchNotesShorter,
-    Command::TransposeUp,
-    Command::TransposeDown,
-    Command::AccentUp,
-    Command::AccentDown,
-    Command::Undo,
-    Command::Redo,
-    Command::Copy,
-    Command::Paste,
-    Command::SetBookmark,
-    Command::ClearBookmark,
-    Command::PrevBookmark,
-    Command::NextBookmark,
-    Command::PrevEvent,
-    Command::NextEvent,
-    Command::CursorStart,
-    Command::CursorEnd,
-];
 
 pub struct CommandDescription {
     pub title: &'static str,
@@ -176,7 +139,7 @@ impl Command {
     pub fn description(self) -> &'static CommandDescription {
         static DESCRIPTIONS: OnceLock<HashMap<Command, CommandDescription>> = OnceLock::new();
         &DESCRIPTIONS
-            .get_or_init(|| ALL.iter().map(|c| (*c, build_description(*c))).collect())[&self]
+            .get_or_init(|| Command::iter().map(|c| (c, build_description(c))).collect())[&self]
     }
 }
 
@@ -184,9 +147,8 @@ impl Command {
 fn shortcut_table() -> &'static [(KeyboardShortcut, Command)] {
     static TABLE: OnceLock<Vec<(KeyboardShortcut, Command)>> = OnceLock::new();
     TABLE.get_or_init(|| {
-        let mut table: Vec<_> = ALL
-            .iter()
-            .flat_map(|cmd| cmd.description().shortcuts.iter().map(move |s| (*s, *cmd)))
+        let mut table: Vec<_> = Command::iter()
+            .flat_map(|cmd| cmd.description().shortcuts.iter().map(move |s| (*s, cmd)))
             .collect();
         // egui matches `Ctrl+Shift+Z` also as `Ctrl+Z`, and `Shift+L` as `L`, so test most specific first.
         table.sort_by_key(|(s, _)| -(s.modifiers.shift as i32 + s.modifiers.alt as i32));
@@ -214,15 +176,9 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn all_lists_each_command_once() {
-        let unique: HashSet<_> = ALL.iter().collect();
-        assert_eq!(unique.len(), ALL.len());
-    }
-
-    #[test]
     fn shortcuts_do_not_clash() {
         let mut seen = HashSet::new();
-        for cmd in ALL {
+        for cmd in Command::iter() {
             for s in &cmd.description().shortcuts {
                 assert!(
                     seen.insert((s.logical_key, s.modifiers)),

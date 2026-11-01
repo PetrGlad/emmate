@@ -1,7 +1,8 @@
-use crate::commands::{self, Command};
+use crate::commands::Command;
 use eframe::egui::{self, Align, Align2, Context, Key, Layout, Modifiers, RichText};
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
+use strum::IntoEnumIterator;
 
 /// Pop-up list of commands filtered by the text typed by the user.
 #[derive(Default)]
@@ -16,14 +17,13 @@ pub struct CommandPalette {
 /// With an empty query all commands are returned in registry order.
 fn matching_commands(matcher: &SkimMatcherV2, query: &str) -> Vec<Command> {
     if query.is_empty() {
-        return commands::ALL.to_vec();
+        return Command::iter().collect();
     }
-    let mut scored: Vec<(i64, Command)> = commands::ALL
-        .iter()
+    let mut scored: Vec<(i64, Command)> = Command::iter()
         .filter_map(|cmd| {
             matcher
                 .fuzzy_match(cmd.description().title, query)
-                .map(|score| (score, *cmd))
+                .map(|score| (score, cmd))
         })
         .collect();
     scored.sort_by_key(|(score, _)| -score); // Stable, so ties keep registry order.
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn empty_query_lists_everything_in_registry_order() {
         let found = matching_commands(&SkimMatcherV2::default(), "");
-        assert_eq!(found, commands::ALL);
+        assert_eq!(found, Command::iter().collect::<Vec<_>>());
     }
 
     #[test]

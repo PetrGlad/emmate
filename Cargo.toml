@@ -57,6 +57,7 @@ signal-hook = "0.4.4"
 
 num = "0.4.3"
 fuzzy-matcher = "0.3.7"
+strum = { version = "0.28.0", features = ["derive"] }
 # rhai = "1.20.1"
 
 # These may be useful
