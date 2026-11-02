@@ -169,9 +169,23 @@ impl eframe::App for EmApp {
                             if dz != 1.0 {
                                 self.stave.viewport.zoom(dz, hover_pos.x);
                             }
-                            let scroll_delta = ui.input(|i| i.smooth_scroll_delta);
-                            if scroll_delta != Vec2::ZERO {
+                            let (scroll_delta, alt) =
+                                ui.input(|i| (i.smooth_scroll_delta, i.modifiers.alt));
+                            if alt {
+                                // Alt + wheel: vertical zoom, one discrete step per wheel notch.
+                                let notch = ui.input(|i| {
+                                    i.events.iter().any(|e| {
+                                        matches!(e, egui::Event::MouseWheel { delta, .. } if delta.y != 0.0)
+                                    })
+                                });
+                                if notch && scroll_delta.y != 0.0 {
+                                    self.stave
+                                        .viewport
+                                        .zoom_lanes(scroll_delta.y > 0.0, hover_pos.y);
+                                }
+                            } else if scroll_delta != Vec2::ZERO {
                                 self.stave.viewport.scroll_by(scroll_delta.x);
+                                self.stave.viewport.scroll_lanes_by(scroll_delta.y);
                             }
                         }
                         // TODO (improvement) Handle also note-hovered (this requires to resolve note itself).
@@ -192,6 +206,12 @@ impl eframe::App for EmApp {
                             }
                             if ui.button(" - ").clicked() {
                                 self.stave.viewport.zoom(1.0 / 1.05, mouse_x);
+                            }
+                            if ui.button(" ↕+ ").clicked() {
+                                self.execute(ui.ctx(), Command::VerticalZoomIn);
+                            }
+                            if ui.button(" ↕- ").clicked() {
+                                self.execute(ui.ctx(), Command::VerticalZoomOut);
                             }
                             let scroll_step = ui.painter().clip_rect().size().x * 0.15;
                             if ui.button(" << ").clicked() {

@@ -90,7 +90,7 @@ E.g. one can launch stand-alone Pianoteq for that.
   This lookup can also speed-up selection hints and hovers.
 - [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow /
   RightArrow
-- [ ] (usability) Vertical zoom.
+- [x] (usability) Vertical zoom (Alt+wheel, Alt+=/-, Alt+0 to reset; wheel or scrollbar to scroll).
 - [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
   handle_commands easier to read and enable to have a generated cheatsheet/help UI.
 - [ ] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.

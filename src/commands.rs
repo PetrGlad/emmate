@@ -23,6 +23,9 @@ pub enum Command {
     // Stave: selection and view
     ClearNoteSelection,
     ZoomToFit,
+    VerticalZoomIn,
+    VerticalZoomOut,
+    VerticalZoomReset,
     // Stave: edits
     TempoUp,
     TempoDown,
@@ -103,7 +106,10 @@ fn build_description(command: Command) -> CommandDescription {
         Command::CommandPalette => desc(
             "Command palette",
             // egui has no key for `~`: on a US layout it arrives as Shift+Backtick.
-            [with(ctrl_shift, Key::P), with(Modifiers::SHIFT, Key::Backtick)],
+            [
+                with(ctrl_shift, Key::P),
+                with(Modifiers::SHIFT, Key::Backtick),
+            ],
         ),
         Command::Pause => desc("Play/pause", [plain(Key::Space)]),
         Command::Export => desc("Export to MIDI file", [with(ctrl, Key::S)]),
@@ -119,23 +125,43 @@ fn build_description(command: Command) -> CommandDescription {
         Command::ZoomReset => egui_desc("Reset UI zoom", [kb_shortcuts::ZOOM_RESET]),
         Command::ClearNoteSelection => desc("Clear note selection", [plain(Key::Q)]),
         Command::ZoomToFit => desc("Zoom stave to fit", [with(Modifiers::ALT, Key::A)]),
+        Command::VerticalZoomIn => desc(
+            "Zoom stave in vertically",
+            [with(Modifiers::ALT, Key::Equals)],
+        ),
+        Command::VerticalZoomOut => desc(
+            "Zoom stave out vertically",
+            [with(Modifiers::ALT, Key::Minus)],
+        ),
+        Command::VerticalZoomReset => desc(
+            "Reset stave vertical zoom",
+            [with(Modifiers::ALT, Key::Num0)],
+        ),
         Command::TempoUp => desc("Tempo: slow down selection", [plain(Key::CloseBracket)]),
         Command::TempoDown => desc("Tempo: speed up selection", [plain(Key::OpenBracket)]),
         Command::DeleteSelection => desc("Delete selection", [plain(Key::Delete)]),
         Command::InsertTape => desc("Insert tape at time selection", [plain(Key::Insert)]),
-        Command::ShiftTailLater => {
-            desc("Shift track tail later", [with(ctrl_shift, Key::ArrowRight)])
-        }
-        Command::ShiftTailEarlier => {
-            desc("Shift track tail earlier", [with(ctrl_shift, Key::ArrowLeft)])
-        }
+        Command::ShiftTailLater => desc(
+            "Shift track tail later",
+            [with(ctrl_shift, Key::ArrowRight)],
+        ),
+        Command::ShiftTailEarlier => desc(
+            "Shift track tail earlier",
+            [with(ctrl_shift, Key::ArrowLeft)],
+        ),
         Command::ShiftNotesLater => desc(
             "Move selected notes later",
-            [with(alt_shift, Key::ArrowRight), with(Modifiers::SHIFT, Key::L)],
+            [
+                with(alt_shift, Key::ArrowRight),
+                with(Modifiers::SHIFT, Key::L),
+            ],
         ),
         Command::ShiftNotesEarlier => desc(
             "Move selected notes earlier",
-            [with(alt_shift, Key::ArrowLeft), with(Modifiers::SHIFT, Key::H)],
+            [
+                with(alt_shift, Key::ArrowLeft),
+                with(Modifiers::SHIFT, Key::H),
+            ],
         ),
         Command::StretchNotesLonger => desc("Make selected notes longer", [plain(Key::L)]),
         Command::StretchNotesShorter => desc("Make selected notes shorter", [plain(Key::H)]),
@@ -151,7 +177,10 @@ fn build_description(command: Command) -> CommandDescription {
         Command::ClearBookmark => desc("Clear bookmark at cursor", [plain(Key::N)]),
         Command::PrevBookmark => desc("Go to previous bookmark", [with(ctrl, Key::ArrowLeft)]),
         Command::NextBookmark => desc("Go to next bookmark", [with(ctrl, Key::ArrowRight)]),
-        Command::PrevEvent => desc("Go to previous event", [with(Modifiers::ALT, Key::ArrowLeft)]),
+        Command::PrevEvent => desc(
+            "Go to previous event",
+            [with(Modifiers::ALT, Key::ArrowLeft)],
+        ),
         Command::NextEvent => desc("Go to next event", [with(Modifiers::ALT, Key::ArrowRight)]),
         Command::CursorStart => desc("Go to track start", [with(ctrl, Key::Home)]),
         Command::CursorEnd => desc("Go to track end", [with(ctrl, Key::End)]),
@@ -161,8 +190,8 @@ fn build_description(command: Command) -> CommandDescription {
 impl Command {
     pub fn description(self) -> &'static CommandDescription {
         static DESCRIPTIONS: OnceLock<HashMap<Command, CommandDescription>> = OnceLock::new();
-        &DESCRIPTIONS
-            .get_or_init(|| Command::iter().map(|c| (c, build_description(c))).collect())[&self]
+        &DESCRIPTIONS.get_or_init(|| Command::iter().map(|c| (c, build_description(c))).collect())
+            [&self]
     }
 }
 

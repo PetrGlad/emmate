@@ -138,6 +138,8 @@ pub struct Viewport {
     time_range: TimeRange,
     /// The widget's displayed rectangle coordinates.
     view_rect: Rect,
+    /// Visible sub-range of `STAVE_KEY_LANES` (vertical zoom and scroll).
+    lane_range: Range<Pitch>,
 }
 
 impl Default for Viewport {
@@ -145,8 +147,22 @@ impl Default for Viewport {
         Viewport {
             time_range: TimeRange::default(),
             view_rect: Rect::NOTHING,
+            lane_range: STAVE_KEY_LANES,
         }
     }
+}
+
+/// Lane counts that vertical zoom steps through, from the most zoomed-out.
+const LANE_ZOOM_STEPS: [Pitch; 5] = [90, 60, 40, 24, 12];
+
+/// Lane range of `count` lanes where the lane at `frac` (0 at top, 1 at bottom) of the view
+/// is the same as it was in `old` range at that fraction. Clamped to `STAVE_KEY_LANES`.
+fn zoomed_lane_range(old: Range<Pitch>, count: Pitch, frac: f32) -> Range<Pitch> {
+    let anchor = old.1 as f32 - frac * old.len() as f32;
+    let count = count.min(STAVE_KEY_LANES.len());
+    let hi = (anchor + frac * count as f32).round() as i32;
+    let hi = hi.clamp((STAVE_KEY_LANES.0 + count) as i32, STAVE_KEY_LANES.1 as i32) as Pitch;
+    (hi - count, hi)
 }
 
 // Zoom and scroll parameters.
@@ -157,7 +173,60 @@ impl Viewport {
     const ZOOM_TIME_LIMIT: Time = 30 * 60 * 60 * 1_000_000;
 
     pub fn lanes_y_half_tone(&self) -> f32 {
-        self.view_rect.height() / STAVE_KEY_LANES.len() as f32
+        self.view_rect.height() / self.lane_range.len() as f32
+    }
+
+    /// Distance in pixels between the top of all-lanes layout and the top of visible lanes.
+    pub fn y_offset(&self) -> Pix {
+        (STAVE_KEY_LANES.1 - self.lane_range.1) as Pix * self.lanes_y_half_tone()
+    }
+
+    pub fn is_lane_zoomed(&self) -> bool {
+        self.lane_range != STAVE_KEY_LANES
+    }
+
+    /// Step vertical zoom. The lane at screen `anchor_y` stays at the same place.
+    pub fn zoom_lanes(&mut self, zoom_in: bool, anchor_y: Pix) {
+        let current = self.lane_range.len();
+        let target = if zoom_in {
+            LANE_ZOOM_STEPS.iter().find(|c| **c < current)
+        } else {
+            LANE_ZOOM_STEPS.iter().rev().find(|c| **c > current)
+        };
+        if let Some(count) = target {
+            let frac =
+                ((anchor_y - self.view_rect.min.y) / self.view_rect.height()).clamp(0.0, 1.0);
+            self.lane_range = zoomed_lane_range(self.lane_range, *count, frac);
+        }
+    }
+
+    pub fn reset_lane_zoom(&mut self) {
+        self.lane_range = STAVE_KEY_LANES;
+    }
+
+    /// Scroll visible lanes, positive delta moves view towards higher pitches.
+    pub fn scroll_lanes(&mut self, delta: i32) {
+        let count = self.lane_range.len();
+        let hi = (self.lane_range.1 as i32 + delta)
+            .clamp((STAVE_KEY_LANES.0 + count) as i32, STAVE_KEY_LANES.1 as i32)
+            as Pitch;
+        self.lane_range = (hi - count, hi);
+    }
+
+    pub fn scroll_lanes_by(&mut self, dy: Pix) {
+        let step = self.lanes_y_half_tone();
+        if step > 0.0 {
+            self.scroll_lanes((dy / step).round() as i32);
+        }
+    }
+
+    /// Scroll the minimum amount to make the lane visible.
+    pub fn ensure_lane_visible(&mut self, pitch: Pitch) {
+        if pitch >= self.lane_range.1 {
+            self.scroll_lanes((pitch + 1 - self.lane_range.1) as i32);
+        } else if pitch < self.lane_range.0 {
+            self.scroll_lanes(-((self.lane_range.0 - pitch) as i32));
+        }
     }
 
     /// Pixel/uSec, can be cached.
@@ -260,6 +329,7 @@ struct Meshes {
     // Scroll/translation.
     time_start: Time,
     xy: Pos2,
+    y_offset: Pix,
 
     // Annotates resulting triangles with track event ids.
     // Used to detect hovers, and to show out-of-view selection hints.
@@ -369,6 +439,7 @@ impl Stave {
             viewport: Viewport {
                 time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
                 view_rect: Rect::NOTHING,
+                lane_range: STAVE_KEY_LANES,
             },
             cursor_position: 0,
             time_selection: None,
@@ -412,6 +483,12 @@ impl Stave {
                     let style = ui.ctx().global_style();
                     let ruler_height = style.text_styles[&Body].size;
                     *bounds.top_mut() += ruler_height;
+                    if self.viewport.is_lane_zoomed() {
+                        let mut bar_rect = bounds.clone();
+                        *bar_rect.left_mut() = bar_rect.right() - Self::SCROLLBAR_WIDTH;
+                        *bounds.right_mut() -= Self::SCROLLBAR_WIDTH + 2.0;
+                        self.view_lane_scrollbar(ui, bar_rect);
+                    }
                     self.viewport.view_rect = bounds;
 
                     ruler_rect.set_height(ruler_height);
@@ -419,10 +496,14 @@ impl Stave {
                     self.draw_time_ruler(&ui.painter(), ruler_rect);
                 }
 
-                let (key_ys, half_tone_step) = key_line_ys(&bounds.y_range(), STAVE_KEY_LANES);
+                let (key_ys, half_tone_step) =
+                    key_line_ys(&bounds.y_range(), self.viewport.lane_range);
                 let mut pitch_hovered = None;
                 let mut time_hovered = None;
-                let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+                // Pointer over the scrollbar or the ruler is not over the stave.
+                let pointer_pos = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .filter(|p| bounds.contains(*p));
                 if let Some(pointer_pos) = pointer_pos {
                     pitch_hovered = Some(closest_pitch(&key_ys, pointer_pos));
                     time_hovered = Some(self.viewport.time_from_x(pointer_pos.x));
@@ -462,18 +543,28 @@ impl Stave {
                 ));
 
                 if let Some(new_note) = &self.note_draw {
-                    painter.add(self.default_draw_note(
-                        64,
-                        (new_note.time.0, new_note.time.1),
-                        *key_ys.get(&new_note.pitch).unwrap(),
-                        half_tone_step,
-                        true,
-                    ));
+                    // The lane may be scrolled out of view.
+                    if let Some(y) = key_ys.get(&new_note.pitch) {
+                        painter.add(self.default_draw_note(
+                            64,
+                            (new_note.time.0, new_note.time.1),
+                            *y,
+                            half_tone_step,
+                            true,
+                        ));
+                    }
                 }
 
-                if let Some(range) = should_be_visible {
-                    if !self.is_visible(range.0) && !self.is_visible(range.1) {
-                        self.ensure_visible(range.0);
+                if let Some((time_range, pitch_range)) = should_be_visible {
+                    if !self.is_visible(time_range.0) && !self.is_visible(time_range.1) {
+                        self.ensure_visible(time_range.0);
+                    }
+                    if let Some((lo, hi)) = pitch_range {
+                        if self.viewport.lane_range.len() < STAVE_KEY_LANES.len() {
+                            // Prefer showing the higher-pitched end, then the lower one.
+                            self.viewport.ensure_lane_visible(lo);
+                            self.viewport.ensure_lane_visible(hi);
+                        }
                     }
                 }
 
@@ -506,6 +597,51 @@ impl Stave {
         60.0f32 * 60.0 * 4.0,
         60.0f32 * 60.0 * 6.0,
     ];
+
+    const SCROLLBAR_WIDTH: Pix = 12.0;
+
+    /// Vertical scrollbar over lanes, shown when the stave is zoomed in vertically.
+    fn view_lane_scrollbar(&mut self, ui: &mut Ui, bar_rect: Rect) {
+        let total = STAVE_KEY_LANES.len() as f32;
+        let range = self.viewport.lane_range;
+        let response = ui.interact(
+            bar_rect,
+            egui::Id::new("stave-lane-scrollbar"),
+            Sense::click_and_drag(),
+        );
+        if let Some(pos) = response.interact_pointer_pos() {
+            if response.dragged() || response.clicked() {
+                // Center the thumb at the pointer.
+                let top_frac =
+                    (pos.y - bar_rect.min.y) / bar_rect.height() - range.len() as f32 / total / 2.0;
+                let hi = STAVE_KEY_LANES.1 as i32 - (top_frac * total).round() as i32;
+                self.viewport
+                    .scroll_lanes(hi - self.viewport.lane_range.1 as i32);
+            }
+        }
+        let range = self.viewport.lane_range;
+        let painter = ui.painter_at(bar_rect);
+        painter.rect_filled(
+            bar_rect,
+            CornerRadius::same(3),
+            Color32::from_black_alpha(25),
+        );
+        let thumb_top =
+            bar_rect.min.y + (STAVE_KEY_LANES.1 - range.1) as f32 / total * bar_rect.height();
+        let thumb = Rect::from_min_max(
+            Pos2::new(bar_rect.min.x, thumb_top),
+            Pos2::new(
+                bar_rect.max.x,
+                thumb_top + range.len() as f32 / total * bar_rect.height(),
+            ),
+        );
+        let color = if response.dragged() || response.hovered() {
+            Color32::from_gray(90)
+        } else {
+            Color32::from_gray(130)
+        };
+        painter.rect_filled(thumb, CornerRadius::same(3), color);
+    }
 
     fn draw_time_ruler(&mut self, painter: &Painter, ruler_rect: Rect) {
         let time_width = ruler_rect.width() / self.viewport.time_scale();
@@ -592,7 +728,7 @@ impl Stave {
         painter: &Painter,
         version_id: VersionId,
         track: &Track,
-    ) -> Option<range::Range<Time>> {
+    ) -> Option<(range::Range<Time>, Option<range::Range<Pitch>>)> {
         let x_range = painter.clip_rect().x_range();
         // Makes elements affected by animation visible,
         // to help avoiding inadvertent changes.
@@ -681,7 +817,7 @@ impl Stave {
                     }
                     TrackEventType::Bookmark => {
                         let shape = self.cursor_shape(
-                            &Rangef::new(0.0, self.viewport.view_rect.y_range().span()),
+                            &Rangef::new(0.0, ty.y_step * STAVE_KEY_LANES.len() as f32),
                             ty.x(&event.at),
                             Rgba::from_rgba_premultiplied(0.0, 0.4, 0.0, 0.3).into(),
                         );
@@ -727,19 +863,33 @@ impl Stave {
 
         let is_animating = !animated.is_empty();
         // Horizontal zoom and scrolling.
+        let y_offset = self.viewport.y_offset();
         let has_position_changed = meshes.xy != self.viewport.view_rect.min
-            || meshes.time_start != self.viewport.time_range.0;
+            || meshes.time_start != self.viewport.time_range.0
+            || meshes.y_offset != y_offset;
         // Diff between 0,0 origin of default mesh rendering and viewport position.
         let shift = self.viewport.view_rect.min.to_vec2()
             // Time scrolling
             + Vec2 {
             x: -ty.x(&self.viewport.time_range.0),
-            y: 0f32,
+            y: -y_offset,
         };
         if is_animating && animation_bounds != Rect::NOTHING {
+            let pitch_at = |y: Pix| -> Pitch {
+                (STAVE_KEY_LANES.1 as f32 - (y + ty.y_step / 2.0) / ty.y_step)
+                    .round()
+                    .clamp(STAVE_KEY_LANES.0 as f32, (STAVE_KEY_LANES.1 - 1) as f32)
+                    as Pitch
+            };
             should_be_visible = Some((
-                self.viewport.time_from_x(animation_bounds.min.x + shift.x),
-                self.viewport.time_from_x(animation_bounds.max.x + shift.x),
+                (
+                    self.viewport.time_from_x(animation_bounds.min.x + shift.x),
+                    self.viewport.time_from_x(animation_bounds.max.x + shift.x),
+                ),
+                Some((
+                    pitch_at(animation_bounds.max.y),
+                    pitch_at(animation_bounds.min.y),
+                )),
             ));
         }
         if has_version_changed
@@ -754,6 +904,7 @@ impl Stave {
             Self::shift_mesh(&mut mesh, &shift);
             meshes.xy = self.viewport.view_rect.min;
             meshes.time_start = self.viewport.time_range.0;
+            meshes.y_offset = y_offset;
             // debug_assert_eq!(meshes.viewport.view_rect, self.viewport.view_rect);
             meshes.out = Arc::new(mesh);
         }
@@ -785,9 +936,22 @@ impl Stave {
         This should help avoiding inadvertent edits. */
         let mut selection_hints_left: HashSet<Pitch> = HashSet::new();
         let mut selection_hints_right: HashSet<Pitch> = HashSet::new();
+        // Selected notes in lanes scrolled out of view: x positions of hints at top and bottom edges.
+        let mut selection_hints_above: Vec<Pix> = vec![];
+        let mut selection_hints_below: Vec<Pix> = vec![];
+        let lane_range = self.viewport.lane_range;
         for event in &track.events {
             if let TrackEventType::Note(note) = &event.event {
                 if self.note_selection.contains(&event.id) {
+                    if lane_range.1 <= note.pitch || note.pitch < lane_range.0 {
+                        let x = (ty.x(&event.at) + shift.x).clamp(x_range.min, x_range.max);
+                        if note.pitch >= lane_range.1 {
+                            selection_hints_above.push(x);
+                        } else {
+                            selection_hints_below.push(x);
+                        }
+                        continue;
+                    }
                     // // Visibility can also be determined by comparing triangles coordinate's.
                     if x_range.max < ty.x(&event.at) + shift.x {
                         selection_hints_right.insert(note.pitch);
@@ -800,6 +964,13 @@ impl Stave {
         Self::shift_mesh(&mut transients_mesh, &shift);
         painter.add(Shape::mesh(transients_mesh));
 
+        let y_range = painter.clip_rect().y_range();
+        for x in selection_hints_above {
+            painter.circle_filled(Pos2::new(x, y_range.min), *half_tone_step, COLOR_SELECTED);
+        }
+        for x in selection_hints_below {
+            painter.circle_filled(Pos2::new(x, y_range.max), *half_tone_step, COLOR_SELECTED);
+        }
         draw_selection_hints(
             &painter,
             &key_ys,
@@ -962,11 +1133,7 @@ impl Stave {
         self.transition = Self::animate_edit(ctx, Self::transition_id(), edit_state);
     }
 
-    fn neighbour_time(
-        &self,
-        forward: bool,
-        only_bookmarks: bool,
-    ) -> Time {
+    fn neighbour_time(&self, forward: bool, only_bookmarks: bool) -> Time {
         let at = self.cursor_position;
         let is_target = |ev: &&TrackEvent| {
             (if forward { ev.at > at } else { ev.at < at })
@@ -997,7 +1164,11 @@ impl Stave {
             Command::ClearNoteSelection => self.note_selection.clear(),
             Command::TempoUp | Command::TempoDown => {
                 if let Some(time_selection) = &self.time_selection.clone() {
-                    let ratio = if command == Command::TempoUp { 1.01 } else { 1.0 / 1.01 };
+                    let ratio = if command == Command::TempoUp {
+                        1.01
+                    } else {
+                        1.0 / 1.01
+                    };
                     self.adjust_tempo(ctx, id, time_selection, ratio);
                 }
             }
@@ -1028,25 +1199,41 @@ impl Stave {
                 }
             }
             Command::ShiftTailLater | Command::ShiftTailEarlier => {
-                let delta = if command == Command::ShiftTailLater { step } else { -step };
+                let delta = if command == Command::ShiftTailLater {
+                    step
+                } else {
+                    -step
+                };
                 self.do_edit_command(ctx, id, |stave, track| {
                     shift_tail(track, &(stave.cursor_position), &delta)
                 });
             }
             Command::ShiftNotesLater | Command::ShiftNotesEarlier => {
-                let delta = if command == Command::ShiftNotesLater { step } else { -step };
+                let delta = if command == Command::ShiftNotesLater {
+                    step
+                } else {
+                    -step
+                };
                 self.do_edit_command(ctx, id, |stave, track| {
                     shift_selected(track, &stave.note_selection.selected, &delta)
                 });
             }
             Command::StretchNotesLonger | Command::StretchNotesShorter => {
-                let delta = if command == Command::StretchNotesLonger { step } else { -step };
+                let delta = if command == Command::StretchNotesLonger {
+                    step
+                } else {
+                    -step
+                };
                 self.do_edit_command(ctx, id, |stave, track| {
                     stretch_selected_notes(track, &stave.note_selection.selected, &delta)
                 });
             }
             Command::TransposeUp | Command::TransposeDown => {
-                let delta = if command == Command::TransposeUp { 1 } else { -1 };
+                let delta = if command == Command::TransposeUp {
+                    1
+                } else {
+                    -1
+                };
                 self.do_edit_command(ctx, id, |stave, track| {
                     transpose_selected_notes(track, &stave.note_selection.selected, delta)
                 });
@@ -1060,6 +1247,15 @@ impl Stave {
             Command::ZoomToFit => {
                 self.zoom_to_fit(Duration::seconds(3).num_microseconds().unwrap_or_default());
             }
+            Command::VerticalZoomIn => {
+                let y = self.lane_zoom_anchor_y(ctx);
+                self.viewport.zoom_lanes(true, y);
+            }
+            Command::VerticalZoomOut => {
+                let y = self.lane_zoom_anchor_y(ctx);
+                self.viewport.zoom_lanes(false, y);
+            }
+            Command::VerticalZoomReset => self.viewport.reset_lane_zoom(),
             Command::Undo => self.undo_redo(ctx, true),
             Command::Redo => self.undo_redo(ctx, false),
             Command::Copy => self.copy_selection(ctx),
@@ -1156,6 +1352,39 @@ impl Stave {
             diff.clone().map(|diff| (diff.0.0, diff.1)),
         );
         diff
+    }
+
+    /// Screen y that keeps its place on vertical zoom: the pointer if it is over the stave,
+    /// otherwise the middle of selected notes (if visible), otherwise the view center.
+    fn lane_zoom_anchor_y(&self, ctx: &Context) -> Pix {
+        let rect = self.viewport.view_rect;
+        if let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) {
+            if rect.contains(pos) {
+                return pos.y;
+            }
+        }
+        let range = self.viewport.lane_range;
+        let pitches: Vec<Pitch> = self
+            .history
+            .read()
+            .expect("Read stave.history.")
+            .with_track(|track| {
+                self.note_selection
+                    .selected
+                    .iter()
+                    .filter_map(|id| match track.track_map.get(id).map(|ev| &ev.event) {
+                        Some(TrackEventType::Note(note)) => Some(note.pitch),
+                        _ => None,
+                    })
+                    .collect()
+            });
+        if !pitches.is_empty() {
+            let mid = pitches.iter().map(|p| *p as f32).sum::<f32>() / pitches.len() as f32 + 0.5;
+            if range.0 as f32 <= mid && mid <= range.1 as f32 {
+                return rect.min.y + (range.1 as f32 - mid) / range.len() as f32 * rect.height();
+            }
+        }
+        rect.center().y
     }
 
     fn max_time(&self) -> Time {
@@ -1696,7 +1925,7 @@ fn match_animation_meshes(before: &mut Mesh, after: &mut Mesh, fill_color: &Colo
 #[cfg(test)]
 mod tests {
     use super::{PIANO_DAMPER_LANE, STAVE_KEY_LANES, TYScale, Viewport, key_line_ys};
-    use crate::range::RangeLike;
+    use crate::range::{RangeLike, RangeSpan};
     use eframe::egui::{Pos2, Rect};
 
     // Check that y (lanes) coordinates in mesh rendering are consistent with direct paints.
@@ -1708,6 +1937,7 @@ mod tests {
                 min: Pos2 { x: 13.0, y: 17.0 },
                 max: Pos2 { x: 200.0, y: 108.0 },
             },
+            ..Default::default()
         };
         let ty = TYScale::new(&viewport);
         let (pitches, step) = key_line_ys(&viewport.view_rect.y_range(), STAVE_KEY_LANES);
@@ -1722,6 +1952,87 @@ mod tests {
         }
     }
 
+    // Same as above, with vertical zoom and scroll.
+    #[test]
+    fn check_viewport_lanes_y_scaling_zoomed() {
+        let viewport = Viewport {
+            time_range: (0, 2000),
+            view_rect: Rect {
+                min: Pos2 { x: 13.0, y: 17.0 },
+                max: Pos2 { x: 200.0, y: 117.0 },
+            },
+            lane_range: (50, 74),
+        };
+        let ty = TYScale::new(&viewport);
+        let (pitches, step) = key_line_ys(&viewport.view_rect.y_range(), viewport.lane_range);
+        assert_eq!(pitches.len(), 24);
+        assert_eq!(ty.y_step, step);
+        for pitch in viewport.lane_range.range() {
+            let y = ty.y(&pitch) - viewport.y_offset() + viewport.view_rect.min.y;
+            assert!((y - pitches.get(&pitch).unwrap()).abs() < 0.001f32);
+        }
+    }
+
+    fn lane_viewport() -> Viewport {
+        Viewport {
+            time_range: (0, 2000),
+            view_rect: Rect {
+                min: Pos2 { x: 0.0, y: 0.0 },
+                max: Pos2 { x: 100.0, y: 900.0 },
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn check_lane_zoom_keeps_anchor() {
+        let mut v = lane_viewport();
+        let y = 300.0;
+        // Lane under anchor, as a fraction of lane height from view top.
+        let lane_at =
+            |v: &Viewport| v.lane_range.1 as f32 - (y - v.view_rect.min.y) / v.lanes_y_half_tone();
+        let before = lane_at(&v);
+        v.zoom_lanes(true, y);
+        assert_eq!(v.lane_range.len(), 60);
+        assert!((lane_at(&v) - before).abs() <= 1.0);
+        v.zoom_lanes(true, y);
+        assert_eq!(v.lane_range.len(), 40);
+        assert!((lane_at(&v) - before).abs() <= 1.0);
+        assert!(v.is_lane_zoomed());
+        v.zoom_lanes(false, y);
+        v.zoom_lanes(false, y);
+        assert_eq!(v.lane_range, STAVE_KEY_LANES);
+        assert!(!v.is_lane_zoomed());
+    }
+
+    #[test]
+    fn check_lane_zoom_and_scroll_limits() {
+        let mut v = lane_viewport();
+        for _ in 0..10 {
+            v.zoom_lanes(true, 0.0);
+        }
+        assert_eq!(v.lane_range.len(), 12);
+        assert_eq!(v.lane_range.1, STAVE_KEY_LANES.1);
+        for _ in 0..10 {
+            v.zoom_lanes(false, 900.0);
+        }
+        assert_eq!(v.lane_range, STAVE_KEY_LANES);
+        for _ in 0..3 {
+            v.zoom_lanes(true, 900.0);
+        }
+        assert_eq!(v.lane_range.0, STAVE_KEY_LANES.0);
+        v.scroll_lanes(-1000);
+        assert_eq!(v.lane_range.0, STAVE_KEY_LANES.0);
+        v.scroll_lanes(1000);
+        assert_eq!(v.lane_range.1, STAVE_KEY_LANES.1);
+        assert_eq!(v.y_offset(), 0.0);
+        v.scroll_lanes(-5);
+        v.ensure_lane_visible(STAVE_KEY_LANES.1 - 1);
+        assert_eq!(v.lane_range.1, STAVE_KEY_LANES.1);
+        v.ensure_lane_visible(STAVE_KEY_LANES.0);
+        assert_eq!(v.lane_range.0, STAVE_KEY_LANES.0);
+    }
+
     // Check that x (time) coordinates in mesh rendering are consistent with direct paints.
     #[test]
     fn check_viewport_time_x_scaling() {
@@ -1734,6 +2045,7 @@ mod tests {
                     y: 108.0,
                 },
             },
+            ..Default::default()
         };
         for t in [-13, 0, 1234, 23, 100006] {
             assert!((viewport.time_from_x(viewport.x_from_time(t)) - t).abs() <= 1);
