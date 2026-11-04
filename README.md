@@ -59,7 +59,7 @@ Draw on/off sustain pedal state (on the bottom lane).
 Mouse zoom and scroll is supported. "Follow playback" switch makes the stave to scroll during playback.
 You can set and clear bookmarks with `m` and `n`.
 
-See `Stave::handle_commands` (src/stave.rs) method for available keyboard shortcuts.
+Use Ctrl+Shift+P or Shift+` (~) to see available commands and keyboard combinations.
 
 ## Build
 
@@ -70,7 +70,7 @@ ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
 
 For audio output you can use any synth or DAW that can read the system's sequencer device.
-E.g. one can launch stand-alone Pianoteq for that.
+For example, I launch stand-alone Pianoteq for that.
 
 ## TODO
 
@@ -85,15 +85,11 @@ E.g. one can launch stand-alone Pianoteq for that.
 - [ ] (bug, graphics) Events are not displayed when stave zoomed-in too close.
 - [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (snapshot version can be marked on export).
 - [ ] (usability) Do not undo initial import (it is confusing).
-- [ ] (performance) Do not attempt do draw out-of range events, and when the window is not visible.
+- [ ] (performance) Do not attempt do draw out-of-viewvport events, and when the window is not visible.
   Use spatial tree: set of ranges, with mapping range -> events-visible-in-that-range.
   This lookup can also speed-up selection hints and hovers.
 - [ ] (usability) Location history navigation (e.g. go to a bookmark that was visited recently), with Alt + LeftArrow /
   RightArrow
-- [x] (usability) Vertical zoom (Alt+wheel, Alt+=/-, Alt+0 to reset; wheel or scrollbar to scroll).
-- [ ] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
-  handle_commands easier to read and enable to have a generated cheatsheet/help UI.
-- [ ] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.
 - [ ] (workflow) Recording events from the input sequencer (should probably use copy-paste to/from another track
   for overdubs for now).
 - [ ] (workflow) "Flight recorder", always record what is coming from the MIDI controller into a separate file or track.
@@ -102,13 +98,17 @@ E.g. one can launch stand-alone Pianoteq for that.
   is note height jitter on zoom.
 - [ ] (improvement) Ensure changes are visible even when zoomed out (the events may be less than 1 pixel in size to be
   visible as is).
-- [ ] (improvement) Play from new position should reflect current damper CC state (in cases when pedal is pressed
-  earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
+- [ ] (improvement) Starting play from new cursor position should reflect current damper CC state (in cases when pedal
+  is pressed earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
   the CC info is on track, but engine should query when playback is started.
-- [ ] (improvement) Audition hovered notes. It is currently only implemented for lanes. Auditioning actual notes would
-  help to evaluate velocity without playing track.
 - [ ] (refactoring, nice-to-have) Use async in engine. sleeps ot really a performance problem, will just produce
   a nicer implementation.
+- [x] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.
+- [x] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the
+  handle_commands easier to read and enable to have a generated cheatsheet/help UI.
+- [x] (improvement) Audition hovered notes. It is currently only implemented for lanes. Auditioning actual notes would
+  help to evaluate velocity without playing track. -- press T to listen
+- [x] (usability) Vertical zoom (Alt+wheel, Alt+=/-, Alt+0 to reset; wheel or scrollbar to scroll).
 - [x] (improvement) Support note drawing with touchpad (on ThinkPad, scroll button does not seem to be registered as
   middle click).
 - [x] (improvement) Stop all sounds when program is closed.
