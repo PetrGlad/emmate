@@ -346,6 +346,8 @@ struct TYScale {
     height: Pix,
     // Y step per lane
     y_step: Pix,
+    // Time that is at x = 0. Keeps pre-scaled coordinates small (f32 precision) when zoomed in.
+    origin: Time,
 }
 
 impl TYScale {
@@ -354,12 +356,28 @@ impl TYScale {
             time_scale: viewport.view_rect.width() as f64 / viewport.time_range.len() as f64,
             height: viewport.view_rect.height(),
             y_step: viewport.lanes_y_half_tone(),
+            origin: 0,
         }
+    }
+
+    /// Max distance in pixels between x origin and the view start before re-basing the origin.
+    const MAX_ORIGIN_DRIFT: f64 = 100_000.0;
+
+    /// Same as `new`, keeps the `previous` origin unless the view has moved too far from it.
+    /// Is used to avoid numeric overflows at max zoom.
+    fn rebased(viewport: &Viewport, previous: &TYScale) -> Self {
+        let mut ty = Self::new(viewport);
+        ty.origin = previous.origin;
+        let drift = (viewport.time_range.0 - ty.origin) as f64 * ty.time_scale;
+        if drift.abs() > Self::MAX_ORIGIN_DRIFT {
+            ty.origin = viewport.time_range.0;
+        }
+        ty
     }
 
     #[inline]
     fn x(&self, at: &Time) -> Pix {
-        (*at as f64 * self.time_scale) as Pix
+        ((*at - self.origin) as f64 * self.time_scale) as Pix
     }
 
     #[inline]
@@ -746,7 +764,7 @@ impl Stave {
         let has_selection_changed = meshes.selection_version != self.note_selection.version
             || meshes.time_selection != self.time_selection;
 
-        let ty = TYScale::new(&self.viewport);
+        let ty = TYScale::rebased(&self.viewport, &meshes.ty);
         let has_scale_changed = meshes.ty != ty;
         let mut animation_bounds = Rect::NOTHING;
 
