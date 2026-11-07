@@ -59,7 +59,7 @@ Draw on/off sustain pedal state (on the bottom lane).
 Mouse zoom and scroll is supported. "Follow playback" switch makes the stave to scroll during playback.
 You can set and clear bookmarks with `m` and `n`.
 
-Use Ctrl+Shift+P or Shift+` (~) to see available commands and keyboard combinations.
+Use Ctrl+Shift+P or Shift+` (~) to see available commands and keyboard shortcuts.
 
 ## Build
 
@@ -70,7 +70,7 @@ ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
 
 For audio output you can use any synth or DAW that can read the system's sequencer device.
-For example, I launch stand-alone Pianoteq for that.
+For example, I use stand-alone Pianoteq for that.
 
 ## TODO
 
@@ -82,7 +82,6 @@ For example, I launch stand-alone Pianoteq for that.
 - [ ] (improvement) Use intermediate state snapshots in edit history (currently diffs also include previous state).
   Need also logic to decide when the snapshot should be made. This change should produce more compact on-disk files
   without duplication.
-- [ ] (bug, graphics) Events are not displayed when stave zoomed-in too close.
 - [ ] (usability) Stop for confirmation to undo beyond the manual snapshot (snapshot version can be marked on export).
 - [ ] (usability) Do not undo initial import (it is confusing).
 - [ ] (performance) Do not attempt do draw out-of-viewvport events, and when the window is not visible.
@@ -101,6 +100,7 @@ For example, I launch stand-alone Pianoteq for that.
 - [ ] (improvement) Starting play from new cursor position should reflect current damper CC state (in cases when pedal
   is pressed earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
   the CC info is on track, but engine should query when playback is started.
+- [x] (bug, graphics) Events are not displayed when stave zoomed-in too close.
 - [x] (refactoring, nice-to-have) Use async in engine. sleeps ot really a performance problem, will just produce
   a nicer implementation.
 - [x] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.
