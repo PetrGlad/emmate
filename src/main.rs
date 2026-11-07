@@ -1,6 +1,6 @@
 use crate::app::EmApp;
 use crate::config::Config;
-use crate::engine::EngineCommand;
+use crate::engine::EngineHandle;
 use crate::midi::SmfSource;
 use crate::project::Project;
 use crate::track_source::TrackSource;
@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::Sender;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -115,7 +114,7 @@ pub fn main() {
         .expect("MIDI sequencer out");
 
     // Stream and engine references keep them open.
-    let (mut engine, engine_command_sender) = audio_setup::setup_audio_engine(midi_output);
+    let engine_command_sender = audio_setup::setup_audio_engine(midi_output);
 
     {
         let track_midi_source = TrackSource::new(
@@ -136,9 +135,9 @@ pub fn main() {
     let mut midi_inputs = vec![]; // Keeps inputs open
     midi_inputs.push(audio_setup::midi_keyboard_input(
         "Digital Piano",
-        &mut engine,
+        &engine_command_sender,
     ));
-    midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &mut engine));
+    midi_inputs.push(audio_setup::midi_keyboard_input("MPK mini 3", &engine_command_sender));
 
     // GUI
     let window_builder = Box::new(|wb: egui::ViewportBuilder| {
@@ -171,7 +170,7 @@ pub fn main() {
 }
 
 // Play MIDI from an SMD file.
-fn play_midi_file(midi_file_path: &PathBuf, engine_command_sender: &Sender<Box<EngineCommand>>) {
+fn play_midi_file(midi_file_path: &PathBuf, engine_command_sender: &EngineHandle) {
     let smf_data = std::fs::read(midi_file_path).unwrap();
     let smf_midi_source = SmfSource::new(smf_data);
     engine_command_sender

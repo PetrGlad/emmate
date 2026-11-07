@@ -127,7 +127,7 @@ impl EventSource for SmfSource {
             self.current_idx += 1;
             if let Some(lev) = event.kind.as_live_event() {
                 events.push(EngineEvent {
-                    at: *at,
+                    at: running_at,
                     event: lev,
                 });
             }

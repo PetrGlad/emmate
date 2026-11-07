@@ -54,6 +54,7 @@ indoc = "2"
 dirs = "6"
 arrayvec = "0.7.6"
 signal-hook = "0.4.4"
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
 
 num = "0.4.3"
 fuzzy-matcher = "0.3.7"
@@ -61,7 +62,6 @@ strum = { version = "0.28.0", features = ["derive"] }
 # rhai = "1.20.1"
 
 # These may be useful
-# tokio = { version = "1.0", features = ["sync"] }
 # itertools = "0.9"
 # rustc-hash = "1.1"
 # bytes = "1.4.0"

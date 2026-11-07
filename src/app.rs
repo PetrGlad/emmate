@@ -1,7 +1,7 @@
 use crate::command_palette::CommandPalette;
 use crate::commands::{self, Command};
 use crate::common::Time;
-use crate::engine::{Engine, EngineCommand, StatusEvent};
+use crate::engine::{Engine, EngineHandle, StatusEvent};
 use crate::note_sampler::NoteTester;
 use crate::project::Project;
 use crate::stave::Stave;
@@ -23,7 +23,7 @@ pub struct EmApp {
     title: String,
     home_path: PathBuf,
     stave: Stave,
-    engine_command_send: mpsc::Sender<Box<EngineCommand>>,
+    engine_command_send: EngineHandle,
     message_receiver: mpsc::Receiver<Message>,
     follow_playback: bool,
     stop_app: Arc<AtomicBool>,
@@ -34,7 +34,7 @@ pub struct EmApp {
 impl EmApp {
     pub fn new(
         ctx: &CreationContext,
-        engine_command_send: mpsc::Sender<Box<EngineCommand>>,
+        engine_command_send: EngineHandle,
         stop_app: Arc<AtomicBool>,
         project: Project,
     ) -> EmApp {

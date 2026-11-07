@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,6 +8,8 @@ use midly::MidiMessage;
 use midly::MidiMessage::NoteOff;
 use midly::live::LiveEvent;
 use midly::num::u7;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::time::MissedTickBehavior;
 
 use crate::common::Time;
 use crate::track::{ChannelId, MIDI_CC_SUSTAIN_ID};
@@ -59,6 +60,16 @@ type EventSourceHandle = dyn EventSource + Send;
 
 pub type EngineCommand = dyn FnOnce(&mut Engine) + Send;
 
+/// Cloneable sender for commands to the engine. `send` is not async, so it can be
+/// called from any (synchronous) thread.
+pub type EngineHandle = UnboundedSender<Box<EngineCommand>>;
+
+/// How far ahead of the transport clock sources are polled (microseconds).
+/// Also bounds how late an edit of a track becomes audible.
+const LOOKAHEAD_US: Time = 20_000;
+/// Period of status (transport time) notifications.
+const STATUS_PERIOD: Duration = Duration::from_millis(20);
+
 pub struct Engine {
     midi_output: MidiOutputConnection,
     sources: Vec<Box<EventSourceHandle>>,
@@ -66,18 +77,14 @@ pub struct Engine {
     reset_at: Instant,
     paused: bool,
     status_receiver: Option<Box<StatusEventReceiver>>,
-    command_receiver: mpsc::Receiver<Box<EngineCommand>>,
-    command_sender: mpsc::Sender<Box<EngineCommand>>,
     current_sustain: Option<LiveEvent<'static>>,
     queue: BinaryHeap<EngineEvent>,
+    /// Wall-clock scheduled events (audition); independent of transport and pause state.
+    timed: Vec<(Instant, LiveEvent<'static>)>,
 }
 
 impl Engine {
-    pub fn new(
-        midi_output: MidiOutputConnection,
-        command_sender: mpsc::Sender<Box<EngineCommand>>,
-        command_receiver: mpsc::Receiver<Box<EngineCommand>>,
-    ) -> Engine {
+    pub fn new(midi_output: MidiOutputConnection) -> Engine {
         Engine {
             midi_output,
             sources: Vec::new(),
@@ -86,85 +93,116 @@ impl Engine {
             paused: false,
             status_receiver: None,
             current_sustain: None,
-            command_receiver,
-            command_sender,
             queue: BinaryHeap::new(),
+            timed: Vec::new(),
         }
     }
 
-    pub fn start(self) -> Arc<Mutex<Engine>> {
-        let engine = Arc::new(Mutex::new(self));
-        let engine2 = engine.clone();
+    /// Run the engine on its own thread (single-threaded tokio runtime).
+    /// Commands are sent through the returned handle.
+    pub fn start(self) -> EngineHandle {
+        let (sender, receiver) = mpsc::unbounded_channel();
         thread::spawn(move || {
-            engine2.lock().unwrap().seek(0);
-            loop {
-                thread::sleep(Duration::from_micros(3_000)); // TODO (improvement?) Use async instead.
-                let lock = engine2.lock();
-                if let Err(_) = lock {
-                    continue; // Will try next time.
-                }
-                let mut locked = lock.unwrap();
-                let pending_commands: Vec<Box<EngineCommand>> =
-                    locked.command_receiver.try_iter().collect();
-                for command in pending_commands {
-                    command(&mut locked);
-                }
-                if locked.paused {
-                    continue;
-                };
-                locked.sources.retain(|s| s.is_running());
-                Self::update_track_time(&mut locked);
-                let transport_time = locked.running_at;
-                for ev in locked
-                    .sources
-                    .iter_mut()
-                    .map(|s| s.next(&transport_time))
-                    .flatten()
-                    .collect::<Vec<EngineEvent>>()
-                {
-                    locked.queue.push(ev);
-                }
-                let mut batch = vec![];
-                while let Some(ev) = locked.queue.peek() {
-                    if ev.at > transport_time {
-                        break;
-                    }
-                    batch.push(locked.queue.pop().unwrap().event);
-                }
-                for ev in batch {
-                    // Keeping actual value to resume playback with sustain enabled if necessary.
-                    // Otherwise, it will only be active after next explicit change.
-                    if let LiveEvent::Midi {
-                        message: MidiMessage::Controller { controller, .. },
-                        ..
-                    } = ev
-                    {
-                        if controller == MIDI_CC_SUSTAIN_ID {
-                            locked.current_sustain = Some(ev.to_static());
-                        }
-                    }
-
-                    locked.process(ev);
-                }
-            }
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .expect("engine runtime");
+            runtime.block_on(self.run(receiver));
         });
-        engine
+        sender
     }
 
-    fn update_track_time(&mut self) {
+    async fn run(mut self, mut commands: UnboundedReceiver<Box<EngineCommand>>) {
+        self.seek(0);
+        let mut status_tick = tokio::time::interval(STATUS_PERIOD);
+        status_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            let deadline = self.next_deadline();
+            let timed_at = self.timed.iter().map(|(at, _)| *at).min();
+            let timed_deadline = tokio::time::Instant::from_std(timed_at.unwrap_or_else(Instant::now));
+            tokio::select! {
+                command = commands.recv() => match command {
+                    Some(command) => command(&mut self),
+                    None => break, // All handles dropped.
+                },
+                _ = tokio::time::sleep_until(timed_deadline), if timed_at.is_some() => self.flush_timed(),
+                _ = tokio::time::sleep_until(deadline), if !self.paused => self.tick(),
+                _ = status_tick.tick(), if !self.paused => {
+                    self.advance_clock();
+                    self.notify_time();
+                }
+            }
+        }
+    }
+
+    /// When the engine should wake up next to play events or poll sources.
+    fn next_deadline(&self) -> tokio::time::Instant {
+        let poll_at = Instant::now() + Duration::from_micros(LOOKAHEAD_US as u64 / 2);
+        let at = match self.queue.peek() {
+            Some(ev) => poll_at.min(self.real_time_of(ev.at)),
+            None => poll_at,
+        };
+        tokio::time::Instant::from_std(at)
+    }
+
+    fn real_time_of(&self, at: Time) -> Instant {
+        self.reset_at + Duration::from_micros(at.max(0) as u64)
+    }
+
+    /// Poll sources (with look-ahead) and send out events that are due.
+    fn tick(&mut self) {
+        self.sources.retain(|s| s.is_running());
+        self.advance_clock();
+        let horizon = self.running_at + LOOKAHEAD_US;
+        let new_events: Vec<EngineEvent> = self
+            .sources
+            .iter_mut()
+            .flat_map(|s| s.next(&horizon))
+            .collect();
+        self.queue.extend(new_events);
+        let mut batch = vec![];
+        while let Some(ev) = self.queue.peek() {
+            if ev.at > self.running_at {
+                break;
+            }
+            batch.push(self.queue.pop().unwrap().event);
+        }
+        for ev in batch {
+            // Keeping actual value to resume playback with sustain enabled if necessary.
+            // Otherwise, it will only be active after next explicit change.
+            if let LiveEvent::Midi {
+                message: MidiMessage::Controller { controller, .. },
+                ..
+            } = ev
+            {
+                if controller == MIDI_CC_SUSTAIN_ID {
+                    self.current_sustain = Some(ev.to_static());
+                }
+            }
+            self.process(ev);
+        }
+    }
+
+    fn advance_clock(&mut self) {
         self.running_at = Instant::now().duration_since(self.reset_at).as_micros() as Time;
+    }
+
+    fn notify_time(&mut self) {
+        let at = self.running_at;
         self.status_receiver
             .as_mut()
-            .map(|recv| recv(StatusEvent::Time(self.running_at)));
+            .map(|recv| recv(StatusEvent::Time(at)));
     }
 
     pub fn seek(&mut self, at: Time) {
         for s in self.sources.iter_mut() {
             s.seek(&at);
         }
+        // Events queued ahead of the old position are stale now.
+        self.silence();
         self.running_at = at;
         self.update_realtime();
-        self.update_track_time();
+        self.notify_time();
     }
 
     pub fn toggle_pause(&mut self) {
@@ -182,24 +220,7 @@ impl Engine {
 
     fn process_paused_state(&mut self) {
         if self.paused {
-            // Mute ongoing notes before clearing.
-            self.queue.clear();
-            for key in 0..u7::max_value().into() {
-                self.process(LiveEvent::Midi {
-                    channel: MIDI_CHANNEL.into(),
-                    message: NoteOff {
-                        key: key.into(),
-                        vel: 64.into(),
-                    },
-                });
-            }
-            self.process(LiveEvent::Midi {
-                channel: MIDI_CHANNEL.into(),
-                message: MidiMessage::Controller {
-                    controller: MIDI_CC_SUSTAIN_ID.into(),
-                    value: 0.into(),
-                },
-            });
+            self.silence();
         } else if let Some(sustain) = self.current_sustain {
             // TODO (playback) Lookup sustain state from the track at current
             //      time position instead. Would this require cloent-side logic?
@@ -208,6 +229,27 @@ impl Engine {
                 event: sustain,
             });
         }
+    }
+
+    /// Drop scheduled events and mute ongoing notes.
+    fn silence(&mut self) {
+        self.queue.clear();
+        for key in 0..u7::max_value().into() {
+            self.process(LiveEvent::Midi {
+                channel: MIDI_CHANNEL.into(),
+                message: NoteOff {
+                    key: key.into(),
+                    vel: 64.into(),
+                },
+            });
+        }
+        self.process(LiveEvent::Midi {
+            channel: MIDI_CHANNEL.into(),
+            message: MidiMessage::Controller {
+                controller: MIDI_CC_SUSTAIN_ID.into(),
+                value: 0.into(),
+            },
+        });
     }
 
     /// Stop all sounds.
@@ -221,6 +263,22 @@ impl Engine {
 
     pub fn add(&mut self, source: Box<EventSourceHandle>) {
         self.sources.push(source);
+    }
+
+    /// Play the event after the delay, regardless of transport position or pause state.
+    pub fn play_after(&mut self, delay: Duration, event: LiveEvent<'static>) {
+        self.timed.push((Instant::now() + delay, event));
+    }
+
+    fn flush_timed(&mut self) {
+        let now = Instant::now();
+        let (due, pending): (Vec<_>, Vec<_>) = std::mem::take(&mut self.timed)
+            .into_iter()
+            .partition(|(at, _)| *at <= now);
+        self.timed = pending;
+        for (_, ev) in due {
+            self.process(ev);
+        }
     }
 
     /// Process the event immediately.

@@ -101,7 +101,7 @@ For example, I launch stand-alone Pianoteq for that.
 - [ ] (improvement) Starting play from new cursor position should reflect current damper CC state (in cases when pedal
   is pressed earlier and there are no CC event at the cursor). It is unclear how to provide this info to the engine:
   the CC info is on track, but engine should query when playback is started.
-- [ ] (refactoring, nice-to-have) Use async in engine. sleeps ot really a performance problem, will just produce
+- [x] (refactoring, nice-to-have) Use async in engine. sleeps ot really a performance problem, will just produce
   a nicer implementation.
 - [x] (usability) Command palette: select a command from list, maybe pre-selecting it by typing its name.
 - [x] (refactoring) Organize commands (keep hotkeys/actions in a collection or registry). This should make the

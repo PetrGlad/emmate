@@ -1,24 +1,17 @@
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, mpsc};
-
 use midir::{MidiInput, MidiInputConnection, MidiOutputConnection};
 use midly::live::LiveEvent;
 
-use crate::engine::{Engine, EngineCommand};
+use crate::engine::{Engine, EngineHandle};
 
-pub fn setup_audio_engine(
-    midi_output: MidiOutputConnection,
-) -> (Arc<Mutex<Engine>>, Sender<Box<EngineCommand>>) {
-    let (command_sender, command_receiver) = mpsc::channel();
-    let engine = Engine::new(midi_output, command_sender.clone(), command_receiver);
-    (engine.start(), command_sender)
+pub fn setup_audio_engine(midi_output: MidiOutputConnection) -> EngineHandle {
+    Engine::new(midi_output).start()
 }
 
 // TODO (refactoring) Convert this into event source? Note: on pause engine stops all sources,
 //      may want this to be active when not playing the track (e.g. to make edits audible).
 pub fn midi_keyboard_input(
     name_prefix: &str,
-    engine: &mut Arc<Mutex<Engine>>,
+    engine: &EngineHandle,
 ) -> Option<MidiInputConnection<()>> {
     let input = MidiInput::new("emmate").unwrap();
     let mut port_idx = None;
@@ -48,16 +41,17 @@ pub fn midi_keyboard_input(
                 &port,
                 "midi-input",
                 move |t, ev, _data| {
-                    let le = LiveEvent::parse(ev)
-                        .expect(&format!("Unparseable input controller event {:?}.", ev))
-                        .to_static();
-                    log::info!("Input MIDI event: {} {:?}.", t, le);
-                    if ev[0] == 254 {
+                    if ev.first() == Some(&254) {
                         return; // Ignore keep-alives.
                     }
+                    let Ok(le) = LiveEvent::parse(ev).map(|le| le.to_static()) else {
+                        log::warn!("Unparseable input controller event {:?}.", ev);
+                        return;
+                    };
+                    log::info!("Input MIDI event: {} {:?}.", t, le);
                     // TODO (bug) Effect of sustain events does not last for some reason.
                     //      Triggering noise is there but subsequent notes do not feel the effect.
-                    engine.lock().unwrap().process(le);
+                    let _ = engine.send(Box::new(move |engine| engine.process(le)));
                 },
                 (),
             )
