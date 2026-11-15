@@ -132,6 +132,7 @@ impl BrowserApp {
     fn change_dir(&mut self, dir: PathBuf) {
         self.entries = list_dir(&dir);
         self.dir = dir;
+        self.selected = None;
     }
 
     fn preview(&mut self, path: &Path) {
@@ -157,26 +158,47 @@ impl BrowserApp {
             .unwrap();
     }
 
-    /// Step the selection among the files of the current directory.
+    /// Step the highlight among all entries of the current directory.
+    /// Files are previewed, directories are only highlighted.
     fn select_relative(&mut self, step: isize) {
-        let files: Vec<PathBuf> = self
-            .entries
-            .iter()
-            .filter(|e| !e.is_dir)
-            .map(|e| e.path.clone())
-            .collect();
-        if files.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
         let current = self
             .selected
             .as_ref()
-            .and_then(|s| files.iter().position(|f| f == s));
+            .and_then(|s| self.entries.iter().position(|e| &e.path == s));
         let next = match current {
-            Some(i) => (i as isize + step).clamp(0, files.len() as isize - 1) as usize,
+            Some(i) => (i as isize + step).clamp(0, self.entries.len() as isize - 1) as usize,
             None => 0,
         };
-        self.preview(&files[next].clone());
+        let entry = &self.entries[next];
+        let (path, is_dir) = (entry.path.clone(), entry.is_dir);
+        if is_dir {
+            self.selected = Some(path);
+        } else {
+            self.preview(&path);
+        }
+    }
+
+    fn selected_file(&self) -> Option<PathBuf> {
+        self.selected.clone().filter(|p| p.is_file())
+    }
+
+    /// Right: enter the highlighted directory.
+    fn enter_selected_dir(&mut self) {
+        if let Some(dir) = self.selected.clone().filter(|p| p.is_dir()) {
+            self.change_dir(dir);
+        }
+    }
+
+    /// Left: go to the parent directory and highlight the one we came from.
+    fn leave_dir(&mut self) {
+        if let Some(parent) = self.dir.parent().map(Path::to_owned) {
+            let came_from = self.dir.clone();
+            self.change_dir(parent);
+            self.selected = Some(came_from);
+        }
     }
 
     /// Edit the file: one stave per process, so launch another emmate instance.
@@ -207,10 +229,12 @@ impl eframe::App for BrowserApp {
             }
         }
 
-        let (down, up, space, enter) = ui.input(|i| {
+        let (down, up, left, right, space, enter) = ui.input(|i| {
             (
                 i.key_pressed(Key::ArrowDown),
                 i.key_pressed(Key::ArrowUp),
+                i.key_pressed(Key::ArrowLeft),
+                i.key_pressed(Key::ArrowRight),
                 i.key_pressed(Key::Space),
                 i.key_pressed(Key::Enter),
             )
@@ -221,11 +245,17 @@ impl eframe::App for BrowserApp {
         if up {
             self.select_relative(-1);
         }
+        if left {
+            self.leave_dir();
+        }
+        if right {
+            self.enter_selected_dir();
+        }
         if space {
             self.toggle_pause();
         }
         if enter {
-            if let Some(path) = self.selected.clone() {
+            if let Some(path) = self.selected_file() {
                 self.open_for_editing(&path);
             }
         }
@@ -247,7 +277,12 @@ impl eframe::App for BrowserApp {
                     for e in &self.entries {
                         let name = e.path.file_name().unwrap_or_default().to_string_lossy();
                         if e.is_dir {
-                            if ui.selectable_label(false, format!("📁 {name}")).clicked() {
+                            let selected = self.selected.as_ref() == Some(&e.path);
+                            let response = ui.selectable_label(selected, format!("📁 {name}"));
+                            if selected && (down || up || left) {
+                                response.scroll_to_me(None);
+                            }
+                            if response.clicked() {
                                 go_to = Some(e.path.clone());
                             }
                         } else {
@@ -309,8 +344,8 @@ impl eframe::App for BrowserApp {
                             )
                             .fill(egui::Color32::from_rgb(30, 110, 200))
                             .min_size(egui::vec2(150.0, 30.0));
-                            if ui.add_enabled(self.selected.is_some(), edit).clicked() {
-                                if let Some(path) = self.selected.clone() {
+                            if ui.add_enabled(self.selected_file().is_some(), edit).clicked() {
+                                if let Some(path) = self.selected_file() {
                                     self.open_for_editing(&path);
                                 }
                             }
