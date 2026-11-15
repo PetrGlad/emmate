@@ -318,14 +318,6 @@ impl eframe::App for BrowserApp {
                     });
                 });
             let stave_response = self.stave.show(ui);
-            let stave_rect = stave_response.ui_response.rect;
-            ui.painter_at(stave_rect).text(
-                stave_rect.right_bottom() - egui::vec2(16.0, 12.0),
-                egui::Align2::RIGHT_BOTTOM,
-                "PREVIEW",
-                egui::FontId::proportional(48.0),
-                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 28),
-            );
             navigate_stave(ui, &mut self.stave, &stave_response);
             if let Some(pos) = stave_response.new_cursor_position {
                 self.engine
