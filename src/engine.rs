@@ -205,6 +205,12 @@ impl Engine {
         self.notify_time();
     }
 
+    pub fn set_paused(&mut self, paused: bool) {
+        if self.paused != paused {
+            self.toggle_pause();
+        }
+    }
+
     pub fn toggle_pause(&mut self) {
         self.paused = !self.paused;
         if !self.paused {

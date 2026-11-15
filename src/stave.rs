@@ -81,7 +81,7 @@ impl NotesSelection {
         self.selected.contains(ev_id)
     }
 
-    fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.selected.clear();
         self.version += 1;
     }
@@ -287,6 +287,8 @@ type Shapes = ArrayVec<Shape, 2>;
 pub struct Stave {
     pub history: Arc<RwLock<TrackHistory>>,
     clipboard: Clipboard,
+    /// A read-only stave ignores all edit commands (used for previews).
+    pub read_only: bool,
 
     pub viewport: Viewport,
 
@@ -454,6 +456,7 @@ impl Stave {
         Stave {
             history,
             clipboard: Clipboard::init(),
+            read_only: false,
             viewport: Viewport {
                 time_range: (0, chrono::Duration::minutes(5).num_microseconds().unwrap()),
                 view_rect: Rect::NOTHING,
@@ -1134,6 +1137,9 @@ impl Stave {
     }
 
     fn undo_redo(&mut self, ctx: &Context, undo: bool) {
+        if self.read_only {
+            return;
+        }
         let mut changes = vec![];
         let mut history = self.history.write().expect("Write stave.history.");
         let edit_state = if undo {
@@ -1357,6 +1363,9 @@ impl Stave {
         transition_id: egui::Id,
         action: Action,
     ) -> CommandApplication {
+        if self.read_only {
+            return None;
+        }
         let diff = self
             .history
             .write()

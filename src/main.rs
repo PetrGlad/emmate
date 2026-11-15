@@ -22,6 +22,7 @@ use tracing_subscriber::FmtSubscriber;
 
 mod app;
 mod audio_setup;
+mod browser;
 mod changeset;
 mod clipboard;
 mod command_palette;
@@ -80,6 +81,11 @@ pub fn main() {
 
     // No configurable values at the moment, keeping it here to keep config loader compilable.
     let _config = Config::load(arg_matches.get_one::<PathBuf>("config-file"));
+
+    if let Some(dir) = arg_matches.get_one::<PathBuf>("browse") {
+        run_browser(dir.clone());
+        return;
+    }
 
     let new_project = arg_matches.get_flag("new-project");
     let project_dir;
@@ -169,6 +175,35 @@ pub fn main() {
     .expect("Emmate UI")
 }
 
+/// File browser with preview. No project is opened or created.
+fn run_browser(dir: PathBuf) {
+    let dir = std::path::absolute(dir).expect("browse directory path can be normalized");
+    let midi_output = MidiOutput::new(common::APP_NAME)
+        .expect("MIDI sequencer client")
+        .create_virtual(common::APP_NAME)
+        .expect("MIDI sequencer out");
+    let engine_command_sender = audio_setup::setup_audio_engine(midi_output);
+    let interrupted = Arc::new(AtomicBool::new(false));
+    flag::register(SIGINT, Arc::clone(&interrupted)).expect("set Ctrl-C handler");
+    eframe::run_native(
+        common::APP_NAME,
+        eframe::NativeOptions::default(),
+        Box::new(|ctx| {
+            ctx.egui_ctx.global_style_mut(|style| {
+                style.visuals = egui::Visuals::light();
+                style.animation_time = 0.2;
+            });
+            Ok(Box::new(browser::BrowserApp::new(
+                ctx,
+                engine_command_sender,
+                interrupted,
+                dir,
+            )))
+        }),
+    )
+    .expect("Emmate browser UI")
+}
+
 // Play MIDI from an SMD file.
 fn play_midi_file(midi_file_path: &PathBuf, engine_command_sender: &EngineHandle) {
     let smf_data = std::fs::read(midi_file_path).unwrap();
@@ -194,6 +229,12 @@ fn build_cli() -> Command {
             clap::arg!(--"project" <FILE>)
                 .value_parser(clap::value_parser!(std::path::PathBuf))
                 .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            clap::arg!(--"browse" <DIR>)
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .value_hint(clap::ValueHint::DirPath)
+                .help("Browse MIDI files in the directory and preview them without importing."),
         )
         .arg(
             clap::arg!(--"new-project")

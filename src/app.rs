@@ -4,7 +4,7 @@ use crate::common::Time;
 use crate::engine::{Engine, EngineHandle, StatusEvent};
 use crate::note_sampler::NoteTester;
 use crate::project::Project;
-use crate::stave::Stave;
+use crate::stave::{Stave, StaveResponse};
 use eframe::egui::{Key, Ui, Vec2};
 use eframe::{self, CreationContext, egui};
 use egui_extras::{Size, StripBuilder};
@@ -129,6 +129,33 @@ impl EmApp {
     }
 }
 
+/// Mouse zoom and scroll over the stave.
+pub fn navigate_stave(ui: &mut Ui, stave: &mut Stave, stave_response: &StaveResponse) {
+    if let Some(hover_pos) = stave_response.ui_response.hover_pos() {
+        let dz = ui.input(|i| i.zoom_delta());
+        if dz != 1.0 {
+            stave.viewport.zoom(dz, hover_pos.x);
+        }
+        let (scroll_delta, alt) =
+            ui.input(|i| (i.smooth_scroll_delta, i.modifiers.alt));
+        if alt {
+            // Alt + wheel: vertical zoom, one discrete step per wheel notch.
+            let notch = ui.input(|i| {
+                i.events.iter().any(|e| {
+                    matches!(e, egui::Event::MouseWheel { delta, .. } if delta.y != 0.0)
+                })
+            });
+            if notch && scroll_delta.y != 0.0 {
+                stave.viewport
+                    .zoom_lanes(scroll_delta.y > 0.0, hover_pos.y);
+            }
+        } else if scroll_delta != Vec2::ZERO {
+            stave.viewport.scroll_by(scroll_delta.x);
+            stave.viewport.scroll_lanes_by(scroll_delta.y);
+        }
+    }
+}
+
 impl eframe::App for EmApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         if self.stop_app.load(std::sync::atomic::Ordering::Relaxed) {
@@ -164,30 +191,7 @@ impl eframe::App for EmApp {
                     strip.cell(|ui| {
                         let stave_response = self.stave.show(ui);
 
-                        if let Some(hover_pos) = stave_response.ui_response.hover_pos() {
-                            let dz = ui.input(|i| i.zoom_delta());
-                            if dz != 1.0 {
-                                self.stave.viewport.zoom(dz, hover_pos.x);
-                            }
-                            let (scroll_delta, alt) =
-                                ui.input(|i| (i.smooth_scroll_delta, i.modifiers.alt));
-                            if alt {
-                                // Alt + wheel: vertical zoom, one discrete step per wheel notch.
-                                let notch = ui.input(|i| {
-                                    i.events.iter().any(|e| {
-                                        matches!(e, egui::Event::MouseWheel { delta, .. } if delta.y != 0.0)
-                                    })
-                                });
-                                if notch && scroll_delta.y != 0.0 {
-                                    self.stave
-                                        .viewport
-                                        .zoom_lanes(scroll_delta.y > 0.0, hover_pos.y);
-                                }
-                            } else if scroll_delta != Vec2::ZERO {
-                                self.stave.viewport.scroll_by(scroll_delta.x);
-                                self.stave.viewport.scroll_lanes_by(scroll_delta.y);
-                            }
-                        }
+                        navigate_stave(ui, &mut self.stave, &stave_response);
                         // TODO (improvement) Handle also note-hovered (this requires to resolve note itself).
                         if let Some(pitch_hovered) = stave_response.pitch_hovered
                             && ui.input(|i| i.keys_down == HashSet::from([Key::T]))
