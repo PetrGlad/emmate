@@ -188,6 +188,36 @@ fn build_description(command: Command) -> CommandDescription {
 }
 
 impl Command {
+    /// Commands that do not modify the track and make sense without a project:
+    /// available in the read-only preview.
+    pub fn allowed_in_preview(self) -> bool {
+        use Command::*;
+        matches!(
+            self,
+            CommandPalette
+                | Pause
+                | FollowPlayback
+                | ScrollPageLeft
+                | ScrollPageRight
+                | Quit
+                | ZoomIn
+                | ZoomOut
+                | ZoomReset
+                | ClearNoteSelection
+                | ZoomToFit
+                | VerticalZoomIn
+                | VerticalZoomOut
+                | VerticalZoomReset
+                | Copy
+                | PrevBookmark
+                | NextBookmark
+                | PrevEvent
+                | NextEvent
+                | CursorStart
+                | CursorEnd
+        )
+    }
+
     pub fn description(self) -> &'static CommandDescription {
         static DESCRIPTIONS: OnceLock<HashMap<Command, CommandDescription>> = OnceLock::new();
         &DESCRIPTIONS.get_or_init(|| Command::iter().map(|c| (c, build_description(c))).collect())
@@ -211,12 +241,18 @@ fn shortcut_table() -> &'static [(KeyboardShortcut, Command)] {
 /// Consume the shortcut pressed in this frame, if it matches any command.
 /// Does nothing while a text field is being edited.
 pub fn pressed(ctx: &Context) -> Option<Command> {
+    pressed_among(ctx, |_| true)
+}
+
+/// Like `pressed` but only for commands that pass the filter.
+pub fn pressed_among(ctx: &Context, allowed: impl Fn(Command) -> bool) -> Option<Command> {
     if ctx.egui_wants_keyboard_input() {
         return None;
     }
     ctx.input_mut(|i| {
         shortcut_table()
             .iter()
+            .filter(|(_, cmd)| allowed(*cmd))
             .find(|(shortcut, _)| i.consume_shortcut(shortcut))
             .map(|(_, cmd)| *cmd)
     })

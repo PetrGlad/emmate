@@ -25,11 +25,16 @@ pub struct CommandPalette {
 
 /// Commands whose title matches the query, best match first.
 /// With an empty query all commands are returned in registry order.
-fn matching_commands(matcher: &SkimMatcherV2, query: &str) -> Vec<Command> {
+fn matching_commands(
+    matcher: &SkimMatcherV2,
+    query: &str,
+    allowed: &dyn Fn(Command) -> bool,
+) -> Vec<Command> {
     if query.is_empty() {
-        return Command::iter().collect();
+        return Command::iter().filter(|c| allowed(*c)).collect();
     }
     let mut scored: Vec<(i64, Command)> = Command::iter()
+        .filter(|c| allowed(*c))
         .filter_map(|cmd| {
             matcher
                 .fuzzy_match(cmd.description().title, query)
@@ -64,7 +69,8 @@ impl CommandPalette {
 
     /// Shows the palette when it is visible. Returns the command chosen by the user.
     #[must_use]
-    pub fn show(&mut self, ctx: &Context) -> Option<Command> {
+    /// Only commands that pass the `allowed` filter are listed.
+    pub fn show(&mut self, ctx: &Context, allowed: &dyn Fn(Command) -> bool) -> Option<Command> {
         if !self.visible {
             return None;
         }
@@ -103,7 +109,7 @@ impl CommandPalette {
                     self.selected = 0;
                 }
 
-                let found = matching_commands(&self.matcher, &self.query);
+                let found = matching_commands(&self.matcher, &self.query, allowed);
                 if found.is_empty() {
                     ui.weak("No matching commands");
                     return;
@@ -166,22 +172,22 @@ mod tests {
 
     #[test]
     fn empty_query_lists_everything_in_registry_order() {
-        let found = matching_commands(&SkimMatcherV2::default(), "");
+        let found = matching_commands(&SkimMatcherV2::default(), "", &|_| true);
         assert_eq!(found, Command::iter().collect::<Vec<_>>());
     }
 
     #[test]
     fn query_filters_by_title() {
-        let found = matching_commands(&SkimMatcherV2::default(), "transp");
+        let found = matching_commands(&SkimMatcherV2::default(), "transp", &|_| true);
         assert_eq!(found.len(), 2);
         assert!(found.contains(&Command::TransposeUp));
         assert!(found.contains(&Command::TransposeDown));
-        assert!(matching_commands(&SkimMatcherV2::default(), "zzzz").is_empty());
+        assert!(matching_commands(&SkimMatcherV2::default(), "zzzz", &|_| true).is_empty());
     }
 
     #[test]
     fn fuzzy_query_matches_non_adjacent_letters() {
-        let found = matching_commands(&SkimMatcherV2::default(), "undo");
+        let found = matching_commands(&SkimMatcherV2::default(), "undo", &|_| true);
         assert_eq!(found.first(), Some(&Command::Undo));
     }
 }

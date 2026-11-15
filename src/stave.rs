@@ -1182,6 +1182,9 @@ impl Stave {
     pub fn execute(&mut self, ctx: &Context, command: Command) -> Option<Time> {
         let id = Self::transition_id();
         let step = Stave::KEYBOARD_TIME_STEP;
+        if self.read_only && !command.allowed_in_preview() {
+            return None;
+        }
         match command {
             Command::ClearNoteSelection => self.note_selection.clear(),
             Command::TempoUp | Command::TempoDown => {

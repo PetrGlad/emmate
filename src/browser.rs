@@ -2,6 +2,8 @@
 // imported into any project until they are opened for editing (in a separate emmate process).
 
 use crate::app::navigate_stave;
+use crate::command_palette::CommandPalette;
+use crate::commands::{self, Command};
 use crate::common::Time;
 use crate::engine::{EngineHandle, StatusEvent};
 use crate::stave::Stave;
@@ -34,6 +36,7 @@ pub struct BrowserApp {
     engine: EngineHandle,
     time_receiver: mpsc::Receiver<Time>,
     stop_app: Arc<AtomicBool>,
+    palette: CommandPalette,
 }
 
 fn is_midi(path: &Path) -> bool {
@@ -126,6 +129,7 @@ impl BrowserApp {
             engine,
             time_receiver,
             stop_app,
+            palette: CommandPalette::default(),
         }
     }
 
@@ -212,6 +216,37 @@ impl BrowserApp {
         }
     }
 
+    fn execute(&mut self, ctx: &egui::Context, command: Command) {
+        if !command.allowed_in_preview() {
+            return;
+        }
+        match command {
+            Command::CommandPalette => self.palette.toggle(),
+            Command::Pause => self.toggle_pause(),
+            Command::FollowPlayback => self.follow_playback = !self.follow_playback,
+            Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Command::ZoomIn => egui::gui_zoom::zoom_in(ctx),
+            Command::ZoomOut => egui::gui_zoom::zoom_out(ctx),
+            Command::ZoomReset => ctx.set_zoom_factor(1.0),
+            Command::ScrollPageLeft => self
+                .stave
+                .viewport
+                .scroll_by(ctx.content_rect().width() / -4.0),
+            Command::ScrollPageRight => self
+                .stave
+                .viewport
+                .scroll_by(ctx.content_rect().width() / 4.0),
+            _ => {
+                if let Some(pos) = self.stave.execute(ctx, command) {
+                    self.stave.move_cursor_to(pos);
+                    self.engine
+                        .send(Box::new(move |engine| engine.seek(pos)))
+                        .unwrap();
+                }
+            }
+        }
+    }
+
     fn toggle_pause(&self) {
         self.engine
             .send(Box::new(|engine| engine.toggle_pause()))
@@ -231,16 +266,29 @@ impl eframe::App for BrowserApp {
             }
         }
 
-        let (down, up, left, right, space, enter) = ui.input(|i| {
-            (
-                i.key_pressed(Key::ArrowDown),
-                i.key_pressed(Key::ArrowUp),
-                i.key_pressed(Key::ArrowLeft),
-                i.key_pressed(Key::ArrowRight),
-                i.key_pressed(Key::Space),
-                i.key_pressed(Key::Enter),
-            )
-        });
+        let ctx = ui.ctx().clone();
+        let from_palette = self.palette.show(&ctx, &|c| c.allowed_in_preview());
+        if let Some(command) =
+            from_palette.or_else(|| commands::pressed_among(&ctx, |c| c.allowed_in_preview()))
+        {
+            self.execute(&ctx, command);
+        }
+
+        // Browsing keys, unless the palette or another text input has the keyboard.
+        let browsing = !self.palette.visible && !ctx.egui_wants_keyboard_input();
+        let (down, up, left, right, enter) = if browsing {
+            ui.input(|i| {
+                (
+                    i.key_pressed(Key::ArrowDown),
+                    i.key_pressed(Key::ArrowUp),
+                    i.key_pressed(Key::ArrowLeft) && i.modifiers.is_none(),
+                    i.key_pressed(Key::ArrowRight) && i.modifiers.is_none(),
+                    i.key_pressed(Key::Enter),
+                )
+            })
+        } else {
+            (false, false, false, false, false)
+        };
         if down {
             self.select_relative(1);
         }
@@ -252,9 +300,6 @@ impl eframe::App for BrowserApp {
         }
         if right {
             self.enter_selected_dir();
-        }
-        if space {
-            self.toggle_pause();
         }
         if enter {
             if let Some(path) = self.selected_file() {
