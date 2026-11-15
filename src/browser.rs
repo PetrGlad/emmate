@@ -284,17 +284,42 @@ impl eframe::App for BrowserApp {
                         .send(Box::new(crate::engine::Engine::reset))
                         .unwrap();
                 }
-                if ui
-                    .add_enabled(self.selected.is_some(), egui::Button::new("✏ Edit"))
-                    .clicked()
-                {
-                    if let Some(path) = self.selected.clone() {
-                        self.open_for_editing(&path);
-                    }
-                }
                 ui.label(&self.status);
             });
+            // Banner: says what this is and offers the way out of it.
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(255, 243, 205))
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("👁 Preview, read-only. Editing opens the file in a project.");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let edit = egui::Button::new(
+                                egui::RichText::new("✏  Edit this file")
+                                    .size(16.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(30, 110, 200))
+                            .min_size(egui::vec2(150.0, 30.0));
+                            if ui.add_enabled(self.selected.is_some(), edit).clicked() {
+                                if let Some(path) = self.selected.clone() {
+                                    self.open_for_editing(&path);
+                                }
+                            }
+                        });
+                    });
+                });
             let stave_response = self.stave.show(ui);
+            let stave_rect = stave_response.ui_response.rect;
+            ui.painter_at(stave_rect).text(
+                stave_rect.right_bottom() - egui::vec2(16.0, 12.0),
+                egui::Align2::RIGHT_BOTTOM,
+                "PREVIEW",
+                egui::FontId::proportional(48.0),
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 28),
+            );
             navigate_stave(ui, &mut self.stave, &stave_response);
             if let Some(pos) = stave_response.new_cursor_position {
                 self.engine
