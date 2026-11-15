@@ -13,6 +13,7 @@ use crate::track_source::TrackSource;
 use crate::util::IdSeq;
 use eframe::egui::{self, Key, Ui};
 use eframe::{CreationContext, egui::ScrollArea};
+use egui_extras::{Size, StripBuilder};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock, mpsc};
@@ -27,7 +28,10 @@ struct Entry {
 pub struct BrowserApp {
     dir: PathBuf,
     entries: Vec<Entry>,
+    /// Highlighted entry of the list. May be a directory.
     selected: Option<PathBuf>,
+    /// The file that is shown on the stave now. May differ from the highlighted entry.
+    previewed: Option<PathBuf>,
     status: String,
     autoplay: bool,
     follow_playback: bool,
@@ -121,6 +125,7 @@ impl BrowserApp {
             entries: list_dir(&dir),
             dir,
             selected: None,
+            previewed: None,
             status: String::new(),
             autoplay: true,
             follow_playback: true,
@@ -141,16 +146,19 @@ impl BrowserApp {
 
     fn preview(&mut self, path: &Path) {
         self.selected = Some(path.to_owned());
-        if let Err(e) = check_importable(path) {
-            self.status = format!("Cannot preview: {e}");
-            return;
-        }
-        let events = import_smf(&IdSeq::new(0), &path.to_path_buf());
+        let (events, error) = match check_importable(path) {
+            Ok(()) => (import_smf(&IdSeq::new(0), &path.to_path_buf()), None),
+            Err(e) => (vec![], Some(e)),
+        };
         let count = events.len();
+        self.previewed = error.is_none().then(|| path.to_owned());
         self.track.edit(|t| t.reset(events));
         // The stave redraws its note meshes when the track version changes.
         self.stave.history.write().expect("Write stave.history.").version += 1;
-        self.status = format!("{count} events");
+        self.status = match error {
+            Some(e) => format!("Cannot preview: {e}"),
+            None => format!("{count} events"),
+        };
         self.stave.note_selection.clear();
         self.stave.time_selection = None;
         self.stave.zoom_to_fit(1_000_000);
@@ -187,8 +195,10 @@ impl BrowserApp {
         }
     }
 
-    fn selected_file(&self) -> Option<PathBuf> {
-        self.selected.clone().filter(|p| p.is_file())
+    /// The previewed file, if it is also the highlighted entry (Enter edits only what is both
+    /// highlighted and shown).
+    fn highlighted_preview(&self) -> Option<PathBuf> {
+        self.previewed.clone().filter(|p| self.selected.as_ref() == Some(p))
     }
 
     /// Right: enter the highlighted directory.
@@ -223,7 +233,7 @@ impl BrowserApp {
         match command {
             Command::CommandPalette => self.palette.toggle(),
             Command::EditFile => {
-                if let Some(path) = self.selected_file() {
+                if let Some(path) = self.previewed.clone() {
                     self.open_for_editing(&path);
                 }
             }
@@ -307,7 +317,7 @@ impl eframe::App for BrowserApp {
             self.enter_selected_dir();
         }
         if enter {
-            if let Some(path) = self.selected_file() {
+            if let Some(path) = self.highlighted_preview() {
                 self.open_for_editing(&path);
             }
         }
@@ -363,22 +373,18 @@ impl eframe::App for BrowserApp {
             });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.autoplay, "Autoplay");
-                ui.checkbox(&mut self.follow_playback, "Follow playback");
-                if ui.button(" ⏯ ").clicked() {
-                    self.toggle_pause();
-                }
-                if ui.button(" ⏮ ").clicked() {
-                    self.engine.send(Box::new(|engine| engine.seek(0))).unwrap();
-                }
-                if ui.button("🔇").clicked() {
-                    self.engine
-                        .send(Box::new(crate::engine::Engine::reset))
-                        .unwrap();
-                }
-                ui.label(&self.status);
-            });
+            // Name of what is on the stave, regardless of the highlight in the file list.
+            let title = match &self.previewed {
+                Some(path) => format!(
+                    "👁 {}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ),
+                None => "👁 (no file)".to_string(),
+            };
+            let heading = ui.heading(title);
+            if let Some(path) = &self.previewed {
+                heading.on_hover_text(path.to_string_lossy());
+            }
             // Banner: says what this is and offers the way out of it.
             egui::Frame::new()
                 .fill(egui::Color32::from_rgb(255, 243, 205))
@@ -386,7 +392,7 @@ impl eframe::App for BrowserApp {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("👁 Preview, read-only. Editing opens the file in a project.");
+                        ui.label("Preview, read-only. Editing opens the file in a project.");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let edit = egui::Button::new(
                                 egui::RichText::new("✏  Edit this file")
@@ -396,21 +402,91 @@ impl eframe::App for BrowserApp {
                             )
                             .fill(egui::Color32::from_rgb(30, 110, 200))
                             .min_size(egui::vec2(150.0, 30.0));
-                            if ui.add_enabled(self.selected_file().is_some(), edit).clicked() {
-                                if let Some(path) = self.selected_file() {
-                                    self.open_for_editing(&path);
-                                }
+                            if ui.add_enabled(self.previewed.is_some(), edit).clicked() {
+                                self.execute(&ctx, Command::EditFile);
                             }
                         });
                     });
                 });
-            let stave_response = self.stave.show(ui);
-            navigate_stave(ui, &mut self.stave, &stave_response);
-            if let Some(pos) = stave_response.new_cursor_position {
-                self.engine
-                    .send(Box::new(move |engine| engine.seek(pos)))
-                    .unwrap();
-            }
+            // Same arrangement as in the editor: stave, button row, status line.
+            StripBuilder::new(ui)
+                .size(Size::remainder())
+                .size(Size::exact(20.0))
+                .size(Size::exact(20.0))
+                .vertical(|mut strip| {
+                    strip.cell(|ui| {
+                        let stave_response = self.stave.show(ui);
+                        navigate_stave(ui, &mut self.stave, &stave_response);
+                        if let Some(pos) = stave_response.new_cursor_position {
+                            self.engine
+                                .send(Box::new(move |engine| engine.seek(pos)))
+                                .unwrap();
+                        }
+                    });
+                    strip.cell(|ui| {
+                        ui.horizontal(|ui| {
+                            let mouse_x = ui.painter().clip_rect().min.x;
+                            if ui.button(" + ").clicked() {
+                                self.stave.viewport.zoom(1.05, mouse_x);
+                            }
+                            if ui.button(" - ").clicked() {
+                                self.stave.viewport.zoom(1.0 / 1.05, mouse_x);
+                            }
+                            if ui.button(" ↕+ ").clicked() {
+                                self.execute(&ctx, Command::VerticalZoomIn);
+                            }
+                            if ui.button(" ↕- ").clicked() {
+                                self.execute(&ctx, Command::VerticalZoomOut);
+                            }
+                            let scroll_step = ui.painter().clip_rect().size().x * 0.15;
+                            if ui.button(" << ").clicked() {
+                                self.stave.viewport.scroll_by(-scroll_step);
+                            }
+                            if ui.button(" >> ").clicked() {
+                                self.stave.viewport.scroll_by(scroll_step);
+                            }
+                            ui.checkbox(&mut self.follow_playback, "Follow playback");
+                            if ui.button(" ⏮ ").clicked() {
+                                self.engine.send(Box::new(|engine| engine.seek(0))).unwrap();
+                            }
+                            if ui.button(" ⏯ ").clicked() {
+                                self.toggle_pause();
+                            }
+                            if ui.button("🔇").clicked() {
+                                self.engine
+                                    .send(Box::new(crate::engine::Engine::reset))
+                                    .unwrap();
+                            }
+                            ui.checkbox(&mut self.autoplay, "Autoplay");
+                        });
+                    });
+                    strip.cell(|ui| {
+                        ui.horizontal(|ui| {
+                            let n_events = self.track.read().events.len();
+                            ui.label(format!(
+                                "{}  n_sel={}  t_sel={}  at={}s  fps={}",
+                                if self.status.is_empty() {
+                                    format!("track_len={n_events}")
+                                } else {
+                                    self.status.clone()
+                                },
+                                self.stave.note_selection.count(),
+                                self.stave.time_selection.as_ref().map_or(
+                                    "()".to_string(),
+                                    |sel| format!(
+                                        "[{}s,{}s)/{}s",
+                                        Duration::from_micros(sel.0 as u64).as_secs(),
+                                        Duration::from_micros(sel.1 as u64).as_secs(),
+                                        Duration::from_micros((sel.1 - sel.0).abs() as u64)
+                                            .as_secs()
+                                    ),
+                                ),
+                                Duration::from_micros(self.stave.cursor_position as u64).as_secs(),
+                                ui.input(|i| (1.0 / i.stable_dt) as u32)
+                            ));
+                        });
+                    });
+                });
         });
     }
 
