@@ -118,7 +118,7 @@ fn build_description(command: Command) -> CommandDescription {
         Command::FollowPlayback => desc("Toggle follow playback", [plain(Key::F)]),
         Command::ScrollPageLeft => desc("Scroll page left", [plain(Key::PageUp)]),
         Command::ScrollPageRight => desc("Scroll page right", [plain(Key::PageDown)]),
-        Command::EditFile => desc("Edit this file", []),
+        Command::EditFile => desc("Edit this file", [with(ctrl, Key::E)]),
         Command::Quit => egui_desc("Quit", [with(Modifiers::COMMAND, Key::Q)]),
         Command::ZoomIn => egui_desc(
             "Zoom in UI",
