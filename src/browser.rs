@@ -146,6 +146,7 @@ impl BrowserApp {
 
     fn preview(&mut self, path: &Path) {
         self.selected = Some(path.to_owned());
+        log::debug!("Opening for preview {}", path.display());
         let (events, error) = match check_importable(path) {
             Ok(()) => (import_smf(&IdSeq::new(0), &path.to_path_buf()), None),
             Err(e) => (vec![], Some(e)),
@@ -219,6 +220,7 @@ impl BrowserApp {
 
     /// Edit the file: one stave per process, so launch another emmate instance.
     fn open_for_editing(&mut self, path: &Path) {
+        log::info!("Opening for editing {}", path.display());
         let result = std::env::current_exe()
             .and_then(|exe| std::process::Command::new(exe).arg("--midi-file").arg(path).spawn());
         if let Err(e) = result {
