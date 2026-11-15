@@ -287,7 +287,7 @@ type Shapes = ArrayVec<Shape, 2>;
 pub struct Stave {
     pub history: Arc<RwLock<TrackHistory>>,
     clipboard: Clipboard,
-    /// A read-only stave ignores all edit commands (used for previews).
+        /// A read-only stave ignores all edit commands (used for previews).
     pub read_only: bool,
 
     pub viewport: Viewport,

@@ -28,6 +28,7 @@ pub struct BrowserApp {
     selected: Option<PathBuf>,
     status: String,
     autoplay: bool,
+    follow_playback: bool,
     stave: Stave,
     track: Arc<SyncCow<Track>>,
     engine: EngineHandle,
@@ -119,6 +120,7 @@ impl BrowserApp {
             selected: None,
             status: String::new(),
             autoplay: true,
+            follow_playback: true,
             stave,
             track,
             engine,
@@ -200,6 +202,9 @@ impl eframe::App for BrowserApp {
         }
         if let Some(t) = self.time_receiver.try_iter().last() {
             self.stave.cursor_position = t;
+            if self.follow_playback {
+                self.stave.viewport.scroll_to(t, 0.1);
+            }
         }
 
         let (down, up, space, enter) = ui.input(|i| {
@@ -273,6 +278,7 @@ impl eframe::App for BrowserApp {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.autoplay, "Autoplay");
+                ui.checkbox(&mut self.follow_playback, "Follow playback");
                 if ui.button(" ⏯ ").clicked() {
                     self.toggle_pause();
                 }
