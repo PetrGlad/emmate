@@ -15,6 +15,8 @@ pub enum Command {
     FollowPlayback,
     ScrollPageLeft,
     ScrollPageRight,
+    // File browser (preview) only
+    EditFile,
     // App, shortcuts handled by egui itself
     Quit,
     ZoomIn,
@@ -116,6 +118,7 @@ fn build_description(command: Command) -> CommandDescription {
         Command::FollowPlayback => desc("Toggle follow playback", [plain(Key::F)]),
         Command::ScrollPageLeft => desc("Scroll page left", [plain(Key::PageUp)]),
         Command::ScrollPageRight => desc("Scroll page right", [plain(Key::PageDown)]),
+        Command::EditFile => desc("Edit this file", []),
         Command::Quit => egui_desc("Quit", [with(Modifiers::COMMAND, Key::Q)]),
         Command::ZoomIn => egui_desc(
             "Zoom in UI",
@@ -190,11 +193,17 @@ fn build_description(command: Command) -> CommandDescription {
 impl Command {
     /// Commands that do not modify the track and make sense without a project:
     /// available in the read-only preview.
+    /// Commands that only make sense in the file browser.
+    pub fn browser_only(self) -> bool {
+        self == Command::EditFile
+    }
+
     pub fn allowed_in_preview(self) -> bool {
         use Command::*;
         matches!(
             self,
             CommandPalette
+                | EditFile
                 | Pause
                 | FollowPlayback
                 | ScrollPageLeft

@@ -1308,6 +1308,7 @@ impl Stave {
             Command::CommandPalette
             | Command::Pause
             | Command::Export
+            | Command::EditFile
             | Command::FollowPlayback
             | Command::Quit
             | Command::ZoomIn

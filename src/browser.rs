@@ -222,6 +222,11 @@ impl BrowserApp {
         }
         match command {
             Command::CommandPalette => self.palette.toggle(),
+            Command::EditFile => {
+                if let Some(path) = self.selected_file() {
+                    self.open_for_editing(&path);
+                }
+            }
             Command::Pause => self.toggle_pause(),
             Command::FollowPlayback => self.follow_playback = !self.follow_playback,
             Command::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

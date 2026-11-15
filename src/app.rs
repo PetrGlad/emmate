@@ -174,7 +174,7 @@ impl eframe::App for EmApp {
         }
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            let from_palette = self.palette.show(ui.ctx(), &|_| true);
+            let from_palette = self.palette.show(ui.ctx(), &|c| !c.browser_only());
             if let Some(command) = from_palette.or_else(|| commands::pressed(ui.ctx())) {
                 self.execute(ui.ctx(), command);
             }
