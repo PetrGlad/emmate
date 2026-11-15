@@ -144,6 +144,8 @@ impl BrowserApp {
         let events = import_smf(&IdSeq::new(0), &path.to_path_buf());
         let count = events.len();
         self.track.edit(|t| t.reset(events));
+        // The stave redraws its note meshes when the track version changes.
+        self.stave.history.write().expect("Write stave.history.").version += 1;
         self.status = format!("{count} events");
         self.stave.note_selection.clear();
         self.stave.time_selection = None;
