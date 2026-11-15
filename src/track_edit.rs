@@ -369,27 +369,51 @@ pub fn add_new_note(id_seq: &IdSeq, range: &Range<Time>, pitch: &Pitch) -> Optio
     Some((EditCommandId::AddNote, vec![action]))
 }
 
+/// Insert the fragment like a tape insert: the track tail (events at or after `at`)
+/// is shifted by `duration` to make room for the pasted events.
+/// Events that began before the fragment start are clipped to the fragment start.
 pub fn paste_events(
     id_seq: &IdSeq,
     at: &Time,
+    duration: Time,
     snippet: &[TrackEvent],
 ) -> Option<AppliedCommand> {
-    if snippet.is_empty() {
-        return None;
-    }
+    let duration = duration.max(0);
     let patch: Vec<EventAction> = snippet
         .iter()
-        .map(|ev| {
+        .filter_map(|ev| {
             let mut new_ev = ev.clone();
             new_ev.id = id_seq.next();
-            new_ev.at = ev.at + at;
-            EventAction::Insert(new_ev)
+            if ev.at < 0 {
+                match &mut new_ev.event {
+                    TrackEventType::Note(note) => {
+                        note.duration += ev.at;
+                        if note.duration <= 0 {
+                            return None;
+                        }
+                    }
+                    _ => {}
+                }
+                new_ev.at = 0;
+            }
+            new_ev.at += at;
+            Some(EventAction::Insert(new_ev))
         })
         .collect();
-    Some((
-        EditCommandId::Paste,
-        vec![CommandDiff::ChangeList { patch }],
-    ))
+    if patch.is_empty() && duration == 0 {
+        return None;
+    }
+    let mut diffs = vec![];
+    if duration > 0 {
+        diffs.push(CommandDiff::TailShift {
+            at: at - 1,
+            delta: duration,
+        });
+    }
+    if !patch.is_empty() {
+        diffs.push(CommandDiff::ChangeList { patch });
+    }
+    Some((EditCommandId::Paste, diffs))
 }
 
 fn cc_event(id_seq: &IdSeq, at: &Time, value: Level) -> TrackEvent {

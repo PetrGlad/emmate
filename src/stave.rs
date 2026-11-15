@@ -1121,8 +1121,6 @@ impl Stave {
                 return;
             }
         };
-        // TODO (clip-buffer) Also process fragment.duration, e.g. select the pasted time range
-        //   or move the cursor to its end. Now only the events are pasted.
         let insert_at = self.cursor_position;
         let id_seq = self
             .history
@@ -1131,7 +1129,7 @@ impl Stave {
             .id_seq
             .clone();
         self.do_edit_command(ctx, Self::transition_id(), |_stave, _track| {
-            paste_events(&id_seq, &insert_at, &fragment.events)
+            paste_events(&id_seq, &insert_at, fragment.duration, &fragment.events)
         });
     }
 
